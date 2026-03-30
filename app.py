@@ -1,11 +1,18 @@
 """
 AI Fencing Coach MVP — Pure OpenCV + YOLOv8n-pose
-High-FPS laptop webcam pipeline with Fencer L/R identification and Audio Rules Engine.
+Dual-mode: live webcam OR imported video file.
 Press 'q' to quit.
+
+Usage:
+  python app.py                    # webcam mode (default)
+  python app.py --video path.mp4   # video file mode → outputs processed file
 """
 
+import sys
+import os
 import cv2
 import time
+import argparse
 import threading
 import pyttsx3
 import numpy as np
@@ -92,26 +99,135 @@ def draw_fps(img, fps):
     cv2.putText(img, text, (x, 28), font, scale, (0, 255, 0), thick, cv2.LINE_AA)
 
 
-# ── Main loop ────────────────────────────────────────────────
-def main():
-    # Load model
-    print(f"[INFO] Loading {MODEL_PATH} …")
-    model = YOLO(MODEL_PATH)
+def draw_mode_badge(img, mode_text):
+    """Mode indicator badge in the top-left corner."""
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale, thick = 0.6, 2
+    (tw, th), baseline = cv2.getTextSize(mode_text, font, scale, thick)
+    cv2.rectangle(img, (8, 6), (18 + tw, 14 + th + baseline), (60, 60, 60), -1)
+    cv2.putText(img, mode_text, (12, 10 + th), font, scale, (200, 200, 200), thick, cv2.LINE_AA)
 
-    # Open webcam
+
+# ── Frame processing (shared by both modes) ─────────────────
+def process_frame(frame, model, last_audio_time, enable_audio=True):
+    """
+    Run YOLO, assign fencer IDs, compute metrics, draw overlays,
+    trigger audio. Returns (annotated_frame, last_audio_time).
+    """
+    results = model.predict(frame, verbose=False, conf=YOLO_CONF)
+    result = results[0]
+
+    engagement_dist = None
+    dynamic_threshold = None
+
+    if result.boxes is not None and len(result.boxes) > 0:
+        boxes = result.boxes.xyxy.cpu().numpy()       # (N, 4)
+        confs = result.boxes.conf.cpu().numpy()        # (N,)
+        kps   = result.keypoints.data.cpu().numpy()    # (N, 17, 3)
+
+        # ── Keep top-2 largest bounding boxes ─────────────
+        areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+        if len(areas) > 2:
+            top2 = np.argsort(areas)[-2:]
+        else:
+            top2 = np.arange(len(areas))
+
+        sel_boxes = boxes[top2]
+        sel_kps   = kps[top2]
+
+        # ── Sort by center-X → assign L / R ──────────────
+        cx = (sel_boxes[:, 0] + sel_boxes[:, 2]) / 2.0
+        order = np.argsort(cx)
+        sel_boxes = sel_boxes[order]
+        sel_kps   = sel_kps[order]
+
+        if len(sel_boxes) == 2:
+            labels = ["Fencer L", "Fencer R"]
+            colors = [COLOR_L, COLOR_R]
+
+            # ── Calculate Metrics ─────────────────────────
+            bbox_L, bbox_R = sel_boxes[0], sel_boxes[1]
+            kps_L, kps_R   = sel_kps[0], sel_kps[1]
+
+            # Dynamic threshold from bounding-box heights
+            height_L = bbox_L[3] - bbox_L[1]
+            height_R = bbox_R[3] - bbox_R[1]
+            avg_height = (height_L + height_R) / 2.0
+            dynamic_threshold = avg_height * DISTANCE_MULTIPLIER
+
+            # Ankle indices: 15 (L_ankle), 16 (R_ankle)
+            # Front ankle for Fencer L = max X, Fencer R = min X
+            if kps_L[15][2] > KP_CONF and kps_L[16][2] > KP_CONF:
+                ankle_L_x = max(kps_L[15][0], kps_L[16][0])
+            elif kps_L[15][2] > KP_CONF:
+                ankle_L_x = kps_L[15][0]
+            elif kps_L[16][2] > KP_CONF:
+                ankle_L_x = kps_L[16][0]
+            else:
+                ankle_L_x = None
+
+            if kps_R[15][2] > KP_CONF and kps_R[16][2] > KP_CONF:
+                ankle_R_x = min(kps_R[15][0], kps_R[16][0])
+            elif kps_R[15][2] > KP_CONF:
+                ankle_R_x = kps_R[15][0]
+            elif kps_R[16][2] > KP_CONF:
+                ankle_R_x = kps_R[16][0]
+            else:
+                ankle_R_x = None
+
+            if ankle_L_x is not None and ankle_R_x is not None:
+                engagement_dist = abs(ankle_R_x - ankle_L_x)
+
+        else:
+            labels = ["Fencer"]
+            colors = [COLOR_SINGLE]
+
+        # ── Draw Skeletons & BBoxes ───────────────────────
+        for bbox, keypoints, label, color in zip(sel_boxes, sel_kps, labels, colors):
+            draw_bbox_label(frame, bbox, label, color)
+            draw_skeleton(frame, keypoints, color)
+
+    # ── Rules Engine & UI Drawing ─────────────────────────
+    if engagement_dist is not None and dynamic_threshold is not None:
+        # Draw distance + threshold at top center
+        dist_text = f"Dist: {int(engagement_dist)} / Thresh: {int(dynamic_threshold)}"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        dw, dh = cv2.getTextSize(dist_text, font, 1.0, 3)[0]
+        cv2.putText(frame, dist_text, ((frame.shape[1] - dw) // 2, 40),
+                    font, 1.0, (255, 255, 0), 3, cv2.LINE_AA)
+
+        # Rule 1: Distance too close (dynamic threshold)
+        if engagement_dist < dynamic_threshold:
+            # Flash Warning Text
+            warn_text = "TOO CLOSE!"
+            ww, wh = cv2.getTextSize(warn_text, font, 1.5, 4)[0]
+            cv2.putText(frame, warn_text, ((frame.shape[1] - ww) // 2, 90),
+                        font, 1.5, COLOR_WARN, 4, cv2.LINE_AA)
+
+            # Trigger Audio Dispatcher
+            if enable_audio:
+                current_time = time.time()
+                if current_time - last_audio_time > AUDIO_COOLDOWN:
+                    last_audio_time = current_time
+                    speak_async("Warning, distance too close. Watch your steps.")
+
+    return frame, last_audio_time
+
+
+# ── Webcam mode ──────────────────────────────────────────────
+def run_webcam(model):
+    """Live webcam capture + real-time processing."""
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         print("[ERROR] Cannot open webcam.")
         return
 
-    # Try to set camera resolution for higher FPS
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
-    print("[INFO] Camera opened. Press 'q' to quit.")
+    print("[INFO] Webcam opened. Press 'q' to quit.")
     fps = 0.0
     prev_tick = cv2.getTickCount()
-    
     last_audio_time = 0.0
 
     while True:
@@ -120,120 +236,101 @@ def main():
             print("[WARN] Empty frame, skipping.")
             continue
 
-        # ── YOLO inference ────────────────────────────────────
-        results = model.predict(frame, verbose=False, conf=YOLO_CONF)
-        result = results[0]
+        frame, last_audio_time = process_frame(frame, model, last_audio_time)
 
-        engagement_dist = None
-        dynamic_threshold = None
-
-        if result.boxes is not None and len(result.boxes) > 0:
-            boxes = result.boxes.xyxy.cpu().numpy()       # (N, 4)
-            confs = result.boxes.conf.cpu().numpy()        # (N,)
-            kps   = result.keypoints.data.cpu().numpy()    # (N, 17, 3)
-
-            # ── Keep top-2 largest bounding boxes ─────────────
-            areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-            if len(areas) > 2:
-                top2 = np.argsort(areas)[-2:]
-            else:
-                top2 = np.arange(len(areas))
-
-            sel_boxes = boxes[top2]
-            sel_kps   = kps[top2]
-
-            # ── Sort by center-X → assign L / R ──────────────
-            cx = (sel_boxes[:, 0] + sel_boxes[:, 2]) / 2.0
-            order = np.argsort(cx)
-            sel_boxes = sel_boxes[order]
-            sel_kps   = sel_kps[order]
-
-            if len(sel_boxes) == 2:
-                labels = ["Fencer L", "Fencer R"]
-                colors = [COLOR_L, COLOR_R]
-                
-                # ── Calculate Metrics ─────────────────────────
-                bbox_L, bbox_R = sel_boxes[0], sel_boxes[1]
-                kps_L, kps_R   = sel_kps[0], sel_kps[1]
-
-                # Dynamic threshold from bounding-box heights
-                height_L = bbox_L[3] - bbox_L[1]
-                height_R = bbox_R[3] - bbox_R[1]
-                avg_height = (height_L + height_R) / 2.0
-                dynamic_threshold = avg_height * DISTANCE_MULTIPLIER
-                
-                # Ankle indices: 15 (L_ankle), 16 (R_ankle)
-                # Front ankle for Fencer L is the one further right (max X)
-                # Front ankle for Fencer R is the one further left (min X)
-                if kps_L[15][2] > KP_CONF and kps_L[16][2] > KP_CONF:
-                    ankle_L_x = max(kps_L[15][0], kps_L[16][0])
-                elif kps_L[15][2] > KP_CONF:
-                    ankle_L_x = kps_L[15][0]
-                elif kps_L[16][2] > KP_CONF:
-                    ankle_L_x = kps_L[16][0]
-                else:
-                    ankle_L_x = None
-                    
-                if kps_R[15][2] > KP_CONF and kps_R[16][2] > KP_CONF:
-                    ankle_R_x = min(kps_R[15][0], kps_R[16][0])
-                elif kps_R[15][2] > KP_CONF:
-                    ankle_R_x = kps_R[15][0]
-                elif kps_R[16][2] > KP_CONF:
-                    ankle_R_x = kps_R[16][0]
-                else:
-                    ankle_R_x = None
-
-                if ankle_L_x is not None and ankle_R_x is not None:
-                    engagement_dist = abs(ankle_R_x - ankle_L_x)
-                    
-            else:
-                labels = ["Fencer"]
-                colors = [COLOR_SINGLE]
-
-            # ── Draw Skeletons & BBoxes ───────────────────────
-            for bbox, keypoints, label, color in zip(sel_boxes, sel_kps, labels, colors):
-                draw_bbox_label(frame, bbox, label, color)
-                draw_skeleton(frame, keypoints, color)
-
-        # ── Rules Engine & UI Drawing ─────────────────────────
-        if engagement_dist is not None and dynamic_threshold is not None:
-            # Draw distance + threshold at top center
-            dist_text = f"Dist: {int(engagement_dist)} / Thresh: {int(dynamic_threshold)}"
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            dw, dh = cv2.getTextSize(dist_text, font, 1.0, 3)[0]
-            cv2.putText(frame, dist_text, ((frame.shape[1] - dw) // 2, 40), 
-                        font, 1.0, (255, 255, 0), 3, cv2.LINE_AA)
-            
-            # Rule 1: Distance too close (dynamic threshold)
-            if engagement_dist < dynamic_threshold:
-                # Flash Warning Text
-                warn_text = "TOO CLOSE!"
-                ww, wh = cv2.getTextSize(warn_text, font, 1.5, 4)[0]
-                cv2.putText(frame, warn_text, ((frame.shape[1] - ww) // 2, 90),
-                            font, 1.5, COLOR_WARN, 4, cv2.LINE_AA)
-                
-                # Trigger Audio Dispatcher
-                current_time = time.time()
-                if current_time - last_audio_time > AUDIO_COOLDOWN:
-                    last_audio_time = current_time
-                    speak_async("Warning, distance too close. Watch your steps.")
-
-        # ── FPS calculation ───────────────────────────────────
+        # FPS
         curr_tick = cv2.getTickCount()
         elapsed = (curr_tick - prev_tick) / cv2.getTickFrequency()
         prev_tick = curr_tick
-        fps = 0.9 * fps + 0.1 * (1.0 / max(elapsed, 1e-6))   # smoothed
+        fps = 0.9 * fps + 0.1 * (1.0 / max(elapsed, 1e-6))
         draw_fps(frame, fps)
+        draw_mode_badge(frame, "LIVE")
 
-        # ── Display ───────────────────────────────────────────
         cv2.imshow(WINDOW_NAME, frame)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
-    # Cleanup
     cap.release()
     cv2.destroyAllWindows()
     print("[INFO] Exited cleanly.")
+
+
+# ── Video file mode ──────────────────────────────────────────
+def run_video(model, video_path):
+    """Process a video file and write annotated output."""
+    if not os.path.isfile(video_path):
+        print(f"[ERROR] Video file not found: {video_path}")
+        return
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        print(f"[ERROR] Cannot open video: {video_path}")
+        return
+
+    # Read video properties
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps_in = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    # Build output path: input.mp4 → input_processed.mp4
+    base, ext = os.path.splitext(video_path)
+    output_path = f"{base}_processed{ext}"
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    writer = cv2.VideoWriter(output_path, fourcc, fps_in, (w, h))
+
+    print(f"[INFO] Processing video: {video_path}")
+    print(f"[INFO] Resolution: {w}x{h} | FPS: {fps_in:.1f} | Frames: {total_frames}")
+    print(f"[INFO] Output will be saved to: {output_path}")
+    print("[INFO] Press 'q' to cancel early.")
+
+    last_audio_time = 0.0
+    frame_idx = 0
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        frame_idx += 1
+        frame, last_audio_time = process_frame(
+            frame, model, last_audio_time, enable_audio=False
+        )
+
+        # Progress badge instead of FPS
+        progress = f"Frame {frame_idx}/{total_frames} ({100*frame_idx/max(total_frames,1):.0f}%)"
+        draw_mode_badge(frame, f"VIDEO | {progress}")
+
+        writer.write(frame)
+
+        # Preview window (press q to cancel)
+        cv2.imshow(WINDOW_NAME, frame)
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            print("[INFO] Cancelled by user.")
+            break
+
+    writer.release()
+    cap.release()
+    cv2.destroyAllWindows()
+    print(f"[INFO] Done! Processed video saved to: {output_path}")
+
+
+# ── Entry point ──────────────────────────────────────────────
+def main():
+    parser = argparse.ArgumentParser(description="AI Fencing Coach MVP")
+    parser.add_argument(
+        "--video", type=str, default=None,
+        help="Path to a video file. If omitted, the webcam is used."
+    )
+    args = parser.parse_args()
+
+    print(f"[INFO] Loading {MODEL_PATH} …")
+    model = YOLO(MODEL_PATH)
+
+    if args.video:
+        run_video(model, args.video)
+    else:
+        run_webcam(model)
 
 
 if __name__ == "__main__":

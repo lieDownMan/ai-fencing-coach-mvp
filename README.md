@@ -1,6 +1,6 @@
 # 🤺 AI Fencing Coach MVP
 
-A real-time AI fencing coach that uses **YOLOv8 pose estimation** to track two fencers via webcam, evaluate distance heuristics, and deliver **spoken audio warnings** when fencers get too close — all running natively on your laptop with zero cloud dependencies.
+A real-time AI fencing coach that uses **YOLOv8 pose estimation** to track two fencers via **webcam or imported video**, evaluate distance heuristics, and deliver **spoken audio warnings** when fencers get too close — all running natively on your laptop with zero cloud dependencies.
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue)
 ![OpenCV](https://img.shields.io/badge/OpenCV-4.x-green)
@@ -12,18 +12,20 @@ A real-time AI fencing coach that uses **YOLOv8 pose estimation** to track two f
 
 | Feature | Description |
 |---|---|
+| **Dual Input Mode** | Live webcam (`python app.py`) or imported video file (`python app.py --video clip.mp4`) |
 | **Real-time Pose Tracking** | YOLOv8n-pose detects and draws full COCO skeletons on both fencers |
 | **Fencer L/R Identification** | Automatically assigns Left/Right IDs based on X-axis position |
 | **Dynamic Distance Threshold** | Scale-invariant — threshold adapts to camera distance using fencer bounding box height |
-| **Audio Coaching** | Asynchronous text-to-speech warns when fencers are too close (non-blocking) |
-| **Visual HUD** | On-screen distance, threshold, FPS counter, and red "TOO CLOSE!" flash warning |
+| **Audio Coaching** | Asynchronous text-to-speech warns when fencers are too close (webcam mode only) |
+| **Video Export** | Video mode outputs a fully annotated `*_processed.mp4` with all overlays baked in |
+| **Visual HUD** | Distance, threshold, FPS/progress, mode badge, and red "TOO CLOSE!" flash warning |
 
 ---
 
 ## 📋 Prerequisites
 
 - **Python 3.10+**
-- A **webcam** (built-in laptop cam or USB)
+- A **webcam** (built-in laptop cam or USB) — *or* a video file for offline analysis
 - **Windows** (pyttsx3 uses SAPI5; macOS/Linux may need additional TTS backends)
 
 ---
@@ -51,13 +53,21 @@ This installs:
 
 ### 3. Run the application
 
+**Webcam mode (default):**
 ```bash
 python app.py
 ```
 
+**Video file mode:**
+```bash
+python app.py --video path/to/fencing_match.mp4
+```
+This processes the video and saves the annotated result as `fencing_match_processed.mp4` in the same directory.
+
 ### 4. Usage
 
-1. A window titled **"AI Fencing Coach"** will open showing your webcam feed.
+**Webcam mode:**
+1. A window titled **"AI Fencing Coach"** will open showing your webcam feed with a `LIVE` badge.
 2. Stand two people in front of the camera (side view works best, like a fencing strip).
 3. The system will:
    - Draw **skeletons** and **bounding boxes** on both detected fencers
@@ -65,6 +75,12 @@ python app.py
    - Display **Dist / Thresh** values at the top center of the screen
    - Flash **"TOO CLOSE!"** in red and speak an audio warning when the distance rule triggers
 4. Press **`q`** to quit and release the camera.
+
+**Video mode:**
+1. The app reads the input video frame-by-frame, runs the same YOLO + rules pipeline.
+2. A preview window shows progress (`VIDEO | Frame 120/3600 (3%)`).
+3. The annotated video is written to `*_processed.mp4` with all overlays baked in.
+4. Audio warnings are disabled (they'd be out of sync). Press **`q`** to cancel early.
 
 ---
 
@@ -108,7 +124,7 @@ hci/
 ## 🔧 How It Works
 
 ```
-Webcam Frame
+Input (Webcam OR Video File)
     │
     ▼
 YOLOv8n-pose inference (conf > 0.5)
@@ -126,10 +142,13 @@ Extract ankle keypoints (indices 15, 16)
     ├─► dynamic_threshold = avg_bbox_height × DISTANCE_MULTIPLIER
     │
     ▼
-Rules Engine: if dist < threshold → speak_async("Warning...")
+Rules Engine: if dist < threshold → speak_async("Warning...")  [webcam only]
     │
     ▼
-Draw skeletons, boxes, labels, HUD → cv2.imshow
+Draw skeletons, boxes, labels, HUD
+    │
+    ├─► cv2.imshow (both modes)
+    └─► cv2.VideoWriter → *_processed.mp4 (video mode)
 ```
 
 ---
