@@ -1,0 +1,19 @@
+# YOLO model weights (auto-downloaded on first run)
+*.pt
+
+# Python
+__pycache__/
+*.pyc
+
+# SSL certs (old WebRTC approach)
+*.pem
+
+# Tunnel binaries
+cloudflared.exe
+
+# Streamlit (old approach)
+.streamlit/
+
+# OS
+.DS_Store
+Thumbs.db
