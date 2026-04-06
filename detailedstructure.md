@@ -1,29 +1,79 @@
-fencing_referee_system/
-├── data/                      # 存放原始比賽影片與萃取出的 JSON/CSV 骨架資料
-├── weights/                   # 存放各個模型的預訓練權重
-│   ├── pose_estimator/        # 存放 2D Pose 模型權重 (如 YOLO-Pose)
-│   └── fencenet/              # 存放訓練好的 FenceNet 或 BiFenceNet 權重
+# Project Specification: AI Fencing Coach & Referee System
+
+## 1. Project Overview
+This project implements a comprehensive remote fencing coaching and referee assistance system. It utilizes `FenceNet` for fine-grained 2D skeleton-based footwork recognition and integrates an Open-Source Multimodal Large Language Model (e.g., LLaVA-NeXT, Qwen2-VL) to act as a virtual coach. The system monitors bouts, analyzes fencing patterns, provides tiered feedback (immediate, inter-bout breaks, and post-bout conclusions), and tracks long-term athlete progression.
+
+## 2. Directory Structure
+```text
+fencing_coach_system/
+├── data/
+│   ├── videos/                # Raw bout videos
+│   └── fencer_profiles/       # JSON/DB files storing historical patterns and progression
+├── weights/
+│   ├── pose_estimator/        # 2D Pose model weights (e.g., YOLO-Pose)
+│   ├── fencenet/              # Trained FenceNet/BiFenceNet weights
+│   └── llm_models/            # Local Open-Source LLM weights (e.g., Qwen2-VL, LLaVA)
 ├── src/
-│   ├── pose_estimation/       # 第一階段：影像轉骨架
+│   ├── pose_estimation/       # Phase 1: Video to 2D Skeleton
+│   ├── preprocessing/         # Phase 2: Skeleton Normalization & Sampling
+│   ├── models/                # Phase 3: FenceNet Footwork Classification
+│   ├── tracking/              # Phase 4: Pattern Analysis & Progression Tracking
 │   │   ├── __init__.py
-│   │   └── pose_extractor.py  # 呼叫現成的 2D 人體姿勢估計模型 [cite: 79]
+│   │   ├── pattern_analyzer.py# Aggregates FenceNet outputs (e.g., calculates JS vs SF ratio)
+│   │   └── profile_manager.py # Reads/Writes athlete stats to 'data/fencer_profiles/'
 │   │
-│   ├── preprocessing/         # 第二階段：骨架資料正規化
+│   ├── llm_agent/             # Phase 5: The Virtual Coach Engine
 │   │   ├── __init__.py
-│   │   ├── normalizer.py      # 實作論文中基於鼻子與腳踝的位移與縮放正規化 [cite: 151, 152]
-│   │   └── sampler.py         # 實作將序列採樣至 28 個連續影格的邏輯 [cite: 141, 143]
+│   │   ├── prompt_templates.py# System prompts for Immediate, Break, and Conclusive feedback
+│   │   ├── model_loader.py    # Inference pipeline for the local open-source LLM
+│   │   └── coach_engine.py    # Injects tracking stats and context into prompts to generate advice
 │   │
-│   ├── models/                # 第三階段：腳步動作分類模型
-│   │   ├── __init__.py
-│   │   ├── tcn_blocks.py      # 實作因果卷積 (Causal) 與擴張卷積 (Dilated) 的底層 Block [cite: 160, 161, 167]
-│   │   ├── fencenet.py        # 實作包含 6 個 TCN blocks 與 Dense layers 的主模型 [cite: 159]
-│   │   └── bifencenet.py      # 實作結合 causal 與 anti-causal 網路的雙向版本 
-│   │
-│   └── referee_app/           # 第四階段：系統整合與 HCI 介面
+│   └── app_interface/         # Phase 6: System Orchestration & HCI
 │       ├── __init__.py
-│       ├── system_pipeline.py # 串接 Extract -> Preprocess -> Predict 的端到端腳本
-│       └── main_ui.py         # 呈現預測結果 (例如：Step Forward, Rapid Lunge 等) 給裁判的介面 [cite: 126, 130]
-│
-├── train_fencenet.py          # 模型訓練腳本
+│       ├── system_pipeline.py # Orchestrates Pose -> FenceNet -> Tracking -> LLM
+│       └── main_ui.py         # Real-time dashboard for fencers/coaches
 ├── requirements.txt           
 └── README.md
+```
+
+## 3. Target Classes
+The FenceNet classification layer must output logits for the following 6 fencing footwork actions:
+1. `R`: Rapid lunge
+2. `IS`: Incremental speed lunge
+3. `WW`: With waiting lunge
+4. `JS`: Jumping sliding lunge
+5. `SF`: Step forward
+6. `SB`: Step backward
+
+## 4. Module Specifications
+
+### 4.1. Vision Pipeline (`src/pose_estimation/`)
+* **Responsibility**: Run an off-the-shelf 2D pose estimator on input videos.
+* **Constraint**: Must extract the x, y coordinates for the following joints: front wrist, front elbow, front shoulder, both hips, both knees, and both ankles. The nose and front ankle are also strictly required for spatial normalization.
+
+### 4.2. Preprocessing Pipeline (`src/preprocessing/`)
+* **Spatial Normalizer**: 
+  * Subtract the fencer's nose position of the *first frame* from every joint coordinate in each frame.
+  * Divide each coordinate by the vertical distance between the head position and front ankle in the *first frame*.
+* **Temporal Sampler**: Extract or sample sequences into exactly 28 consecutive frames to ensure uniform input length for the model. 
+
+### 4.3. FenceNet Architecture (`src/models/`)
+* **TCN Blocks**: Implement Temporal Convolutional Network (TCN) blocks. Must include causal convolutions to prevent future data leakage and dilated convolutions to increase the receptive field. Include a residual connection `output = Activation(p + f(p))`.
+* **FenceNet**: Stack 6 TCN blocks. Extract the last time-step from the output sequence, feeding it into dense layers for prediction.
+* **BiFenceNet**: Implement a bidirectional module containing a causal network (forward motion) and an anti-causal network (reversed motion). Concatenate their last time steps before the dense layers.
+
+### 4.4. Data Tracking & Pattern Analysis (`src/tracking/`)
+* **`pattern_analyzer.py`**: Ingests real-time classifications from FenceNet. Calculates statistical metrics (e.g., action frequencies, defensive vs. offensive ratios, reaction delays). Identifies repetitive patterns.
+* **`profile_manager.py`**: Saves match statistics and bout summaries to individual fencer profiles to trace long-term technical progression.
+
+### 4.5. LLM Coaching Engine (`src/llm_agent/`)
+* **Responsibility**: Acts as the remote coaching system, generating actionable intelligence using a local open-source MLLM.
+* **`prompt_templates.py`**: Implement three specific feedback loops:
+  1. **Immediate Feedback**: Extremely concise feedback delivered during the bout (e.g., "Shorten your recovery step").
+  2. **Break Strategy**: Delivered during the 1-minute break. Summarizes opponent patterns and suggests tactical adjustments against the opponent.
+  3. **Conclusive Advice**: Delivered after the bout. Compares current performance with historical `profile_manager` data to provide progression insights.
+* **`coach_engine.py`**: Orchestrates the formatting of tracking data and MLLM inference calls.
+
+### 4.6. Application Interface (`src/app_interface/`)
+* **Responsibility**: Provides the Human-Computer Interaction dashboard.
+* **UI Components**: Must display the live video feed with bounding boxes, a real-time footwork classification log, and a dedicated "Coach's Corner" panel displaying the MLLM-generated feedback.
