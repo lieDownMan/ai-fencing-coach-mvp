@@ -1,12 +1,17 @@
 """Utilities for rendering tracked fencers onto processed video files."""
 
+import logging
 from pathlib import Path
+import shutil
+import subprocess
 from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
 
 from src.tracking import PatternAnalyzer
+
+logger = logging.getLogger(__name__)
 
 LEFT_COLOR = (255, 180, 0)
 RIGHT_COLOR = (0, 180, 255)
@@ -17,6 +22,22 @@ TEXT_COLOR = (255, 255, 255)
 PANEL_COLOR = (32, 32, 32)
 
 
+def _scaled_dimensions(
+    width: int,
+    height: int,
+    max_width: Optional[int] = None
+) -> Tuple[int, int]:
+    """Return output dimensions, preserving aspect ratio when downscaling."""
+    if max_width is None or max_width <= 0 or width <= max_width:
+        return int(width), int(height)
+
+    scaled_height = int(round(height * (max_width / width)))
+    # Keep dimensions even for broad MP4 player/browser compatibility.
+    scaled_width = max(2, int(max_width) - int(max_width) % 2)
+    scaled_height = max(2, scaled_height - scaled_height % 2)
+    return scaled_width, scaled_height
+
+
 def write_annotated_video(
     video_path: str,
     output_path: Path,
@@ -25,7 +46,8 @@ def write_annotated_video(
     classifications: Optional[List[Tuple[int, float]]] = None,
     window_size: int = 28,
     window_stride: int = 14,
-    fencer_heights_cm: Optional[Dict[str, float]] = None
+    fencer_heights_cm: Optional[Dict[str, float]] = None,
+    max_width: Optional[int] = None
 ) -> Path:
     """Write a copy of the video with fencer boxes and dual HUD panels."""
     input_path = Path(video_path).expanduser()
@@ -45,8 +67,19 @@ def write_annotated_video(
         cap.release()
         raise ValueError(f"Cannot read video dimensions: {input_path}")
 
+    output_width, output_height = _scaled_dimensions(
+        width=width,
+        height=height,
+        max_width=max_width,
+    )
+
     fourcc = cv2.VideoWriter_fourcc(*codec)
-    writer = cv2.VideoWriter(str(output_file), fourcc, fps, (width, height))
+    writer = cv2.VideoWriter(
+        str(output_file),
+        fourcc,
+        fps,
+        (output_width, output_height),
+    )
     if not writer.isOpened():
         cap.release()
         raise OSError(f"Cannot open annotated video writer: {output_file}")
@@ -78,13 +111,72 @@ def write_annotated_video(
                     global_action=actions_by_frame.get(frame_index),
                     track_motion=motion_by_frame.get(frame_index, {}),
                 )
+            if (output_width, output_height) != (width, height):
+                frame = cv2.resize(frame, (output_width, output_height))
             writer.write(frame)
             frame_index += 1
     finally:
         cap.release()
         writer.release()
 
+    if max_width is not None:
+        return _transcode_mp4_for_browser(output_file)
     return output_file
+
+
+def _transcode_mp4_for_browser(
+    video_path: Path,
+    ffmpeg_path: Optional[str] = None
+) -> Path:
+    """Transcode an MP4 to H.264/yuv420p for browser playback when possible."""
+    ffmpeg = ffmpeg_path or shutil.which("ffmpeg")
+    if not ffmpeg:
+        logger.warning("ffmpeg not found; leaving annotated video in OpenCV codec")
+        return video_path
+
+    output_path = Path(video_path)
+    temp_path = output_path.with_name(f"{output_path.stem}_browser{output_path.suffix}")
+    command = [
+        ffmpeg,
+        "-y",
+        "-i",
+        str(output_path),
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        "-an",
+        str(temp_path),
+    ]
+
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        logger.warning("Could not run ffmpeg for browser MP4 transcode: %s", exc)
+        return output_path
+
+    if result.returncode != 0:
+        logger.warning(
+            "ffmpeg browser MP4 transcode failed: %s",
+            result.stderr.strip() if result.stderr else "unknown error",
+        )
+        if temp_path.exists():
+            temp_path.unlink()
+        return output_path
+
+    temp_path.replace(output_path)
+    return output_path
 
 
 def draw_tracking_overlay(

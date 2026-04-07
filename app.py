@@ -155,6 +155,19 @@ def _optional_positive_float(value: Any, label: str) -> Optional[float]:
     return parsed
 
 
+def _optional_positive_int(value: Any, label: str) -> Optional[int]:
+    """Parse optional positive integer CLI/config values."""
+    if value is None or value == "":
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be an integer") from exc
+    if parsed <= 0:
+        raise ValueError(f"{label} must be greater than 0")
+    return parsed
+
+
 def _build_height_calibration(
     left_height_cm: Any = None,
     right_height_cm: Any = None
@@ -602,6 +615,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Optional right fencer height in centimeters for annotated-video HUD calibration"
     )
     parser.add_argument(
+        "--annotated-max-width",
+        type=int,
+        help="Optional max output width for annotated MP4 export, useful for web playback"
+    )
+    parser.add_argument(
         "--interactive",
         action="store_true",
         help="Run in interactive mode"
@@ -659,10 +677,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.right_height_cm is not None
         else _config_value(config, "tracking", "right_height_cm", default=None)
     )
+    annotated_max_width_value = (
+        args.annotated_max_width
+        if args.annotated_max_width is not None
+        else _config_value(config, "output", "annotated_max_width", default=None)
+    )
     try:
         height_calibration = _build_height_calibration(
             left_height_cm=left_height_value,
             right_height_cm=right_height_value
+        )
+        annotated_max_width = _optional_positive_int(
+            annotated_max_width_value,
+            "annotated max width"
         )
     except ValueError as e:
         logger.error(f"Configuration error: {e}")
@@ -738,6 +765,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(_format_tracking_summary(tracking_summary))
     if annotated_video_path is not None:
         print(_format_height_calibration(height_calibration))
+        if annotated_max_width is not None:
+            print(f"Annotated video max width: {annotated_max_width}px")
     model_status_getter = getattr(app, "get_model_status", None)
     if model_status_getter:
         print(_format_model_status(model_status_getter()))
@@ -770,7 +799,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 classifications=results.get("classifications", []),
                 window_size=_as_int(results.get("window_size"), default=28),
                 window_stride=_as_int(results.get("window_stride"), default=14),
-                fencer_heights_cm=height_calibration
+                fencer_heights_cm=height_calibration,
+                max_width=annotated_max_width
             )
         except (OSError, ValueError) as e:
             logger.error(f"Could not write annotated video: {e}")
