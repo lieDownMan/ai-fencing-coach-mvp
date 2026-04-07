@@ -19,6 +19,40 @@ class TestPoseEstimation:
         assert hasattr(estimator, 'extract_frame_skeleton')
         assert hasattr(estimator, 'extract_video_skeleton')
 
+    def test_pose_estimator_mock_frame_skeleton(self):
+        """Test explicit mock backend returns a valid non-zero skeleton."""
+        from src.pose_estimation import PoseEstimator
+
+        estimator = PoseEstimator(backend="mock")
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        skeleton = estimator.extract_frame_skeleton(frame)
+
+        assert skeleton is not None
+        assert estimator.validate_skeleton(skeleton)
+        assert skeleton["front_ankle"] == skeleton["right_ankle"]
+        assert any(coord != 0.0 for point in skeleton.values() for coord in point)
+
+    def test_pose_estimator_unavailable_backend_raises(self):
+        """Test unavailable real pose backend fails clearly instead of returning zeros."""
+        from src.pose_estimation import PoseEstimator
+
+        estimator = PoseEstimator(backend="mock")
+        estimator.backend = "unavailable"
+        estimator.model = None
+
+        with pytest.raises(RuntimeError, match="Pose estimator is unavailable"):
+            estimator.extract_frame_skeleton(np.zeros((10, 10, 3), dtype=np.uint8))
+
+    def test_pose_estimator_validate_rejects_invalid_coordinates(self):
+        """Test skeleton validation rejects missing or non-finite coordinates."""
+        from src.pose_estimation import PoseEstimator
+
+        estimator = PoseEstimator(backend="mock")
+        skeleton = estimator.extract_frame_skeleton(np.zeros((10, 10, 3), dtype=np.uint8))
+        skeleton["nose"] = (np.nan, 0.0)
+
+        assert not estimator.validate_skeleton(skeleton)
+
 
 class TestPreprocessing:
     """Test suite for preprocessing module."""
