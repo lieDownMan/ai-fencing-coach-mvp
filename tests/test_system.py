@@ -89,6 +89,20 @@ class TestPreprocessing:
         normalizer.fit(skeleton_seq)
         assert normalizer.scale_factor == 100.0
         assert np.allclose(normalizer.reference_nose, [100.0, 100.0])
+
+    def test_spatial_normalizer_rejects_invalid_coordinate(self):
+        """Test SpatialNormalizer rejects malformed or non-finite coordinates early."""
+        from src.preprocessing import SpatialNormalizer
+
+        normalizer = SpatialNormalizer()
+
+        with pytest.raises(ValueError, match="non-finite"):
+            normalizer.fit([
+                {
+                    "nose": (np.nan, 100.0),
+                    "front_ankle": (100.0, 200.0),
+                }
+            ])
     
     def test_temporal_sampler_initialization(self):
         """Test TemporalSampler initialization."""
@@ -96,6 +110,41 @@ class TestPreprocessing:
         
         sampler = TemporalSampler(target_length=28)
         assert sampler.target_length == 28
+
+    def test_temporal_sampler_rejects_invalid_array_shape(self):
+        """Test TemporalSampler rejects arrays that are not frame/joint/xy tensors."""
+        from src.preprocessing import TemporalSampler
+
+        sampler = TemporalSampler(target_length=28)
+
+        with pytest.raises(ValueError, match="shape"):
+            sampler.sample_array(np.zeros((28, 20), dtype=np.float32))
+
+    def test_temporal_sampler_repeats_single_frame_array(self):
+        """Test one-frame sequences are safely expanded to the target length."""
+        from src.preprocessing import TemporalSampler
+
+        sampler = TemporalSampler(target_length=4)
+        skeleton_array = np.array([[[1.0, 2.0], [3.0, 4.0]]])
+
+        sampled = sampler.sample_array(skeleton_array)
+
+        assert sampled.shape == (4, 2, 2)
+        assert np.allclose(sampled[0], skeleton_array[0])
+        assert np.allclose(sampled[-1], skeleton_array[0])
+
+    def test_temporal_sampler_rejects_inconsistent_skeleton_keys(self):
+        """Test list-based interpolation fails clearly on inconsistent joints."""
+        from src.preprocessing import TemporalSampler
+
+        sampler = TemporalSampler(target_length=4)
+        sequence = [
+            {"nose": (0.0, 0.0), "front_ankle": (0.0, 1.0)},
+            {"nose": (1.0, 0.0)},
+        ]
+
+        with pytest.raises(KeyError, match="inconsistent"):
+            sampler.sample(sequence)
 
     def test_model_joint_array_has_twenty_channels(self):
         """Test that the model feature joint set excludes normalization-only aliases."""
@@ -276,6 +325,44 @@ class TestAppInterface:
 
         with pytest.raises(ValueError, match="channel mismatch"):
             pipeline._run_inference(skeleton_array)
+
+    def test_system_pipeline_preserves_long_sequences_for_sliding_windows(self):
+        """Test Phase 2 keeps long videos long enough for sliding-window inference."""
+        from src.app_interface import SystemPipeline
+        from src.preprocessing import SpatialNormalizer
+        import tempfile
+
+        pipeline = SystemPipeline(
+            device="cpu",
+            use_bifencenet=False,
+            profiles_dir=tempfile.mkdtemp(),
+            pose_backend="mock"
+        )
+
+        skeleton_array = np.zeros((56, 10, 2), dtype=np.float32)
+        calls = []
+
+        def fake_get_normalized_array(*args, **kwargs):
+            return skeleton_array
+
+        def fake_run_inference(array, batch_process=True):
+            calls.append(array.shape)
+            return [(0, 1.0)] * 3
+
+        pipeline.pose_estimator.extract_video_skeleton = lambda _: [
+            {
+                **{joint: (float(idx), float(idx + 1)) for idx, joint in enumerate(SpatialNormalizer.MODEL_JOINT_NAMES)},
+                "front_ankle": (0.0, 100.0),
+            }
+            for _ in range(56)
+        ]
+        pipeline.spatial_normalizer.get_normalized_array = fake_get_normalized_array
+        pipeline._run_inference = fake_run_inference
+
+        results = pipeline.process_video("synthetic.mp4", "athlete_001")
+
+        assert calls == [(56, 10, 2)]
+        assert len(results["classifications"]) == 3
     
     def test_fencing_coach_ui_initialization(self):
         """Test FencingCoachUI initialization."""

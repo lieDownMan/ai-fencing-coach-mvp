@@ -50,14 +50,14 @@ class SpatialNormalizer:
         if "nose" not in first_frame:
             raise KeyError("'nose' not found in first frame skeleton")
         
-        self.reference_nose = np.array(first_frame["nose"])
+        self.reference_nose = self._as_coordinate(first_frame["nose"], "nose")
         
         # Calculate scale factor: vertical distance between nose and front ankle
         if "front_ankle" not in first_frame:
             raise KeyError("'front_ankle' not found in first frame skeleton")
         
-        head_pos = np.array(first_frame["nose"])
-        ankle_pos = np.array(first_frame["front_ankle"])
+        head_pos = self._as_coordinate(first_frame["nose"], "nose")
+        ankle_pos = self._as_coordinate(first_frame["front_ankle"], "front_ankle")
         vertical_distance = abs(ankle_pos[1] - head_pos[1])
         
         if vertical_distance < 1e-6:
@@ -82,7 +82,8 @@ class SpatialNormalizer:
             raise RuntimeError("Normalizer not fitted. Call fit() first.")
         
         normalized = {}
-        for joint_name, (x, y) in skeleton.items():
+        for joint_name, coords in skeleton.items():
+            x, y = self._as_coordinate(coords, joint_name)
             # Subtract reference nose position
             x_norm = (x - self.reference_nose[0]) / self.scale_factor
             y_norm = (y - self.reference_nose[1]) / self.scale_factor
@@ -137,6 +138,17 @@ class SpatialNormalizer:
             for joint_idx, joint_name in enumerate(joint_names):
                 if joint_name not in frame:
                     raise KeyError(f"'{joint_name}' not found in frame {frame_idx}")
+                self._as_coordinate(frame[joint_name], joint_name)
                 array[frame_idx, joint_idx] = frame[joint_name]
         
+        return array
+
+    @staticmethod
+    def _as_coordinate(coords: Tuple[float, float], joint_name: str) -> np.ndarray:
+        """Validate and convert a coordinate pair to a float numpy array."""
+        array = np.asarray(coords, dtype=float)
+        if array.shape != (2,):
+            raise ValueError(f"Joint '{joint_name}' must be a 2D coordinate pair")
+        if not np.all(np.isfinite(array)):
+            raise ValueError(f"Joint '{joint_name}' contains non-finite coordinates")
         return array
