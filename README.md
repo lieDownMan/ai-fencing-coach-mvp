@@ -12,7 +12,8 @@ Implemented and tested in the current code path:
 - Pose extraction backends: `mock` for deterministic development/tests and `ultralytics` for YOLO pose when the dependency and weights are installed.
 - Side-based two-fencer candidate tracking for visualization: keep the two largest pose candidates per frame and label them `fencer_L`/`fencer_R` by horizontal position.
 - Prototype distance feedback: mark global `too_close` frames from average tracked height and show per-fencer too-close status against each fencer's own detected height.
-- Annotated MP4 output with fencer boxes, skeleton keypoints, engagement-distance line, dual left/right HUD panels, speed/movement cues, global action label, optional height calibration, and too-close warning banner.
+- Annotated MP4 output with fencer boxes, skeleton keypoints, engagement-distance line, dual left/right HUD panels, speed/movement cues, global action label, optional height calibration, optional web-friendly downscaling, and too-close warning banner.
+- Local no-dependency browser demo at `web_app.py` for processing a video, reviewing the annotated MP4, and reading summary metrics without typing the full CLI command.
 - Single selected fencer skeleton remains the classifier input, using the largest detected person so existing FenceNet/BiFenceNet inference stays stable.
 - Explicit 10-joint, 20-channel skeleton feature order for FenceNet/BiFenceNet inference.
 - Sliding-window FenceNet/BiFenceNet-style six-class footwork recognition.
@@ -36,7 +37,7 @@ Out of scope for this MVP:
 - Full electronic refereeing or official scoring.
 - Blade tracking and fine-grained weapon contact analysis.
 - Multi-camera 3D reconstruction.
-- Mobile or web deployment.
+- Hosted production deployment or mobile app distribution.
 - Medical, professional safety, or certification claims.
 
 ## Documentation Map
@@ -73,7 +74,7 @@ Video input
   -> coaching feedback
      -> current path: analytical fallback from tracked stats
      -> planned path: real LLM-generated coaching where appropriate
-  -> CLI summary and/or OpenCV dashboard
+  -> CLI summary, local browser demo, and/or OpenCV dashboard
 ```
 
 The key product question is not "Can we classify fencing movement?" The stronger HCI question is "Can a fencer or coach change practice behavior because the system gives timely, understandable, trustworthy feedback?"
@@ -115,7 +116,7 @@ python app.py --video path/to/bout.mp4 --fencer-id athlete_001 --pose-backend mo
 Write an annotated video for visual review:
 
 ```bash
-python app.py --video video/fencing_match.mp4 --fencer-id athlete_001 --device cpu --pose-backend mock --left-height-cm 170 --right-height-cm 185 --annotated-video video/fencing_match_processed.mp4
+python app.py --video video/fencing_match.mp4 --fencer-id athlete_001 --device cpu --pose-backend mock --left-height-cm 170 --right-height-cm 185 --annotated-max-width 1280 --annotated-video video/fencing_match_processed.mp4
 ```
 
 The height flags are optional; without them, the HUD uses detected bounding-box height only. Limb length and reach calibration are intentionally future work.
@@ -126,6 +127,15 @@ Run the local ignored sample video if present:
 python app.py --video video/fencing_match.mp4 --fencer-id athlete_001 --device cpu --pose-backend mock
 ```
 
+
+Run the local browser demo:
+
+```bash
+python web_app.py
+```
+
+Open `http://127.0.0.1:7860`, choose the sample video or another server-side video path, set left/right heights, and click **Process Video**. Use `ultralytics` for real CV boxes; `mock` is only for deterministic pipeline checks.
+
 See [QUICKSTART.md](QUICKSTART.md) for the minimal command reference.
 
 ## Project Structure
@@ -133,6 +143,7 @@ See [QUICKSTART.md](QUICKSTART.md) for the minimal command reference.
 ```text
 ai-fencing-coach-mvp/
 ├── app.py
+├── web_app.py
 ├── config.yaml
 ├── requirements.txt
 ├── mvpspec.md

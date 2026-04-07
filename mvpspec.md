@@ -31,7 +31,8 @@ Implemented in the current debugged code path:
 - Pose/keypoint extraction with explicit `mock`, `ultralytics`, and `auto` backend behavior.
 - Side-based two-fencer candidate tracking for visualization. The pipeline keeps the two largest pose candidates per frame and labels them `fencer_L`/`fencer_R` by horizontal center.
 - Prototype distance feedback marks global `too_close` frames when front-ankle x-distance is less than `1.0x` average tracked fencer bounding-box height, then the annotated-video HUD also shows per-fencer distance status against each fencer's own detected height.
-- Annotated MP4 output draws fencer boxes, skeleton keypoints, engagement-distance lines, dual left/right HUD panels, speed/movement cues, the current global action label, optional left/right height calibration, and the too-close warning banner.
+- Annotated MP4 output draws fencer boxes, skeleton keypoints, engagement-distance lines, dual left/right HUD panels, speed/movement cues, the current global action label, optional left/right height calibration, optional web-friendly downscaling, and the too-close warning banner.
+- A local no-dependency browser demo lets reviewers process the sample/server-side video, watch the annotated MP4, and inspect summary metrics without composing terminal processing commands.
 - Single selected fencer skeleton per frame remains the classifier input. For Ultralytics results, the largest detected person is selected.
 - Spatial normalization into a fixed 10-joint, 20-channel model feature tensor.
 - Six-class FenceNet/BiFenceNet footwork recognition as the model-based path.
@@ -57,7 +58,7 @@ Out of scope:
 - Blade contact detection.
 - Full tactical understanding of all weapon actions.
 - Multi-camera 3D reconstruction.
-- Web/mobile deployment.
+- Hosted production web deployment or mobile app distribution.
 - Safety, medical, or certification claims.
 
 ## 4. Canonical Workflow
@@ -87,8 +88,8 @@ Out of scope:
    Planned path: generate concise live feedback, break strategy, or post-bout summary using the best available coaching backend.
 
 7. Interface and persistence
-   Current path: return CLI summaries, JSON reports with two-fencer tracking frames, write annotated MP4 review videos, render the OpenCV dashboard when requested, and save athlete profile updates.
-   Planned path: show annotated video, feedback, and metrics in a live coaching dashboard.
+   Current path: return CLI summaries, JSON reports with two-fencer tracking frames, write annotated MP4 review videos, expose a local browser demo for post-bout review, render the OpenCV dashboard when requested, and save athlete profile updates.
+   Planned path: add upload support, progress updates, and stronger coach-facing review controls.
 ```
 
 ## 5. Core Data and State
@@ -193,7 +194,8 @@ Recent debug milestones:
 - Checkpoint loading now accepts common PyTorch state-dict formats, validates optional metadata, and reports when the app is still using random weights.
 - JSON report output can be written explicitly with `--report` or through `output.save_reports` and `output.reports_dir` in config.
 - Two-fencer candidate tracking now records `fencer_L`/`fencer_R` side labels, per-frame centers/bounding boxes/keypoints, coverage, average front-ankle x-distance, and prototype `too_close` distance cues for reports and CLI summaries.
-- Annotated video output can write a processed MP4 with fencer overlays, dual left/right HUD panels, per-fencer height-relative distance status, speed/movement cues, current global action label, and a red `TOO CLOSE` banner when the distance heuristic triggers.
+- Annotated video output can write a processed MP4 with fencer overlays, dual left/right HUD panels, per-fencer height-relative distance status, speed/movement cues, current global action label, optional `--annotated-max-width` downscaling, and a red `TOO CLOSE` banner when the distance heuristic triggers.
+- Local browser demo output is available through `python web_app.py`; it reuses the same pipeline/report/annotator code and writes generated assets under `web_outputs/`.
 
 Current local sample-video smoke:
 
@@ -205,7 +207,7 @@ Observed result in the current environment:
 
 - `video/fencing_match.mp4` opens with 776 frames at 30 FPS.
 - Mock pose mode processes all 776 frames and records two side-based fencer candidates on each frame.
-- Annotated-video mode writes `video/fencing_match_processed.mp4` or another requested output path with fencer overlays, dual HUDs, optional `--left-height-cm` / `--right-height-cm` calibration, and distance cues.
+- Annotated-video mode writes `video/fencing_match_processed.mp4` or another requested output path with fencer overlays, dual HUDs, optional `--left-height-cm` / `--right-height-cm` calibration, optional `--annotated-max-width 1280` downscaling, and distance cues.
 - Sliding-window inference emits 54 classifications.
 - The post-bout feedback path completes using analytical fallback.
 - The action labels are not semantically meaningful until trained model weights are provided.
@@ -234,7 +236,7 @@ These items move beyond the current prototype toward a useful deployed or study-
 - Upgrade side-based `fencer_L`/`fencer_R` candidate tracking into robust identity persistence across exchanges, crossings, and occlusions.
 - Replace the prototype `too_close` ratio with coach-validated engagement-distance thresholds, then add limb/reach calibration, stance-width, recovery, and timing feedback grounded in fencing coaching concepts.
 - Train or fine-tune action-recognition models on fencing-specific labeled data and evaluate them against held-out real bouts.
-- Add coach-facing review UI that links feedback to specific moments in the video rather than only giving aggregate summaries.
+- Extend the local browser demo with video upload, progress/status updates, and coach-facing review UI that links feedback to specific moments in the video rather than only giving aggregate summaries.
 - Add a real LLM backend or carefully designed prompt/API layer with coach-reviewed fallback templates and guardrails.
 - Study feedback trust and usefulness with beginner/intermediate fencers and at least one coach before making strong HCI claims.
 - Compare against realistic alternatives such as coach review, self-review video, and generic sports-analysis tools.
