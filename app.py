@@ -82,6 +82,23 @@ def _format_model_status(status: Dict[str, Any]) -> str:
     return f"Model weights: random ({model_type}; no checkpoint provided)"
 
 
+def _format_tracking_summary(summary: Dict[str, Any]) -> str:
+    """Format two-fencer tracking coverage for CLI output."""
+    frames = _as_int(summary.get("frames_analyzed"))
+    frames_with_two = _as_int(summary.get("frames_with_two_fencers"))
+    coverage = _as_float(summary.get("two_fencer_coverage")) * 100.0
+    average_distance = summary.get("average_engagement_distance_px")
+
+    message = (
+        "Two-fencer tracking: "
+        f"{frames_with_two}/{frames} frames with two fencers "
+        f"({coverage:.1f}% coverage)"
+    )
+    if average_distance is not None:
+        message += f", avg front-ankle distance {float(average_distance):.1f}px"
+    return message
+
+
 def _config_bool(value: Any, default: bool = False) -> bool:
     """Parse optional YAML/CLI-style booleans predictably."""
     if value is None:
@@ -152,6 +169,19 @@ def build_video_report(
         })
 
     statistics = results.get("statistics") or {}
+    tracking_payload = results.get("two_fencer_tracking") or {}
+    tracking_report = {
+        "schema_version": _as_int(
+            tracking_payload.get("schema_version"),
+            default=1
+        ),
+        "strategy": str(tracking_payload.get("strategy", "")),
+        "identity_persistence": str(
+            tracking_payload.get("identity_persistence", "")
+        ),
+        "summary": tracking_payload.get("summary", {}),
+        "frames": tracking_payload.get("frames", []),
+    }
 
     return {
         "schema_version": 1,
@@ -164,6 +194,7 @@ def build_video_report(
         "window_stride": window_stride,
         "classification_window_count": len(classification_windows),
         "classification_windows": classification_windows,
+        "two_fencer_tracking": tracking_report,
         "statistics": {
             "total_actions": _as_int(
                 statistics.get("total_actions"),
@@ -614,6 +645,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     print(f"Processed video: {results['video_path']}")
     print(f"Frames processed: {results.get('frames_processed', 0)}")
+    tracking_summary = (results.get("two_fencer_tracking") or {}).get("summary")
+    if tracking_summary:
+        print(_format_tracking_summary(tracking_summary))
     model_status_getter = getattr(app, "get_model_status", None)
     if model_status_getter:
         print(_format_model_status(model_status_getter()))

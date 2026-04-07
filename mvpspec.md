@@ -29,7 +29,8 @@ Implemented in the current debugged code path:
 - Native desktop workflow using Python and OpenCV.
 - Imported video input through the CLI/app pipeline.
 - Pose/keypoint extraction with explicit `mock`, `ultralytics`, and `auto` backend behavior.
-- Single selected fencer skeleton per frame. For Ultralytics results, the largest detected person is selected.
+- Side-based two-fencer candidate tracking for visualization. The pipeline keeps the two largest pose candidates per frame and labels them `fencer_L`/`fencer_R` by horizontal center.
+- Single selected fencer skeleton per frame remains the classifier input. For Ultralytics results, the largest detected person is selected.
 - Spatial normalization into a fixed 10-joint, 20-channel model feature tensor.
 - Six-class FenceNet/BiFenceNet footwork recognition as the model-based path.
 - Sliding-window inference over long videos instead of collapsing every clip to 28 frames.
@@ -43,8 +44,7 @@ Implemented in the current debugged code path:
 Planned or research-facing:
 
 - Webcam/live mode beyond the current menu shell.
-- Robust two-fencer tracking in a side-view fencing scene.
-- Left/right fencer assignment by horizontal position.
+- Robust fencer identity persistence through crossings, occlusions, and exchange resets.
 - Dynamic distance and stance heuristics for lightweight coaching.
 - Trained checkpoints for meaningful action recognition. The expected loading format is now documented, but trained weights are not included yet.
 - Real LLM loading or API-backed generation.
@@ -66,8 +66,8 @@ Out of scope:
    Planned path: webcam stream or imported bout video.
 
 2. Pose estimation and tracking
-   Current path: extract one usable skeleton per frame using mock pose or the largest Ultralytics person detection.
-   Planned path: detect people, keep the two largest fencer candidates, and assign Fencer L/R by center X position.
+   Current path: detect people, keep the two largest fencer candidates, and assign `fencer_L`/`fencer_R` by center X position while preserving one largest skeleton for classification.
+   Planned path: add identity persistence through crossings, occlusion, and exchange resets.
 
 3. Feature extraction
    Current path: export a fixed 10-joint skeleton tensor and keep `front_ankle` as a normalization reference.
@@ -85,7 +85,7 @@ Out of scope:
    Planned path: generate concise live feedback, break strategy, or post-bout summary using the best available coaching backend.
 
 7. Interface and persistence
-   Current path: return CLI summaries, render the OpenCV dashboard when requested, and save athlete profile updates.
+   Current path: return CLI summaries, JSON reports with two-fencer tracking frames, render the OpenCV dashboard when requested, and save athlete profile updates.
    Planned path: show annotated video, feedback, and metrics in a live coaching dashboard.
 ```
 
@@ -189,6 +189,7 @@ Recent debug milestones:
 - CLI/config handling and UI rendering are testable without opening windows.
 - Checkpoint loading now accepts common PyTorch state-dict formats, validates optional metadata, and reports when the app is still using random weights.
 - JSON report output can be written explicitly with `--report` or through `output.save_reports` and `output.reports_dir` in config.
+- Two-fencer candidate tracking now records `fencer_L`/`fencer_R` side labels, per-frame centers/bounding boxes/keypoints, coverage, and average front-ankle x-distance for reports and CLI summaries.
 
 Current local sample-video smoke:
 
@@ -199,7 +200,7 @@ python app.py --video video/fencing_match.mp4 --fencer-id smoke_fencer --device 
 Observed result in the current environment:
 
 - `video/fencing_match.mp4` opens with 776 frames at 30 FPS.
-- Mock pose mode processes all 776 frames.
+- Mock pose mode processes all 776 frames and records two side-based fencer candidates on each frame.
 - Sliding-window inference emits 54 classifications.
 - The post-bout feedback path completes using analytical fallback.
 - The action labels are not semantically meaningful until trained model weights are provided.
@@ -225,7 +226,7 @@ These items improve the reliability, testability, and clarity of the current rep
 
 These items move beyond the current prototype toward a useful deployed or study-ready system:
 
-- Implement robust two-fencer tracking, left/right assignment, and identity persistence across exchanges.
+- Upgrade side-based `fencer_L`/`fencer_R` candidate tracking into robust identity persistence across exchanges, crossings, and occlusions.
 - Add engagement-distance, stance-width, recovery, and timing feedback grounded in fencing coaching concepts.
 - Train or fine-tune action-recognition models on fencing-specific labeled data and evaluate them against held-out real bouts.
 - Add coach-facing review UI that links feedback to specific moments in the video rather than only giving aggregate summaries.

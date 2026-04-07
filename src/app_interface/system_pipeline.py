@@ -12,7 +12,7 @@ import logging
 from ..pose_estimation import PoseEstimator
 from ..preprocessing import SpatialNormalizer, TemporalSampler
 from ..models import FenceNet, BiFenceNet
-from ..tracking import PatternAnalyzer, ProfileManager
+from ..tracking import FencerTracker, PatternAnalyzer, ProfileManager
 from ..llm_agent import CoachEngine
 
 logger = logging.getLogger(__name__)
@@ -98,6 +98,7 @@ class SystemPipeline:
         self.model.eval()
         
         # Phase 4: Pattern Tracking
+        self.fencer_tracker = FencerTracker()
         self.pattern_analyzer = PatternAnalyzer()
         self.profile_manager = ProfileManager(profiles_dir=profiles_dir)
         
@@ -143,12 +144,14 @@ class SystemPipeline:
             "statistics": {},
             "window_size": self.INFERENCE_WINDOW_SIZE,
             "window_stride": self.INFERENCE_STRIDE,
+            "two_fencer_tracking": self.fencer_tracker.build_payload([]),
         }
         
         try:
             # Phase 1: Extract Skeleton
             logger.info("Phase 1: Extracting skeleton...")
-            skeletons = self.pose_estimator.extract_video_skeleton(video_path)
+            skeletons, tracking_payload = self._extract_pose_sequence(video_path)
+            results["two_fencer_tracking"] = tracking_payload
             results["frames_processed"] = len(skeletons)
             
             if not skeletons:
@@ -188,6 +191,32 @@ class SystemPipeline:
         
         return results
     
+    def _extract_pose_sequence(
+        self,
+        video_path: str
+    ) -> Tuple[List[Dict[str, Tuple[float, float]]], Dict[str, Any]]:
+        """Extract classifier skeletons and two-fencer tracking metadata."""
+        skeleton_extractor = getattr(self.pose_estimator, "extract_video_skeleton")
+        if getattr(skeleton_extractor, "__func__", None) is PoseEstimator.extract_video_skeleton:
+            pose_payload = self.pose_estimator.extract_video_fencer_tracks(video_path)
+            skeletons = pose_payload.get("skeletons", [])
+            tracking_payload = {
+                key: value
+                for key, value in pose_payload.items()
+                if key != "skeletons"
+            }
+            return skeletons, tracking_payload
+
+        skeletons = list(skeleton_extractor(video_path) or [])
+        tracking_frames = [
+            self.fencer_tracker.build_frame(
+                frame_index,
+                [self.fencer_tracker.candidate_from_skeleton(skeleton)]
+            )
+            for frame_index, skeleton in enumerate(skeletons)
+        ]
+        return skeletons, self.fencer_tracker.build_payload(tracking_frames)
+
     def _run_inference(
         self,
         skeleton_array: np.ndarray,
@@ -442,6 +471,8 @@ class SystemPipeline:
             "pose_backend": self.pose_estimator.backend,
             "pose_requested_backend": self.pose_estimator.requested_backend,
             "pose_model": pose_model,
+            "tracking_strategy": self.fencer_tracker.TRACKING_STRATEGY,
+            "tracking_identity_persistence": self.fencer_tracker.IDENTITY_NOTE,
         }
 
     def get_model_status(self) -> Dict[str, Any]:
