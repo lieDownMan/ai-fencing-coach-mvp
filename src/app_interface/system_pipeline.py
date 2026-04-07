@@ -29,7 +29,9 @@ class SystemPipeline:
         use_bifencenet: bool = False,
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         model_checkpoint: Optional[str] = None,
-        profiles_dir: str = "data/fencer_profiles/"
+        profiles_dir: str = "data/fencer_profiles/",
+        pose_backend: str = "auto",
+        pose_model_path: Optional[str] = None
     ):
         """
         Initialize System Pipeline.
@@ -39,6 +41,8 @@ class SystemPipeline:
             device: Device to use for models (cuda or cpu)
             model_checkpoint: Path to pretrained model weights
             profiles_dir: Directory for fencer profiles
+            pose_backend: Pose estimator backend ("auto", "ultralytics", or "mock")
+            pose_model_path: Optional pose model path
         """
         self.device = device
         self.use_bifencenet = use_bifencenet
@@ -46,7 +50,10 @@ class SystemPipeline:
         logger.info(f"Initializing System Pipeline on device: {device}")
         
         # Phase 1: Pose Estimation
-        self.pose_estimator = PoseEstimator()
+        self.pose_estimator = PoseEstimator(
+            model_path=pose_model_path,
+            backend=pose_backend
+        )
         
         # Phase 2: Preprocessing
         self.spatial_normalizer = SpatialNormalizer()

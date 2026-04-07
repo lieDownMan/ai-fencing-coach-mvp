@@ -28,7 +28,9 @@ class FencingCoachApplication:
         self,
         use_bifencenet: bool = False,
         device: str = "auto",
-        model_checkpoint: Path = None
+        model_checkpoint: Path = None,
+        pose_backend: str = "auto",
+        pose_model: str = None
     ):
         """
         Initialize application.
@@ -37,6 +39,8 @@ class FencingCoachApplication:
             use_bifencenet: Use BiFenceNet instead of FenceNet
             device: Device to use (auto, cuda, cpu)
             model_checkpoint: Path to pretrained model
+            pose_backend: Pose estimator backend
+            pose_model: Optional pose model path
         """
         # Auto-detect device
         if device == "auto":
@@ -49,7 +53,9 @@ class FencingCoachApplication:
         self.pipeline = SystemPipeline(
             use_bifencenet=use_bifencenet,
             device=device,
-            model_checkpoint=model_checkpoint
+            model_checkpoint=model_checkpoint,
+            pose_backend=pose_backend,
+            pose_model_path=pose_model
         )
         
         # Initialize UI
@@ -191,6 +197,18 @@ def main():
         help="Path to pretrained model checkpoint"
     )
     parser.add_argument(
+        "--pose-backend",
+        type=str,
+        default="auto",
+        choices=["auto", "ultralytics", "mock"],
+        help="Pose estimator backend"
+    )
+    parser.add_argument(
+        "--pose-model",
+        type=str,
+        help="Path to YOLO pose model weights"
+    )
+    parser.add_argument(
         "--interactive",
         action="store_true",
         help="Run in interactive mode"
@@ -202,7 +220,9 @@ def main():
     app = FencingCoachApplication(
         use_bifencenet=args.use_bifencenet,
         device=args.device,
-        model_checkpoint=Path(args.model) if args.model else None
+        model_checkpoint=Path(args.model) if args.model else None,
+        pose_backend=args.pose_backend,
+        pose_model=args.pose_model
     )
     
     if args.interactive:
