@@ -29,6 +29,7 @@ Implemented in the current debugged code path:
 - Native desktop workflow using Python and OpenCV.
 - Imported video input through the CLI/app pipeline.
 - Pose/keypoint extraction with explicit `mock`, `ultralytics`, and `auto` backend behavior.
+- Opt-in real Ultralytics pose smoke coverage for `video/fencing_match.mp4` when `ultralytics` and a local YOLO pose model are available.
 - Side-based two-fencer candidate tracking for visualization. The pipeline keeps the two largest pose candidates per frame and labels them `fencer_L`/`fencer_R` by horizontal center.
 - Prototype distance feedback marks global `too_close` frames when front-ankle x-distance is less than `1.0x` average tracked fencer bounding-box height, then the annotated-video HUD also shows per-fencer distance status against each fencer's own detected height.
 - Annotated MP4 output draws fencer boxes, skeleton keypoints, engagement-distance lines, dual left/right HUD panels, speed/movement cues, the current global action label, optional left/right height calibration, optional web-friendly downscaling plus H.264 transcoding, and the too-close warning banner.
@@ -211,7 +212,7 @@ Observed result in the current environment:
 - Sliding-window inference emits 54 classifications.
 - The post-bout feedback path completes using analytical fallback.
 - The action labels are not semantically meaningful until trained model weights are provided.
-- Real Ultralytics pose was not run because `ultralytics` is not installed in the current venv.
+- Real Ultralytics processing is available when `ultralytics` and a local YOLO pose model are installed; default tests keep this smoke path opt-in so the suite remains deterministic.
 
 ## 12. Further Work
 
@@ -221,7 +222,7 @@ Further work should be split into two tracks so the prototype can keep improving
 
 These items improve the reliability, testability, and clarity of the current repo:
 
-- Install and smoke-test the real `ultralytics` backend on `video/fencing_match.mp4`, then document the exact model file and dependency version used.
+- Keep expanding the opt-in real `ultralytics` smoke path with pose-quality assertions and documented model/version combinations.
 - Add or link a trained FenceNet/BiFenceNet checkpoint using the documented checkpoint format.
 - Build a small labeled clip set so tests can check semantic action correctness, not only runtime shape and plumbing.
 - Add pose-quality handling for low-confidence, missing, or intermittent skeleton frames.
