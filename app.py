@@ -65,6 +65,20 @@ def _config_value(
     return current
 
 
+def _format_model_status(status: Dict[str, Any]) -> str:
+    """Format model weight status for CLI output."""
+    model_type = status.get("model_type", "model")
+    model_weights = status.get("model_weights", "random")
+    checkpoint_path = status.get("model_checkpoint")
+
+    if model_weights == "checkpoint":
+        return f"Model weights: checkpoint ({model_type}, {checkpoint_path})"
+    if checkpoint_path:
+        error = status.get("model_checkpoint_error") or "checkpoint was not loaded"
+        return f"Model weights: random ({model_type}; {error})"
+    return f"Model weights: random ({model_type}; no checkpoint provided)"
+
+
 class FencingCoachApplication:
     """Main application controller."""
 
@@ -197,6 +211,10 @@ class FencingCoachApplication:
 
             logger.exception("Error processing video")
             return self._error_result(video_file, fencer_id, str(e))
+
+    def get_model_status(self) -> Dict[str, Any]:
+        """Return action-recognition model checkpoint status."""
+        return self.pipeline.get_model_status()
 
     def run_interactive_mode(self):
         """Run interactive UI for real-time coaching."""
@@ -429,6 +447,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     print(f"Processed video: {results['video_path']}")
     print(f"Frames processed: {results.get('frames_processed', 0)}")
+    model_status_getter = getattr(app, "get_model_status", None)
+    if model_status_getter:
+        print(_format_model_status(model_status_getter()))
     if results.get("feedback"):
         print(f"Feedback: {results['feedback']}")
 
