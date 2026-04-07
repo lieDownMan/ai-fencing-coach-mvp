@@ -15,6 +15,7 @@ from typing import Any, Dict, Optional, Sequence
 import yaml
 
 from src.app_interface.system_pipeline import SystemPipeline
+from src.app_interface.video_annotator import write_annotated_video
 from src.tracking import PatternAnalyzer
 
 # Configure logging
@@ -88,6 +89,8 @@ def _format_tracking_summary(summary: Dict[str, Any]) -> str:
     frames_with_two = _as_int(summary.get("frames_with_two_fencers"))
     coverage = _as_float(summary.get("two_fencer_coverage")) * 100.0
     average_distance = summary.get("average_engagement_distance_px")
+    frames_too_close = _as_int(summary.get("frames_too_close"))
+    too_close_ratio = _as_float(summary.get("too_close_ratio")) * 100.0
 
     message = (
         "Two-fencer tracking: "
@@ -96,6 +99,8 @@ def _format_tracking_summary(summary: Dict[str, Any]) -> str:
     )
     if average_distance is not None:
         message += f", avg front-ankle distance {float(average_distance):.1f}px"
+    if frames_too_close:
+        message += f"; too close in {frames_too_close} frames ({too_close_ratio:.1f}%)"
     return message
 
 
@@ -179,6 +184,7 @@ def build_video_report(
         "identity_persistence": str(
             tracking_payload.get("identity_persistence", "")
         ),
+        "too_close_rule": str(tracking_payload.get("too_close_rule", "")),
         "summary": tracking_payload.get("summary", {}),
         "frames": tracking_payload.get("frames", []),
     }
@@ -542,6 +548,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Disable config-driven JSON report writing"
     )
     parser.add_argument(
+        "--annotated-video",
+        type=str,
+        help="Path to write an annotated MP4 with fencer boxes and distance cues"
+    )
+    parser.add_argument(
         "--interactive",
         action="store_true",
         help="Run in interactive mode"
@@ -580,6 +591,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         config, "pose", "model", default=None
     )
     report_path = Path(args.report).expanduser() if args.report else None
+    annotated_video_config = _config_value(
+        config, "output", "annotated_video", default=None
+    )
+    annotated_video_value = args.annotated_video or annotated_video_config
+    annotated_video_path = (
+        Path(annotated_video_value).expanduser()
+        if annotated_video_value
+        else None
+    )
     reports_dir = args.reports_dir or _config_value(
         config, "output", "reports_dir", default="reports/"
     )
@@ -668,6 +688,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"Could not write JSON report: {e}")
             return 1
         print(f"Report written: {written_report}")
+
+    if annotated_video_path is not None:
+        try:
+            written_video = write_annotated_video(
+                str(video_path),
+                output_path=annotated_video_path,
+                tracking_frames=(
+                    results.get("two_fencer_tracking") or {}
+                ).get("frames", [])
+            )
+        except (OSError, ValueError) as e:
+            logger.error(f"Could not write annotated video: {e}")
+            print(f"Could not write annotated video: {e}")
+            return 1
+        print(f"Annotated video written: {written_video}")
 
     return 0
 

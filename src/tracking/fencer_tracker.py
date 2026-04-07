@@ -20,6 +20,11 @@ class FencerTracker:
     IDENTITY_NOTE = (
         "Side-based labels; identities may swap if fencers cross or occlude."
     )
+    TOO_CLOSE_DISTANCE_RATIO = 1.0
+    TOO_CLOSE_RULE = (
+        "too_close when front-ankle x-distance is less than 1.0 times "
+        "average tracked fencer bbox height"
+    )
 
     def build_frame(
         self,
@@ -52,6 +57,7 @@ class FencerTracker:
             for (track_id, side), detection in zip(labels, selected)
         ]
         engagement_distance, distance_source = self._engagement_distance(tracks)
+        distance_features = self._distance_features(tracks, engagement_distance)
 
         return {
             "frame_index": int(frame_index),
@@ -60,6 +66,7 @@ class FencerTracker:
             "tracks": tracks,
             "engagement_distance_px": engagement_distance,
             "distance_source": distance_source,
+            **distance_features,
         }
 
     def build_payload(self, frames: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -68,6 +75,7 @@ class FencerTracker:
             "schema_version": self.SCHEMA_VERSION,
             "strategy": self.TRACKING_STRATEGY,
             "identity_persistence": self.IDENTITY_NOTE,
+            "too_close_rule": self.TOO_CLOSE_RULE,
             "summary": self.summarize(frames),
             "frames": frames,
         }
@@ -84,13 +92,29 @@ class FencerTracker:
         frames_with_none = sum(
             1 for frame in frames if frame.get("tracked_fencer_count", 0) == 0
         )
+        frames_too_close = sum(
+            1 for frame in frames if frame.get("distance_status") == "too_close"
+        )
+        frames_distance_ok = sum(
+            1 for frame in frames if frame.get("distance_status") == "ok"
+        )
         distances = [
             float(frame["engagement_distance_px"])
             for frame in frames
             if frame.get("engagement_distance_px") is not None
         ]
+        distance_ratios = [
+            float(frame["engagement_distance_ratio"])
+            for frame in frames
+            if frame.get("engagement_distance_ratio") is not None
+        ]
         average_distance = (
             float(sum(distances) / len(distances)) if distances else None
+        )
+        average_distance_ratio = (
+            float(sum(distance_ratios) / len(distance_ratios))
+            if distance_ratios
+            else None
         )
 
         return {
@@ -98,10 +122,18 @@ class FencerTracker:
             "frames_with_two_fencers": frames_with_two,
             "frames_with_one_fencer": frames_with_one,
             "frames_with_no_fencers": frames_with_none,
+            "frames_too_close": frames_too_close,
+            "frames_distance_ok": frames_distance_ok,
             "two_fencer_coverage": (
                 float(frames_with_two / frame_count) if frame_count else 0.0
             ),
+            "too_close_ratio": (
+                float(frames_too_close / frame_count) if frame_count else 0.0
+            ),
             "average_engagement_distance_px": average_distance,
+            "average_engagement_distance_ratio": average_distance_ratio,
+            "too_close_distance_ratio": self.TOO_CLOSE_DISTANCE_RATIO,
+            "too_close_rule": self.TOO_CLOSE_RULE,
             "tracking_strategy": self.TRACKING_STRATEGY,
             "identity_persistence": self.IDENTITY_NOTE,
         }
@@ -200,6 +232,48 @@ class FencerTracker:
             "center_x",
         )
 
+    def _distance_features(
+        self,
+        tracks: List[Dict[str, Any]],
+        engagement_distance: Optional[float]
+    ) -> Dict[str, Any]:
+        """Build scale-relative distance feedback for one frame."""
+        empty = {
+            "average_fencer_height_px": None,
+            "engagement_distance_ratio": None,
+            "too_close_threshold_px": None,
+            "distance_status": "unknown",
+            "coaching_cue": "",
+        }
+        if len(tracks) < 2 or engagement_distance is None:
+            return empty
+
+        heights = [
+            self._bbox_height(track.get("bbox"))
+            for track in tracks[:2]
+        ]
+        heights = [height for height in heights if height is not None and height > 0]
+        if not heights:
+            return empty
+
+        average_height = float(sum(heights) / len(heights))
+        threshold = float(average_height * self.TOO_CLOSE_DISTANCE_RATIO)
+        distance = float(engagement_distance)
+        distance_ratio = float(distance / average_height)
+        too_close = distance < threshold
+
+        return {
+            "average_fencer_height_px": average_height,
+            "engagement_distance_ratio": distance_ratio,
+            "too_close_threshold_px": threshold,
+            "distance_status": "too_close" if too_close else "ok",
+            "coaching_cue": (
+                "Too close: recover distance."
+                if too_close
+                else "Distance OK."
+            ),
+        }
+
     def _bbox_from_skeleton(
         self,
         skeleton: Dict[str, Tuple[float, float]]
@@ -252,6 +326,12 @@ class FencerTracker:
         width = max(0.0, float(bbox[2]) - float(bbox[0]))
         height = max(0.0, float(bbox[3]) - float(bbox[1]))
         return float(width * height)
+
+    @staticmethod
+    def _bbox_height(bbox: Optional[List[float]]) -> Optional[float]:
+        if bbox is None:
+            return None
+        return max(0.0, float(bbox[3]) - float(bbox[1]))
 
     @staticmethod
     def _as_float_list(

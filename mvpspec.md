@@ -30,6 +30,8 @@ Implemented in the current debugged code path:
 - Imported video input through the CLI/app pipeline.
 - Pose/keypoint extraction with explicit `mock`, `ultralytics`, and `auto` backend behavior.
 - Side-based two-fencer candidate tracking for visualization. The pipeline keeps the two largest pose candidates per frame and labels them `fencer_L`/`fencer_R` by horizontal center.
+- Prototype distance feedback marks `too_close` frames when front-ankle x-distance is less than `1.0x` average tracked fencer bounding-box height.
+- Annotated MP4 output draws fencer boxes, skeleton keypoints, engagement-distance lines, and the too-close warning banner.
 - Single selected fencer skeleton per frame remains the classifier input. For Ultralytics results, the largest detected person is selected.
 - Spatial normalization into a fixed 10-joint, 20-channel model feature tensor.
 - Six-class FenceNet/BiFenceNet footwork recognition as the model-based path.
@@ -45,7 +47,7 @@ Planned or research-facing:
 
 - Webcam/live mode beyond the current menu shell.
 - Robust fencer identity persistence through crossings, occlusions, and exchange resets.
-- Dynamic distance and stance heuristics for lightweight coaching.
+- Coach-validated distance thresholds, stance-width checks, and recovery/timing heuristics for lightweight coaching.
 - Trained checkpoints for meaningful action recognition. The expected loading format is now documented, but trained weights are not included yet.
 - Real LLM loading or API-backed generation.
 
@@ -70,12 +72,12 @@ Out of scope:
    Planned path: add identity persistence through crossings, occlusion, and exchange resets.
 
 3. Feature extraction
-   Current path: export a fixed 10-joint skeleton tensor and keep `front_ankle` as a normalization reference.
-   Planned path: also extract bounding boxes, stance width, and engagement distance.
+   Current path: export a fixed 10-joint skeleton tensor, keep `front_ankle` as a normalization reference, and store fencer bounding boxes plus engagement distance for visualization.
+   Planned path: also extract stance width and stronger scale-normalized motion metrics.
 
 4. Motion understanding
-   Current path: classify normalized skeleton windows with FenceNet/BiFenceNet.
-   Planned path: add dynamic rules such as "too close" and stance-width checks.
+   Current path: classify normalized skeleton windows with FenceNet/BiFenceNet and flag prototype `too_close` frames from engagement distance.
+   Planned path: add coach-validated distance thresholds, stance-width checks, and recovery/timing rules.
 
 5. Pattern analysis
    Aggregate action frequencies, offensive/defensive ratios, JS/SF ratio, and repeated patterns.
@@ -85,7 +87,7 @@ Out of scope:
    Planned path: generate concise live feedback, break strategy, or post-bout summary using the best available coaching backend.
 
 7. Interface and persistence
-   Current path: return CLI summaries, JSON reports with two-fencer tracking frames, render the OpenCV dashboard when requested, and save athlete profile updates.
+   Current path: return CLI summaries, JSON reports with two-fencer tracking frames, write annotated MP4 review videos, render the OpenCV dashboard when requested, and save athlete profile updates.
    Planned path: show annotated video, feedback, and metrics in a live coaching dashboard.
 ```
 
@@ -189,7 +191,8 @@ Recent debug milestones:
 - CLI/config handling and UI rendering are testable without opening windows.
 - Checkpoint loading now accepts common PyTorch state-dict formats, validates optional metadata, and reports when the app is still using random weights.
 - JSON report output can be written explicitly with `--report` or through `output.save_reports` and `output.reports_dir` in config.
-- Two-fencer candidate tracking now records `fencer_L`/`fencer_R` side labels, per-frame centers/bounding boxes/keypoints, coverage, and average front-ankle x-distance for reports and CLI summaries.
+- Two-fencer candidate tracking now records `fencer_L`/`fencer_R` side labels, per-frame centers/bounding boxes/keypoints, coverage, average front-ankle x-distance, and prototype `too_close` distance cues for reports and CLI summaries.
+- Annotated video output can write a processed MP4 with fencer overlays and a red `TOO CLOSE` banner when the distance heuristic triggers.
 
 Current local sample-video smoke:
 
@@ -201,6 +204,7 @@ Observed result in the current environment:
 
 - `video/fencing_match.mp4` opens with 776 frames at 30 FPS.
 - Mock pose mode processes all 776 frames and records two side-based fencer candidates on each frame.
+- Annotated-video mode writes `video/fencing_match_processed.mp4` or another requested output path with fencer overlays and distance cues.
 - Sliding-window inference emits 54 classifications.
 - The post-bout feedback path completes using analytical fallback.
 - The action labels are not semantically meaningful until trained model weights are provided.
@@ -227,7 +231,7 @@ These items improve the reliability, testability, and clarity of the current rep
 These items move beyond the current prototype toward a useful deployed or study-ready system:
 
 - Upgrade side-based `fencer_L`/`fencer_R` candidate tracking into robust identity persistence across exchanges, crossings, and occlusions.
-- Add engagement-distance, stance-width, recovery, and timing feedback grounded in fencing coaching concepts.
+- Replace the prototype `too_close` ratio with coach-validated engagement-distance thresholds, then add stance-width, recovery, and timing feedback grounded in fencing coaching concepts.
 - Train or fine-tune action-recognition models on fencing-specific labeled data and evaluate them against held-out real bouts.
 - Add coach-facing review UI that links feedback to specific moments in the video rather than only giving aggregate summaries.
 - Add a real LLM backend or carefully designed prompt/API layer with coach-reviewed fallback templates and guardrails.

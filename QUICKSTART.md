@@ -64,6 +64,12 @@ Write a JSON report for review or downstream analysis:
 python app.py --video path/to/bout.mp4 --fencer-id athlete_001 --pose-backend mock --report reports/bout_report.json
 ```
 
+Write an annotated review video with fencer boxes and a too-close distance cue:
+
+```bash
+python app.py --video video/fencing_match.mp4 --fencer-id athlete_001 --device cpu --pose-backend mock --annotated-video video/fencing_match_processed.mp4
+```
+
 If `output.save_reports: true` is enabled in `config.yaml`, the CLI writes an auto-named report under `output.reports_dir` unless `--no-report` is passed.
 
 ## Help
@@ -76,6 +82,7 @@ python app.py --help
 
 - `data/fencer_profiles/` for athlete profile JSON files.
 - `reports/` for JSON video reports when enabled by config or `--report`.
+- `video/fencing_match_processed.mp4` or your `--annotated-video` path for annotated video output.
 - CLI summary output for frames processed and post-bout feedback.
 - The OpenCV preview window for interactive visual debugging.
 
