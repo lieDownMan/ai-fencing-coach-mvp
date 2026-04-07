@@ -11,8 +11,8 @@ Implemented and tested in the current code path:
 - Side-view fencing video from a webcam or imported video file.
 - Pose extraction backends: `mock` for deterministic development/tests and `ultralytics` for YOLO pose when the dependency and weights are installed.
 - Side-based two-fencer candidate tracking for visualization: keep the two largest pose candidates per frame and label them `fencer_L`/`fencer_R` by horizontal position.
-- Prototype distance feedback: mark frames as `too_close` when front-ankle distance is less than `1.0x` average tracked fencer height.
-- Annotated MP4 output with fencer boxes, skeleton keypoints, engagement-distance line, and too-close warning banner.
+- Prototype distance feedback: mark global `too_close` frames from average tracked height and show per-fencer too-close status against each fencer's own detected height.
+- Annotated MP4 output with fencer boxes, skeleton keypoints, engagement-distance line, dual left/right HUD panels, speed/movement cues, global action label, optional height calibration, and too-close warning banner.
 - Single selected fencer skeleton remains the classifier input, using the largest detected person so existing FenceNet/BiFenceNet inference stays stable.
 - Explicit 10-joint, 20-channel skeleton feature order for FenceNet/BiFenceNet inference.
 - Sliding-window FenceNet/BiFenceNet-style six-class footwork recognition.
@@ -26,7 +26,7 @@ Implemented and tested in the current code path:
 Still planned or research-facing:
 
 - Robust identity persistence through fencer crossing, occlusion, and exchange resets.
-- Coach-validated distance thresholds, stance-width checks, and recovery/timing heuristics for live form feedback.
+- Coach-validated distance thresholds, stance-width checks, limb/reach calibration, and recovery/timing heuristics for live form feedback.
 - Trained fencing model checkpoints. The loader and expected format are documented, but trained weights are not included yet.
 - Real LLM model loading or API integration.
 - Real Ultralytics pose smoke testing in this environment. The current venv does not have `ultralytics` installed.
@@ -115,8 +115,10 @@ python app.py --video path/to/bout.mp4 --fencer-id athlete_001 --pose-backend mo
 Write an annotated video for visual review:
 
 ```bash
-python app.py --video video/fencing_match.mp4 --fencer-id athlete_001 --device cpu --pose-backend mock --annotated-video video/fencing_match_processed.mp4
+python app.py --video video/fencing_match.mp4 --fencer-id athlete_001 --device cpu --pose-backend mock --left-height-cm 170 --right-height-cm 185 --annotated-video video/fencing_match_processed.mp4
 ```
+
+The height flags are optional; without them, the HUD uses detected bounding-box height only. Limb length and reach calibration are intentionally future work.
 
 Run the local ignored sample video if present:
 
