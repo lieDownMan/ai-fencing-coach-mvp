@@ -6,16 +6,25 @@ The current positioning is: a coaching support tool, not a referee replacement. 
 
 ## Current Scope
 
-In scope:
+Implemented and tested in the current code path:
 
 - Side-view fencing video from a webcam or imported video file.
-- Two-fencer pose tracking and left/right fencer assignment.
-- Lower-body and footwork-focused analysis.
-- FenceNet/BiFenceNet-style six-class footwork recognition where model weights are available.
-- Lightweight rule-based coaching for the native MVP path.
-- OpenCV-based visual debugging UI.
+- Pose extraction backends: `mock` for deterministic development/tests and `ultralytics` for YOLO pose when the dependency and weights are installed.
+- Single selected fencer skeleton per frame, using the largest detected person for the Ultralytics backend.
+- Explicit 10-joint, 20-channel skeleton feature order for FenceNet/BiFenceNet inference.
+- Sliding-window FenceNet/BiFenceNet-style six-class footwork recognition.
+- Pattern analysis for action frequency, offensive/defensive ratio, JS/SF ratio, repeated patterns, and average confidence.
 - Athlete profile storage for longitudinal review.
-- LLM-generated coaching feedback as a research/product direction.
+- LLM coaching interface with deterministic analytical fallback. A real LLM backend is not loaded by default in this MVP.
+- CLI/config workflow and OpenCV dashboard rendering, including headless-safe UI tests.
+
+Still planned or research-facing:
+
+- Robust two-fencer tracking and left/right fencer assignment.
+- Distance, stance-width, and engagement heuristics for live form feedback.
+- Trained fencing model checkpoints. Without trained weights, action labels are useful for pipeline smoke tests but not coaching validity.
+- Real LLM model loading or API integration.
+- Real Ultralytics pose smoke testing in this environment. The current venv does not have `ultralytics` installed.
 
 Out of scope for this MVP:
 
@@ -49,14 +58,16 @@ The canonical workflow is:
 
 ```text
 Video input
-  -> pose estimation and two-fencer tracking
-  -> skeleton normalization and motion feature extraction
-  -> motion understanding
-     -> MVP path: heuristic distance and stance rules
-     -> research path: FenceNet/BiFenceNet six-class action recognition
+  -> pose estimation
+     -> current path: one selected fencer skeleton per frame
+     -> planned path: two-fencer tracking and left/right assignment
+  -> skeleton normalization into a 10-joint / 20-channel feature tensor
+  -> sliding-window FenceNet/BiFenceNet six-class action recognition
   -> pattern analysis and athlete profile update
   -> coaching feedback
-  -> OpenCV dashboard and/or processed video output
+     -> current path: analytical fallback from tracked stats
+     -> planned path: real LLM-generated coaching where appropriate
+  -> CLI summary and/or OpenCV dashboard
 ```
 
 The key product question is not "Can we classify fencing movement?" The stronger HCI question is "Can a fencer or coach change practice behavior because the system gives timely, understandable, trustworthy feedback?"
@@ -86,7 +97,13 @@ python app.py --interactive
 Process a video file:
 
 ```bash
-python app.py --video path/to/bout.mp4 --fencer-id athlete_001 --device auto
+python app.py --video path/to/bout.mp4 --fencer-id athlete_001 --device auto --pose-backend mock
+```
+
+Run the local ignored sample video if present:
+
+```bash
+python app.py --video video/fencing_match.mp4 --fencer-id athlete_001 --device cpu --pose-backend mock
 ```
 
 See [QUICKSTART.md](QUICKSTART.md) for the minimal command reference.
