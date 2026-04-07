@@ -201,7 +201,37 @@ Observed result in the current environment:
 - The action labels are not semantically meaningful until trained model weights are provided.
 - Real Ultralytics pose was not run because `ultralytics` is not installed in the current venv.
 
-## 12. Document Ownership
+## 12. Further Work
+
+Further work should be split into two tracks so the prototype can keep improving without overstating what the actual coaching system already does.
+
+### 12.1 Current Prototype
+
+These items improve the reliability, testability, and clarity of the current repo:
+
+- Install and smoke-test the real `ultralytics` backend on `video/fencing_match.mp4`, then document the exact model file and dependency version used.
+- Add or link a trained FenceNet/BiFenceNet checkpoint and document the expected checkpoint format.
+- Build a small labeled clip set so tests can check semantic action correctness, not only runtime shape and plumbing.
+- Add pose-quality handling for low-confidence, missing, or intermittent skeleton frames.
+- Add JSON report output for processed videos, including frame count, classification windows, action frequencies, confidence, and feedback.
+- Add a lightweight CI profile that runs all deterministic tests while skipping local ignored media files when absent.
+- Improve CLI output so users can tell whether they are running mock pose, real YOLO pose, random model weights, or trained model weights.
+- Add a short developer note explaining that `mock` pose validates the system pipeline but does not validate pose accuracy.
+
+### 12.2 Actual Coaching System
+
+These items move beyond the current prototype toward a useful deployed or study-ready system:
+
+- Implement robust two-fencer tracking, left/right assignment, and identity persistence across exchanges.
+- Add engagement-distance, stance-width, recovery, and timing feedback grounded in fencing coaching concepts.
+- Train or fine-tune action-recognition models on fencing-specific labeled data and evaluate them against held-out real bouts.
+- Add coach-facing review UI that links feedback to specific moments in the video rather than only giving aggregate summaries.
+- Add a real LLM backend or carefully designed prompt/API layer with coach-reviewed fallback templates and guardrails.
+- Study feedback trust and usefulness with beginner/intermediate fencers and at least one coach before making strong HCI claims.
+- Compare against realistic alternatives such as coach review, self-review video, and generic sports-analysis tools.
+- Decide the deployment target: local desktop research artifact, coaching-club tool, or broader product prototype.
+
+## 13. Document Ownership
 
 - Keep this file as the canonical workflow/spec.
 - Keep [README.md](README.md) as the entry point and navigation document.
