@@ -266,6 +266,15 @@ class TestTracking:
         assert len(analyzer.action_history) == 2
         assert analyzer.action_history[0] == "R"
         assert analyzer.action_history[1] == "JS"
+
+    def test_pattern_analyzer_rejects_invalid_confidence(self):
+        """Test PatternAnalyzer validates confidence values."""
+        from src.tracking import PatternAnalyzer
+
+        analyzer = PatternAnalyzer()
+
+        with pytest.raises(ValueError, match="confidence"):
+            analyzer.add_classification(0, 1.5)
     
     def test_pattern_analyzer_statistics(self):
         """Test pattern analyzer statistics."""
@@ -282,6 +291,20 @@ class TestTracking:
         
         assert freqs['R'] == 0.625  # 5/8
         assert freqs['SB'] == 0.375  # 3/8
+
+    def test_pattern_analyzer_transitions_are_plain_dicts(self):
+        """Test transition summaries are JSON-friendly plain dictionaries."""
+        from src.tracking import PatternAnalyzer
+
+        analyzer = PatternAnalyzer()
+        analyzer.add_classification(0, 0.9)
+        analyzer.add_classification(4, 0.9)
+        analyzer.add_classification(0, 0.9)
+
+        transitions = analyzer.get_action_transitions()
+
+        assert transitions == {"R": {"SF": 1}, "SF": {"R": 1}}
+        assert type(transitions["R"]) is dict
     
     def test_profile_manager_initialization(self):
         """Test ProfileManager initialization."""
@@ -293,6 +316,41 @@ class TestTracking:
             manager = ProfileManager(profiles_dir=tmpdir)
             assert manager is not None
             assert Path(tmpdir).exists()
+
+    def test_profile_manager_completed_result_is_not_loss(self):
+        """Test non-competitive completed bouts do not count as losses."""
+        from src.tracking import ProfileManager
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = ProfileManager(profiles_dir=tmpdir)
+            profile = manager.save_bout(
+                "athlete_001",
+                {"offensive_ratio": 0.5, "defensive_ratio": 0.25, "js_sf_ratio": 1.0},
+                result="completed"
+            )
+
+        stats = profile["overall_stats"]
+        assert stats["total_bouts"] == 1
+        assert stats["wins"] == 0
+        assert stats["losses"] == 0
+        assert stats["completed_bouts"] == 1
+
+    def test_profile_manager_counts_explicit_wins_and_losses(self):
+        """Test ProfileManager only counts explicit wins/losses as such."""
+        from src.tracking import ProfileManager
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manager = ProfileManager(profiles_dir=tmpdir)
+            manager.save_bout("athlete_001", {"offensive_ratio": 1.0}, result="win")
+            profile = manager.save_bout("athlete_001", {"offensive_ratio": 0.0}, result="loss")
+
+        stats = profile["overall_stats"]
+        assert stats["wins"] == 1
+        assert stats["losses"] == 1
+        assert stats["total_bouts"] == 2
+        assert stats["average_offensive_ratio"] == 0.5
 
 
 class TestLLMAgent:
@@ -446,6 +504,33 @@ class TestAppInterface:
 
         assert calls == [(56, 10, 2)]
         assert len(results["classifications"]) == 3
+
+    def test_system_pipeline_resets_pattern_history_per_video(self):
+        """Test Phase 4 statistics are per-video, not accumulated across videos."""
+        from src.app_interface import SystemPipeline
+        from src.preprocessing import SpatialNormalizer
+        import tempfile
+
+        pipeline = SystemPipeline(
+            device="cpu",
+            use_bifencenet=False,
+            profiles_dir=tempfile.mkdtemp(),
+            pose_backend="mock"
+        )
+        pipeline.pose_estimator.extract_video_skeleton = lambda _: [
+            {
+                **{joint: (float(idx), float(idx + 1)) for idx, joint in enumerate(SpatialNormalizer.MODEL_JOINT_NAMES)},
+                "front_ankle": (0.0, 100.0),
+            }
+            for _ in range(28)
+        ]
+        pipeline._run_inference = lambda *args, **kwargs: [(0, 0.9)]
+
+        first = pipeline.process_video("first.mp4", "athlete_001")
+        second = pipeline.process_video("second.mp4", "athlete_001")
+
+        assert first["statistics"]["total_actions"] == 1
+        assert second["statistics"]["total_actions"] == 1
     
     def test_fencing_coach_ui_initialization(self):
         """Test FencingCoachUI initialization."""
