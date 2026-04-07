@@ -16,6 +16,7 @@ Implemented and tested in the current code path:
 - Pattern analysis for action frequency, offensive/defensive ratio, JS/SF ratio, repeated patterns, and average confidence.
 - Athlete profile storage for longitudinal review.
 - LLM coaching interface with deterministic analytical fallback. A real LLM backend is not loaded by default in this MVP.
+- Optional JSON report output for processed videos, including classification windows, action statistics, runtime metadata, and feedback.
 - CLI/config workflow and OpenCV dashboard rendering, including headless-safe UI tests.
 
 Still planned or research-facing:
@@ -98,6 +99,12 @@ Process a video file:
 
 ```bash
 python app.py --video path/to/bout.mp4 --fencer-id athlete_001 --device auto --pose-backend mock
+```
+
+Write a JSON report:
+
+```bash
+python app.py --video path/to/bout.mp4 --fencer-id athlete_001 --pose-backend mock --report reports/bout_report.json
 ```
 
 Run the local ignored sample video if present:

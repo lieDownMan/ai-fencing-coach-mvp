@@ -2,6 +2,7 @@
 Tests for the AI Fencing Coach System
 """
 
+import json
 import pytest
 import numpy as np
 import torch
@@ -451,6 +452,106 @@ class TestAppInterface:
 
         assert config["model"]["type"] == "bifencenet"
         assert config["athlete"]["default_id"] == "athlete_cfg"
+
+    def test_write_json_report_contains_required_video_summary(self, tmp_path):
+        """Test JSON reports include frame count, windows, stats, and feedback."""
+        from app import write_json_report
+
+        results = {
+            "ok": True,
+            "video_path": "clip.mp4",
+            "fencer_id": "athlete_001",
+            "frames_processed": 42,
+            "window_size": 28,
+            "window_stride": 14,
+            "classifications": [(0, 0.9), (5, 0.25)],
+            "statistics": {
+                "total_actions": 2,
+                "action_frequencies": {"R": 0.5, "SB": 0.5},
+                "offensive_ratio": 0.5,
+                "defensive_ratio": 0.5,
+                "js_sf_ratio": 0.0,
+                "repetitive_patterns": [],
+                "average_confidence": 0.575,
+            },
+            "feedback": "Practice recovering after lunges.",
+        }
+
+        report_path = write_json_report(
+            results,
+            output_path=tmp_path / "report.json",
+            runtime_metadata={"pose_backend": "mock", "model_weights": "random"}
+        )
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+
+        assert report["frames_processed"] == 42
+        assert report["classification_window_count"] == 2
+        assert report["classification_windows"][0]["action"] == "R"
+        assert report["classification_windows"][1]["window_start_frame"] == 14
+        assert report["statistics"]["action_frequencies"]["SB"] == 0.5
+        assert report["statistics"]["average_confidence"] == 0.575
+        assert report["feedback"] == "Practice recovering after lunges."
+        assert report["runtime"]["pose_backend"] == "mock"
+
+    def test_main_writes_json_report_from_cli_flag(
+        self,
+        tmp_path,
+        monkeypatch,
+        capsys
+    ):
+        """Test CLI --report writes a processed-video report."""
+        import app as app_module
+
+        video_path = tmp_path / "clip.mp4"
+        video_path.write_bytes(b"not a real video; app is mocked")
+        report_path = tmp_path / "reports" / "clip_report.json"
+
+        class FakeApplication:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+            def process_video(self, **kwargs):
+                return {
+                    "ok": True,
+                    "video_path": kwargs["video_path"],
+                    "fencer_id": kwargs["fencer_id"],
+                    "frames_processed": 28,
+                    "window_size": 28,
+                    "window_stride": 14,
+                    "classifications": [(4, 0.8)],
+                    "statistics": {
+                        "total_actions": 1,
+                        "action_frequencies": {"SF": 1.0},
+                        "offensive_ratio": 0.0,
+                        "defensive_ratio": 0.0,
+                        "js_sf_ratio": 0.0,
+                        "repetitive_patterns": [],
+                        "average_confidence": 0.8,
+                    },
+                    "feedback": "mock feedback",
+                }
+
+            def get_runtime_metadata(self):
+                return {"pose_backend": "mock", "model_weights": "random"}
+
+        monkeypatch.setattr(app_module, "FencingCoachApplication", FakeApplication)
+
+        exit_code = app_module.main([
+            "--video",
+            str(video_path),
+            "--fencer-id",
+            "cli_fencer",
+            "--report",
+            str(report_path),
+        ])
+        output = capsys.readouterr().out
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+
+        assert exit_code == 0
+        assert "Report written:" in output
+        assert report["fencer_id"] == "cli_fencer"
+        assert report["classification_windows"][0]["action"] == "SF"
+        assert report["runtime"]["model_weights"] == "random"
 
     def test_main_missing_video_returns_nonzero_without_initializing_app(
         self,
