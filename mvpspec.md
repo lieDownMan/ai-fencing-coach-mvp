@@ -38,6 +38,7 @@ Implemented in the current debugged code path:
 - Visual debugging UI rendering and headless-safe UI tests.
 - Athlete profile storage for longitudinal analysis.
 - Metadata-aware FenceNet/BiFenceNet checkpoint loading with explicit status for checkpoint vs random model weights.
+- JSON report output for processed videos, including frame count, classification windows, action frequencies, confidence, runtime metadata, and feedback.
 
 Planned or research-facing:
 
@@ -187,6 +188,7 @@ Recent debug milestones:
 - Coaching uses the pipeline's actual pattern statistics and falls back cleanly when no LLM is loaded.
 - CLI/config handling and UI rendering are testable without opening windows.
 - Checkpoint loading now accepts common PyTorch state-dict formats, validates optional metadata, and reports when the app is still using random weights.
+- JSON report output can be written explicitly with `--report` or through `output.save_reports` and `output.reports_dir` in config.
 
 Current local sample-video smoke:
 
@@ -215,7 +217,6 @@ These items improve the reliability, testability, and clarity of the current rep
 - Add or link a trained FenceNet/BiFenceNet checkpoint using the documented checkpoint format.
 - Build a small labeled clip set so tests can check semantic action correctness, not only runtime shape and plumbing.
 - Add pose-quality handling for low-confidence, missing, or intermittent skeleton frames.
-- Add JSON report output for processed videos, including frame count, classification windows, action frequencies, confidence, and feedback.
 - Add a lightweight CI profile that runs all deterministic tests while skipping local ignored media files when absent.
 - Improve CLI output so users can tell whether they are running mock pose or real YOLO pose.
 - Add a short developer note explaining that `mock` pose validates the system pipeline but does not validate pose accuracy.
