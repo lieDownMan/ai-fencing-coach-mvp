@@ -145,14 +145,13 @@ class SystemPipeline:
             logger.info("Phase 2: Preprocessing skeleton...")
             self.spatial_normalizer.fit(skeletons)
             normalized_skeletons = self.spatial_normalizer.normalize_sequence(skeletons)
-            resampled_skeletons = self.temporal_sampler.sample(normalized_skeletons)
-            
-            # Convert to numpy array
             skeleton_array = self.spatial_normalizer.get_normalized_array(
-                resampled_skeletons,
+                normalized_skeletons,
                 joint_names=self.model_joint_names,
                 already_normalized=True
             )
+            if skeleton_array.shape[0] < self.temporal_sampler.target_length:
+                skeleton_array = self.temporal_sampler.sample_array(skeleton_array)
             
             # Phase 3: Model Inference
             logger.info("Phase 3: Running FenceNet inference...")
