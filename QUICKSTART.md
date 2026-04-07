@@ -81,7 +81,9 @@ python web_app.py
 
 Open `http://127.0.0.1:7860`, keep `ultralytics` selected for real CV boxes, and click **Process Video**. The browser demo writes generated MP4s/reports under `web_outputs/`.
 
-If the app runs on a remote machine, start it on the remote machine and use SSH port forwarding or your normal development tunnel to view port `7860` locally.
+If port `7860` is already in use, run `python web_app.py --port 7861` and open `http://127.0.0.1:7861` instead.
+
+`Annotated max width` only downscales the exported annotated MP4 for browser playback. It does not change pose detection, tracking, or inference.
 
 If `output.save_reports: true` is enabled in `config.yaml`, the CLI writes an auto-named report under `output.reports_dir` unless `--no-report` is passed.
 

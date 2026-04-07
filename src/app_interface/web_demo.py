@@ -344,12 +344,13 @@ def render_home_page(
           <label>Right height cm
             <input name=\"right_height_cm\" type=\"number\" step=\"0.1\" value=\"{_value(defaults.right_height_cm)}\">
           </label>
-          <label>Annotated max width
+          <label>Annotated max width (px)
             <input name=\"annotated_max_width\" type=\"number\" step=\"1\" value=\"{_value(defaults.annotated_max_width)}\">
           </label>
         </div>
         <button type=\"submit\">Process Video</button>
         <p class=\"note\">Tip: use <code>ultralytics</code> for real CV boxes. <code>mock</code> is deterministic and will not follow real fencers.</p>
+        <p class=\"note\"><strong>Annotated max width</strong> downscales the exported MP4 for smoother browser playback. It does not change pose detection, tracking, or inference.</p>
       </form>
     </section>
 

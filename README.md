@@ -136,6 +136,14 @@ python web_app.py
 
 Open `http://127.0.0.1:7860`, choose the sample video or another server-side video path, set left/right heights, and click **Process Video**. Use `ultralytics` for real CV boxes; `mock` is only for deterministic pipeline checks.
 
+If port `7860` is already in use, start the demo on another port:
+
+```bash
+python web_app.py --port 7861
+```
+
+`Annotated max width` is the maximum width, in pixels, of the exported annotated MP4. For example, `1280` downscales a `1908x920` output to about `1280x616` for smoother browser playback. It does not change pose detection, tracking, or model inference.
+
 See [QUICKSTART.md](QUICKSTART.md) for the minimal command reference.
 
 ## Project Structure
