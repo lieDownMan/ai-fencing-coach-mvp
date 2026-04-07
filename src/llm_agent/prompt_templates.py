@@ -71,12 +71,21 @@ Format your response with clear sections for strengths, improvements, and next s
         Returns:
             Formatted prompt for LLM
         """
+        top_actions = ", ".join(
+            f"{action}: {frequency:.0%}"
+            for action, frequency in sorted(
+                action_frequencies.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )[:3]
+        )
+
         context = f"""Current Bout Status:
 - Score: Your {current_score.get('player', 0)} - Opponent {current_score.get('opponent', 0)}
 - Recent Actions: {', '.join(recent_actions[-5:])}
 - Offensive Ratio: {offensive_ratio:.1%}
 - Defensive Ratio: {defensive_ratio:.1%}
-- Top Actions: {sorted(action_frequencies.items(), key=lambda x: x[1], reverse=True)[:3]}
+- Top Actions: {top_actions}
 """
         
         if patterns:

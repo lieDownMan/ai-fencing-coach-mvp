@@ -51,11 +51,13 @@ class SystemPipeline:
         # Phase 2: Preprocessing
         self.spatial_normalizer = SpatialNormalizer()
         self.temporal_sampler = TemporalSampler(target_length=28)
+        self.model_joint_names = list(SpatialNormalizer.MODEL_JOINT_NAMES)
+        self.model_input_channels = len(self.model_joint_names) * 2
         
         # Phase 3: FenceNet Model
         if use_bifencenet:
             self.model = BiFenceNet(
-                input_channels=20,  # 10 joints * 2 coordinates
+                input_channels=self.model_input_channels,
                 hidden_channels=64,
                 num_tcn_blocks=6,
                 device=device
@@ -63,7 +65,7 @@ class SystemPipeline:
             logger.info("Using BiFenceNet model")
         else:
             self.model = FenceNet(
-                input_channels=20,
+                input_channels=self.model_input_channels,
                 hidden_channels=64,
                 num_tcn_blocks=6,
                 device=device
@@ -140,7 +142,9 @@ class SystemPipeline:
             
             # Convert to numpy array
             skeleton_array = self.spatial_normalizer.get_normalized_array(
-                normalized_skeletons
+                resampled_skeletons,
+                joint_names=self.model_joint_names,
+                already_normalized=True
             )
             
             # Phase 3: Model Inference
@@ -182,6 +186,12 @@ class SystemPipeline:
         """
         classifications = []
         num_frames = skeleton_array.shape[0]
+        actual_channels = skeleton_array.shape[1] * skeleton_array.shape[2]
+        if actual_channels != self.model_input_channels:
+            raise ValueError(
+                "Skeleton array channel mismatch: "
+                f"expected {self.model_input_channels}, got {actual_channels}"
+            )
         
         # Sliding window inference
         window_size = 28  # Match temporal sampler
