@@ -8,6 +8,8 @@ import numpy as np
 from typing import Dict, List, Tuple, Optional, Any
 import logging
 
+from ..tracking import FencerTracker
+
 logger = logging.getLogger(__name__)
 
 
@@ -74,6 +76,7 @@ class PoseEstimator:
         self.requested_backend = backend
         self.backend = backend
         self.model = self._load_model()
+        self.fencer_tracker = FencerTracker()
         
     def _load_model(self):
         """Load pose estimation model if a real backend is available."""
@@ -110,25 +113,25 @@ class PoseEstimator:
         """Return whether this estimator can produce skeletons."""
         return self.backend in {"ultralytics", "mock"}
     
-    def extract_frame_skeleton(
-        self,
-        frame: np.ndarray
-    ) -> Optional[Dict[str, Tuple[float, float]]]:
-        """
-        Extract skeleton keypoints from a single frame.
-        
-        Args:
-            frame: Input video frame (BGR format)
-            
-        Returns:
-            Dictionary mapping joint names to (x, y) coordinates, or None if no
-            usable person is detected
-        """
+    def _validate_frame(self, frame: np.ndarray):
+        """Validate a frame before pose extraction."""
         if frame is None or not isinstance(frame, np.ndarray) or frame.size == 0:
             raise ValueError("Frame must be a non-empty numpy array")
 
+    def extract_frame_fencers(
+        self,
+        frame: np.ndarray
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract up to all valid fencer candidates from a single frame.
+
+        Returns detections sorted by size, largest first. A downstream tracker
+        can then select the two largest and assign left/right labels.
+        """
+        self._validate_frame(frame)
+
         if self.backend == "mock":
-            return self._mock_skeleton(frame)
+            return self._mock_fencer_detections(frame)
 
         if self.backend != "ultralytics" or self.model is None:
             raise RuntimeError(
@@ -138,53 +141,86 @@ class PoseEstimator:
 
         results = self.model(frame, verbose=False)
         if not results:
-            return None
+            return []
 
-        return self._extract_from_ultralytics_result(results[0])
-    
-    def extract_video_skeleton(self, video_path: str) -> List[Dict[str, Tuple[float, float]]]:
+        return self._extract_fencer_detections_from_ultralytics_result(results[0])
+
+    def extract_frame_skeleton(
+        self,
+        frame: np.ndarray
+    ) -> Optional[Dict[str, Tuple[float, float]]]:
         """
-        Extract skeleton keypoints for all frames in a video.
-        
-        Args:
-            video_path: Path to input video file
-            
-        Returns:
-            List of skeleton dictionaries, one per frame
+        Extract one selected skeleton from a single frame.
+
+        The selected skeleton is the largest valid pose candidate, preserving the
+        original single-fencer inference path while two-fencer tracking records
+        additional candidates separately.
+        """
+        detections = self.extract_frame_fencers(frame)
+        if not detections:
+            return None
+        return detections[0]["skeleton"]
+
+    def extract_video_fencer_tracks(self, video_path: str) -> Dict[str, Any]:
+        """
+        Extract primary skeletons and side-based two-fencer tracks for a video.
+
+        Returns a payload with `skeletons` for the existing classifier path and
+        `frames`/`summary` for visualization and reporting.
         """
         skeletons = []
-        
+        tracking_frames = []
+
         cap = None
         try:
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
                 raise ValueError(f"Cannot open video: {video_path}")
-            
+
             frame_count = 0
             while True:
                 ret, frame = cap.read()
                 if not ret:
                     break
-                
-                skeleton = self.extract_frame_skeleton(frame)
-                if skeleton is not None and self.validate_skeleton(skeleton):
-                    skeletons.append(skeleton)
+
+                detections = self.extract_frame_fencers(frame)
+                if detections:
+                    skeleton = detections[0]["skeleton"]
+                    if self.validate_skeleton(skeleton):
+                        skeletons.append(skeleton)
+                tracking_frames.append(
+                    self.fencer_tracker.build_frame(frame_count, detections)
+                )
                 frame_count += 1
-                
+
                 if frame_count % 100 == 0:
                     logger.info(f"Processed {frame_count} frames from {video_path}")
-            
+
             logger.info(f"Video processing complete: {frame_count} frames extracted")
-            
+
         except Exception as e:
             logger.error(f"Error extracting skeleton from video: {e}")
             raise
         finally:
             if cap is not None:
                 cap.release()
-        
-        return skeletons
-    
+
+        payload = self.fencer_tracker.build_payload(tracking_frames)
+        payload["skeletons"] = skeletons
+        return payload
+
+    def extract_video_skeleton(self, video_path: str) -> List[Dict[str, Tuple[float, float]]]:
+        """
+        Extract skeleton keypoints for all frames in a video.
+
+        Args:
+            video_path: Path to input video file
+
+        Returns:
+            List of skeleton dictionaries, one per valid frame
+        """
+        return self.extract_video_fencer_tracks(video_path)["skeletons"]
+
     def validate_skeleton(self, skeleton: Dict[str, Tuple[float, float]]) -> bool:
         """
         Validate that all required joints are present in skeleton.
@@ -214,13 +250,23 @@ class PoseEstimator:
         result: Any
     ) -> Optional[Dict[str, Tuple[float, float]]]:
         """Extract one fencing skeleton from an Ultralytics result."""
+        detections = self._extract_fencer_detections_from_ultralytics_result(result)
+        if not detections:
+            return None
+        return detections[0]["skeleton"]
+
+    def _extract_fencer_detections_from_ultralytics_result(
+        self,
+        result: Any
+    ) -> List[Dict[str, Any]]:
+        """Extract valid fencer candidates from an Ultralytics result."""
         keypoints_obj = getattr(result, "keypoints", None)
         if keypoints_obj is None or getattr(keypoints_obj, "xy", None) is None:
-            return None
+            return []
 
         keypoints = self._to_numpy(keypoints_obj.xy)
         if keypoints.size == 0:
-            return None
+            return []
         if keypoints.ndim == 2:
             keypoints = np.expand_dims(keypoints, axis=0)
 
@@ -230,29 +276,109 @@ class PoseEstimator:
             if confidences.ndim == 1:
                 confidences = np.expand_dims(confidences, axis=0)
 
-        person_idx = self._select_person_index(result, keypoints.shape[0])
-        person_confidences = confidences[person_idx] if confidences is not None else None
+        boxes = self._extract_boxes(result, keypoints.shape[0])
+        box_confidences = self._extract_box_confidences(result, keypoints.shape[0])
+        detections = []
 
-        return self._build_skeleton_from_keypoints(
-            keypoints=keypoints[person_idx],
-            confidences=person_confidences
-        )
+        for person_idx in range(keypoints.shape[0]):
+            person_confidences = (
+                confidences[person_idx] if confidences is not None else None
+            )
+            skeleton = self._build_skeleton_from_keypoints(
+                keypoints=keypoints[person_idx],
+                confidences=person_confidences
+            )
+            if skeleton is None:
+                continue
 
-    def _select_person_index(self, result: Any, num_people: int) -> int:
-        """Select the largest detected person when boxes are available."""
+            confidence = self._detection_confidence(
+                person_confidences,
+                box_confidences[person_idx] if box_confidences is not None else None
+            )
+            candidate = self.fencer_tracker.candidate_from_skeleton(
+                skeleton=skeleton,
+                confidence=confidence,
+                source_rank=person_idx
+            )
+            if boxes is not None:
+                bbox = [float(value) for value in boxes[person_idx][:4]]
+                candidate["bbox"] = bbox
+                candidate["center"] = [
+                    float((bbox[0] + bbox[2]) / 2.0),
+                    float((bbox[1] + bbox[3]) / 2.0),
+                ]
+                candidate["area"] = self._bbox_area(bbox)
+            detections.append(candidate)
+
+        detections.sort(key=lambda detection: detection.get("area", 0.0), reverse=True)
+        for source_rank, detection in enumerate(detections):
+            detection["source_rank"] = source_rank
+        return detections
+
+    def _extract_boxes(
+        self,
+        result: Any,
+        num_people: int
+    ) -> Optional[np.ndarray]:
+        """Return Ultralytics boxes as an (N, 4) array when available."""
         boxes = getattr(result, "boxes", None)
         xyxy = getattr(boxes, "xyxy", None) if boxes is not None else None
         if xyxy is None:
-            return 0
+            return None
 
         boxes_array = self._to_numpy(xyxy)
-        if boxes_array.ndim != 2 or boxes_array.shape[0] != num_people:
-            return 0
+        if (
+            boxes_array.ndim != 2
+            or boxes_array.shape[0] != num_people
+            or boxes_array.shape[1] < 4
+        ):
+            return None
+        return boxes_array[:, :4]
 
-        widths = np.maximum(0.0, boxes_array[:, 2] - boxes_array[:, 0])
-        heights = np.maximum(0.0, boxes_array[:, 3] - boxes_array[:, 1])
-        areas = widths * heights
-        return int(np.argmax(areas))
+    def _extract_box_confidences(
+        self,
+        result: Any,
+        num_people: int
+    ) -> Optional[np.ndarray]:
+        """Return Ultralytics detection confidences when available."""
+        boxes = getattr(result, "boxes", None)
+        confidence_values = getattr(boxes, "conf", None) if boxes is not None else None
+        if confidence_values is None:
+            return None
+
+        confidences = self._to_numpy(confidence_values)
+        if confidences.ndim != 1 or confidences.shape[0] != num_people:
+            return None
+        return confidences
+
+    def _detection_confidence(
+        self,
+        keypoint_confidences: Optional[np.ndarray],
+        box_confidence: Optional[float]
+    ) -> float:
+        """Return one confidence score for a fencer candidate."""
+        if box_confidence is not None and np.isfinite(box_confidence):
+            return float(box_confidence)
+        if keypoint_confidences is None:
+            return 1.0
+
+        required_indices = [
+            keypoint_idx
+            for keypoint_idx in self.REQUIRED_JOINTS.values()
+            if keypoint_idx < keypoint_confidences.shape[0]
+        ]
+        values = keypoint_confidences[required_indices]
+        finite_values = values[np.isfinite(values)]
+        if finite_values.size == 0:
+            return 0.0
+        return float(np.mean(finite_values))
+
+    @staticmethod
+    def _bbox_area(bbox: List[float]) -> float:
+        """Return bbox area in pixels."""
+        width = max(0.0, float(bbox[2]) - float(bbox[0]))
+        height = max(0.0, float(bbox[3]) - float(bbox[1]))
+        return float(width * height)
 
     def _build_skeleton_from_keypoints(
         self,
@@ -280,10 +406,33 @@ class PoseEstimator:
 
         return skeleton if self.validate_skeleton(skeleton) else None
 
-    def _mock_skeleton(self, frame: np.ndarray) -> Dict[str, Tuple[float, float]]:
+    def _mock_fencer_detections(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+        """Generate two deterministic fencer candidates for tests and demos."""
+        height, width = frame.shape[:2]
+        left_skeleton = self._mock_skeleton(frame, center_x=width * 0.36)
+        right_skeleton = self._mock_skeleton(frame, center_x=width * 0.64)
+        return [
+            self.fencer_tracker.candidate_from_skeleton(
+                left_skeleton,
+                confidence=1.0,
+                source_rank=0
+            ),
+            self.fencer_tracker.candidate_from_skeleton(
+                right_skeleton,
+                confidence=1.0,
+                source_rank=1
+            ),
+        ]
+
+    def _mock_skeleton(
+        self,
+        frame: np.ndarray,
+        center_x: Optional[float] = None
+    ) -> Dict[str, Tuple[float, float]]:
         """Generate a deterministic skeleton for tests and local pipeline smoke checks."""
         height, width = frame.shape[:2]
-        center_x = width * 0.5
+        if center_x is None:
+            center_x = width * 0.5
         head_y = height * 0.2
         shoulder_y = height * 0.35
         hip_y = height * 0.55
