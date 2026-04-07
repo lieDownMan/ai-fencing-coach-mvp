@@ -194,6 +194,17 @@ class TestModels:
         
         assert output.shape[0] == 2  # batch size
         assert output.shape[1] == 64  # output channels
+
+    def test_tcn_block_preserves_time_length(self):
+        """Test TCNBlock keeps sequence length stable across dilations."""
+        from src.models import TCNBlock
+
+        for dilation in (1, 2, 4):
+            tcn = TCNBlock(in_channels=20, out_channels=20, dilation=dilation)
+            x = torch.randn(2, 20, 28)
+            output = tcn(x)
+
+            assert output.shape == x.shape
     
     def test_fencenet_initialization(self):
         """Test FenceNet initialization."""
@@ -221,6 +232,16 @@ class TestModels:
         model = BiFenceNet(input_channels=20, hidden_channels=64)
         assert model is not None
         assert isinstance(model, torch.nn.Module)
+
+    def test_bifencenet_forward(self):
+        """Test BiFenceNet forward pass."""
+        from src.models import BiFenceNet
+
+        model = BiFenceNet(input_channels=20, hidden_channels=64)
+        x = torch.randn(2, 20, 28)
+        logits = model(x)
+
+        assert logits.shape == (2, 6)
 
 
 class TestTracking:
@@ -325,6 +346,68 @@ class TestAppInterface:
 
         with pytest.raises(ValueError, match="channel mismatch"):
             pipeline._run_inference(skeleton_array)
+
+    def test_system_pipeline_inference_batches_windows(self):
+        """Test Phase 3 batch inference returns one classification per sliding window."""
+        from src.app_interface import SystemPipeline
+        import tempfile
+
+        pipeline = SystemPipeline(
+            device="cpu",
+            use_bifencenet=False,
+            profiles_dir=tempfile.mkdtemp(),
+            pose_backend="mock"
+        )
+        skeleton_array = np.zeros((56, 10, 2), dtype=np.float32)
+
+        classifications = pipeline._run_inference(
+            skeleton_array,
+            batch_process=True,
+            batch_size=2
+        )
+
+        assert len(classifications) == 3
+        assert all(0 <= class_idx < 6 for class_idx, _ in classifications)
+        assert all(0.0 <= confidence <= 1.0 for _, confidence in classifications)
+
+    def test_system_pipeline_inference_rejects_non_finite_values(self):
+        """Test Phase 3 rejects NaN/inf model inputs."""
+        from src.app_interface import SystemPipeline
+        import tempfile
+
+        pipeline = SystemPipeline(
+            device="cpu",
+            use_bifencenet=False,
+            profiles_dir=tempfile.mkdtemp(),
+            pose_backend="mock"
+        )
+        skeleton_array = np.zeros((28, 10, 2), dtype=np.float32)
+        skeleton_array[0, 0, 0] = np.nan
+
+        with pytest.raises(ValueError, match="non-finite"):
+            pipeline._run_inference(skeleton_array)
+
+    def test_system_pipeline_loads_state_dict_checkpoint(self):
+        """Test Phase 3 accepts common checkpoint dictionaries."""
+        from src.app_interface import SystemPipeline
+        from src.models import FenceNet
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            checkpoint_path = Path(tmpdir) / "model.pt"
+            model = FenceNet(input_channels=20, hidden_channels=64)
+            torch.save({"state_dict": model.state_dict()}, checkpoint_path)
+
+            pipeline = SystemPipeline(
+                device="cpu",
+                use_bifencenet=False,
+                model_checkpoint=str(checkpoint_path),
+                profiles_dir=str(Path(tmpdir) / "profiles"),
+                pose_backend="mock"
+            )
+
+        assert pipeline.model.training is False
 
     def test_system_pipeline_preserves_long_sequences_for_sliding_windows(self):
         """Test Phase 2 keeps long videos long enough for sliding-window inference."""
