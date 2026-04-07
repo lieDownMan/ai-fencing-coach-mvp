@@ -23,6 +23,9 @@ class SystemPipeline:
     Main orchestrator for the fencing coaching system.
     Manages all pipeline stages from video input to coaching output.
     """
+
+    INFERENCE_WINDOW_SIZE = 28
+    INFERENCE_STRIDE = 14
     
     def __init__(
         self,
@@ -48,6 +51,12 @@ class SystemPipeline:
         """
         self.device = device
         self.use_bifencenet = use_bifencenet
+        self.model_checkpoint_path = (
+            str(Path(model_checkpoint).expanduser())
+            if model_checkpoint
+            else None
+        )
+        self.model_checkpoint_loaded = False
         
         logger.info(f"Initializing System Pipeline on device: {device}")
         
@@ -82,20 +91,21 @@ class SystemPipeline:
             logger.info("Using FenceNet model")
         
         # Load checkpoint if provided
-        if model_checkpoint and Path(model_checkpoint).exists():
+        if self.model_checkpoint_path and Path(self.model_checkpoint_path).exists():
             try:
-                checkpoint = torch.load(model_checkpoint, map_location=device)
+                checkpoint = torch.load(self.model_checkpoint_path, map_location=device)
                 state_dict = (
                     checkpoint["state_dict"]
                     if isinstance(checkpoint, dict) and "state_dict" in checkpoint
                     else checkpoint
                 )
                 self.model.load_state_dict(state_dict)
-                logger.info(f"Loaded model checkpoint: {model_checkpoint}")
+                self.model_checkpoint_loaded = True
+                logger.info(f"Loaded model checkpoint: {self.model_checkpoint_path}")
             except Exception as e:
                 logger.warning(f"Could not load checkpoint: {e}")
-        elif model_checkpoint:
-            logger.warning(f"Model checkpoint not found: {model_checkpoint}")
+        elif self.model_checkpoint_path:
+            logger.warning(f"Model checkpoint not found: {self.model_checkpoint_path}")
         
         self.model.eval()
         
@@ -142,7 +152,9 @@ class SystemPipeline:
             "fencer_id": fencer_id,
             "frames_processed": 0,
             "classifications": [],
-            "statistics": {}
+            "statistics": {},
+            "window_size": self.INFERENCE_WINDOW_SIZE,
+            "window_stride": self.INFERENCE_STRIDE,
         }
         
         try:
@@ -219,8 +231,8 @@ class SystemPipeline:
             )
         
         # Sliding window inference
-        window_size = 28  # Match temporal sampler
-        stride = 14  # 50% overlap
+        window_size = self.INFERENCE_WINDOW_SIZE
+        stride = self.INFERENCE_STRIDE
 
         windows = [
             skeleton_array[start_idx:start_idx + window_size]
@@ -281,6 +293,26 @@ class SystemPipeline:
             raise ValueError("skeleton_array must contain at least one joint")
         if not np.all(np.isfinite(skeleton_array)):
             raise ValueError("skeleton_array contains non-finite values")
+
+    def get_runtime_metadata(self) -> Dict[str, Any]:
+        """Return JSON-friendly metadata about the active pipeline backends."""
+        pose_model = self.pose_estimator.model_path
+        if pose_model is None and self.pose_estimator.backend == "ultralytics":
+            pose_model = self.pose_estimator.DEFAULT_MODEL_PATH
+
+        return {
+            "device": self.device,
+            "model_type": "bifencenet" if self.use_bifencenet else "fencenet",
+            "model_input_channels": self.model_input_channels,
+            "model_checkpoint": self.model_checkpoint_path,
+            "model_checkpoint_loaded": self.model_checkpoint_loaded,
+            "model_weights": (
+                "checkpoint" if self.model_checkpoint_loaded else "random"
+            ),
+            "pose_backend": self.pose_estimator.backend,
+            "pose_requested_backend": self.pose_estimator.requested_backend,
+            "pose_model": pose_model,
+        }
     
     def get_immediate_feedback(self) -> str:
         """Get immediate feedback during bout."""
