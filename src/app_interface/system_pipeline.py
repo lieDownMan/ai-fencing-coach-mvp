@@ -280,21 +280,28 @@ class SystemPipeline:
         """Get immediate feedback during bout."""
         if not self.current_fencer_id:
             return "Set fencer ID first"
+
+        stats = self.pattern_analyzer.get_statistics_summary()
         
         return self.coach_engine.generate_immediate_feedback(
             fencer_id=self.current_fencer_id,
-            current_score=self.current_score
+            current_score=self.current_score,
+            stats=stats,
+            recent_actions=list(self.pattern_analyzer.action_history)
         )
     
     def get_break_strategy(self) -> str:
         """Get strategy advice during break."""
         if not self.current_fencer_id:
             return "Set fencer ID first"
+
+        stats = self.pattern_analyzer.get_statistics_summary()
         
         return self.coach_engine.generate_break_strategy(
             fencer_id=self.current_fencer_id,
             opponent_id=self.current_opponent_id,
-            current_score=self.current_score
+            current_score=self.current_score,
+            fencer_stats=stats
         )
     
     def get_conclusive_feedback(self, bout_result: str) -> str:
@@ -351,5 +358,6 @@ class SystemPipeline:
     def reset_bout(self):
         """Reset for new bout."""
         self.pattern_analyzer.clear_history()
+        self.current_bout_stats = {}
         self.current_score = {"player": 0, "opponent": 0}
         logger.info("Bout reset")

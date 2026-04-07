@@ -371,6 +371,35 @@ class TestLLMAgent:
         assert isinstance(prompt, str)
         assert len(prompt) > 0
         assert 'R: 30%' in prompt or 'R: 0.3' in prompt
+
+    def test_prompt_templates_conclusive_uses_average_confidence(self):
+        """Test conclusive prompt uses PatternAnalyzer's confidence field."""
+        from src.llm_agent import PromptTemplates
+
+        prompt = PromptTemplates.get_conclusive_feedback_prompt(
+            bout_stats={
+                "defensive_ratio": 0.25,
+                "offensive_ratio": 0.75,
+                "js_sf_ratio": 1.0,
+                "average_confidence": 0.75,
+            },
+            historical_progression={},
+            bout_result="completed"
+        )
+
+        assert "Average Action Confidence: 75.0%" in prompt
+
+    def test_model_loader_reports_unimplemented_backend(self):
+        """Test ModelLoader does not pretend the placeholder LLM is loaded."""
+        from src.llm_agent import ModelLoader
+
+        loader = ModelLoader()
+
+        assert loader.load_model() is False
+        assert not loader.is_loaded()
+        assert loader.get_model_info()["load_attempted"] is True
+        with pytest.raises(RuntimeError, match="Model not loaded"):
+            loader.generate("Give fencing feedback")
     
     def test_coach_engine_initialization(self):
         """Test CoachEngine initialization."""
@@ -380,6 +409,28 @@ class TestLLMAgent:
         assert engine is not None
         assert hasattr(engine, 'generate_immediate_feedback')
         assert hasattr(engine, 'generate_break_strategy')
+
+    def test_coach_engine_immediate_feedback_uses_passed_stats(self, tmp_path):
+        """Test immediate feedback can use active pipeline stats as fallback input."""
+        from src.llm_agent import CoachEngine
+
+        engine = CoachEngine(profiles_dir=str(tmp_path))
+        stats = {
+            "action_frequencies": {"R": 0.75, "SB": 0.25},
+            "offensive_ratio": 0.75,
+            "defensive_ratio": 0.25,
+            "repetitive_patterns": [],
+        }
+
+        feedback = engine.generate_immediate_feedback(
+            fencer_id="athlete_001",
+            current_score={"player": 3, "opponent": 2},
+            stats=stats,
+            recent_actions=["R", "R", "SB", "R"]
+        )
+
+        assert "R: 75%" in feedback
+        assert "Maintain aggressive momentum" in feedback
 
 
 class TestAppInterface:
@@ -394,6 +445,25 @@ class TestAppInterface:
         assert pipeline.device == "cpu"
         assert pipeline.model_input_channels == 20
         assert hasattr(pipeline, 'process_video')
+
+    def test_system_pipeline_immediate_feedback_uses_pipeline_stats(self, tmp_path):
+        """Test Phase 5 feedback is based on the pipeline's real analyzer state."""
+        from src.app_interface import SystemPipeline
+
+        pipeline = SystemPipeline(
+            device="cpu",
+            use_bifencenet=False,
+            profiles_dir=str(tmp_path),
+            pose_backend="mock"
+        )
+        pipeline.set_fencer("athlete_001")
+        for class_idx in (0, 0, 0, 5):
+            pipeline.pattern_analyzer.add_classification(class_idx, 0.9)
+
+        feedback = pipeline.get_immediate_feedback()
+
+        assert "R: 75%" in feedback
+        assert "Maintain aggressive momentum" in feedback
 
     def test_system_pipeline_rejects_channel_mismatch(self):
         """Test that Phase 3 fails fast when Phase 2 emits the wrong channel count."""

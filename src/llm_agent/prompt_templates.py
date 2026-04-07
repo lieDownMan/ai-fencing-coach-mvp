@@ -150,6 +150,10 @@ Provide tactical adjustments for the next minute of bout."""
         Returns:
             Formatted prompt for LLM
         """
+        average_confidence = bout_stats.get(
+            "average_confidence",
+            bout_stats.get("avg_confidence", 0)
+        )
         context = f"""Post-Bout Performance Analysis:
 
 Bout Result: {bout_result.upper()}
@@ -158,7 +162,7 @@ This Bout Metrics:
 - Defensive Ratio: {bout_stats.get('defensive_ratio', 0):.1%}
 - Offensive Ratio: {bout_stats.get('offensive_ratio', 0):.1%}
 - JS/SF Ratio: {bout_stats.get('js_sf_ratio', 0):.2f}
-- Average Action Confidence: {bout_stats.get('avg_confidence', 0):.1%}
+- Average Action Confidence: {average_confidence:.1%}
 
 Historical Comparison:
 - Previous Average Offensive Ratio: {historical_progression.get('avg_offensive', 0):.1%}
