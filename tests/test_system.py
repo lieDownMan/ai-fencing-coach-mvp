@@ -853,6 +853,78 @@ class TestAppInterface:
             )
 
         assert pipeline.model.training is False
+        assert pipeline.model_checkpoint_loaded is True
+        assert pipeline.get_model_status()["model_weights"] == "checkpoint"
+
+    def test_system_pipeline_loads_metadata_checkpoint(self):
+        """Test Phase 3 accepts documented checkpoint metadata."""
+        from src.app_interface import SystemPipeline
+        from src.models import FenceNet
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            checkpoint_path = Path(tmpdir) / "model.pt"
+            model = FenceNet(input_channels=20, hidden_channels=64)
+            torch.save(
+                {
+                    "format_version": 1,
+                    "model_type": "fencenet",
+                    "input_channels": 20,
+                    "num_classes": 6,
+                    "action_classes": model.get_class_names(),
+                    "state_dict": model.state_dict(),
+                },
+                checkpoint_path
+            )
+
+            pipeline = SystemPipeline(
+                device="cpu",
+                use_bifencenet=False,
+                model_checkpoint=str(checkpoint_path),
+                profiles_dir=str(Path(tmpdir) / "profiles"),
+                pose_backend="mock"
+            )
+
+        assert pipeline.model_checkpoint_loaded is True
+        assert pipeline.model_checkpoint_error is None
+        assert pipeline.model_checkpoint_metadata["model_type"] == "fencenet"
+
+    def test_system_pipeline_rejects_mismatched_checkpoint_metadata(self):
+        """Test mismatched checkpoint metadata is reported and not loaded."""
+        from src.app_interface import SystemPipeline
+        from src.models import FenceNet
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            checkpoint_path = Path(tmpdir) / "model.pt"
+            model = FenceNet(input_channels=20, hidden_channels=64)
+            torch.save(
+                {
+                    "metadata": {
+                        "format_version": 1,
+                        "model_type": "bifencenet",
+                        "input_channels": 20,
+                        "num_classes": 6,
+                        "action_classes": model.get_class_names(),
+                    },
+                    "state_dict": model.state_dict(),
+                },
+                checkpoint_path
+            )
+
+            pipeline = SystemPipeline(
+                device="cpu",
+                use_bifencenet=False,
+                model_checkpoint=str(checkpoint_path),
+                profiles_dir=str(Path(tmpdir) / "profiles"),
+                pose_backend="mock"
+            )
+
+        assert pipeline.model_checkpoint_loaded is False
+        assert "model_type mismatch" in pipeline.model_checkpoint_error
+        assert pipeline.get_model_status()["model_weights"] == "random"
 
     def test_system_pipeline_preserves_long_sequences_for_sliding_windows(self):
         """Test Phase 2 keeps long videos long enough for sliding-window inference."""

@@ -16,6 +16,7 @@ Implemented and tested in the current code path:
 - Pattern analysis for action frequency, offensive/defensive ratio, JS/SF ratio, repeated patterns, and average confidence.
 - Athlete profile storage for longitudinal review.
 - LLM coaching interface with deterministic analytical fallback. A real LLM backend is not loaded by default in this MVP.
+- Metadata-aware FenceNet/BiFenceNet checkpoint loading with CLI status for checkpoint vs random weights.
 - Optional JSON report output for processed videos, including classification windows, action statistics, runtime metadata, and feedback.
 - CLI/config workflow and OpenCV dashboard rendering, including headless-safe UI tests.
 
@@ -23,7 +24,7 @@ Still planned or research-facing:
 
 - Robust two-fencer tracking and left/right fencer assignment.
 - Distance, stance-width, and engagement heuristics for live form feedback.
-- Trained fencing model checkpoints. Without trained weights, action labels are useful for pipeline smoke tests but not coaching validity.
+- Trained fencing model checkpoints. The loader and expected format are documented, but trained weights are not included yet.
 - Real LLM model loading or API integration.
 - Real Ultralytics pose smoke testing in this environment. The current venv does not have `ultralytics` installed.
 
@@ -43,6 +44,7 @@ Use these documents as the current source of truth:
 | --- | --- |
 | [mvpspec.md](mvpspec.md) | Canonical workflow, scope, and research positioning spec. Start here for design decisions. |
 | [QUICKSTART.md](QUICKSTART.md) | Minimal setup and run commands. |
+| [CHECKPOINTS.md](CHECKPOINTS.md) | Expected FenceNet/BiFenceNet checkpoint format and loading behavior. |
 | [README_zh.md](README_zh.md) | Short Chinese summary and doc navigation. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development and contribution conventions. |
 
