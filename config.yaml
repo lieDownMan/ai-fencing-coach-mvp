@@ -1,0 +1,196 @@
+# AI Fencing Coach System Configuration
+
+# Model Configuration
+model:
+  # FenceNet architecture options: "fencenet" or "bifencenet"
+  type: "fencenet"
+  
+  # Input channels: 10 joints * 2 coordinates = 20
+  input_channels: 20
+  
+  # Hidden channels in TCN blocks
+  hidden_channels: 64
+  
+  # Number of TCN blocks to stack
+  num_tcn_blocks: 6
+  
+  # Convolution kernel size
+  kernel_size: 3
+  
+  # Dropout rate
+  dropout: 0.5
+
+# Preprocessing Configuration
+preprocessing:
+  # Temporal sequence length (must match model input)
+  sequence_length: 28
+  
+  # Spatial normalization method: "center_scale" or "standardize"
+  normalization: "center_scale"
+
+# Data Configuration
+data:
+  # Directory for video files
+  videos_dir: "data/videos/"
+  
+  # Directory for fencer profiles
+  profiles_dir: "data/fencer_profiles/"
+  
+  # Directory for model weights
+  weights_dir: "weights/"
+
+# Pattern Analysis Configuration
+tracking:
+  # Window size for pattern analysis
+  window_size: 100
+  
+  # Minimum repetitions to detect as pattern
+  min_pattern_repetitions: 3
+
+# LLM Configuration
+llm:
+  # Model name: "llava-next", "qwen2-vl", "llama2", "mistral"
+  model_name: "llava-next"
+  
+  # Device: "auto", "cuda", "cpu"
+  device: "auto"
+  
+  # Load model in 4-bit quantization (saves memory)
+  load_in_4bit: false
+  
+  # Model cache directory
+  cache_dir: "~/.cache/huggingface/hub"
+  
+  # LLM inference parameters
+  inference:
+    # Maximum new tokens to generate
+    max_new_tokens: 200
+    
+    # Sampling temperature (0-1)
+    temperature: 0.7
+    
+    # Nucleus sampling parameter
+    top_p: 0.9
+
+# Pose Estimation Configuration
+pose:
+  # Confidence threshold for pose detection
+  confidence_threshold: 0.5
+  
+  # Required joints for fencing analysis
+  required_joints:
+    - "nose"
+    - "front_wrist"
+    - "front_elbow"
+    - "front_shoulder"
+    - "left_hip"
+    - "right_hip"
+    - "left_knee"
+    - "right_knee"
+    - "left_ankle"
+    - "right_ankle"
+
+# Action Classification Configuration
+actions:
+  # Target fencing actions
+  classes:
+    - "R"       # Rapid lunge (Offensive)
+    - "IS"      # Incremental speed lunge (Offensive)
+    - "WW"      # With waiting lunge (Offensive)
+    - "JS"      # Jumping sliding lunge (Offensive)
+    - "SF"      # Step forward (Neutral)
+    - "SB"      # Step backward (Defensive)
+  
+  # Offensive actions
+  offensive:
+    - "R"
+    - "IS"
+    - "WW"
+    - "JS"
+  
+  # Defensive actions
+  defensive:
+    - "SB"
+  
+  # Neutral actions
+  neutral:
+    - "SF"
+
+# UI Configuration
+ui:
+  # Window dimensions
+  window_width: 1600
+  window_height: 900
+  
+  # Video panel width as percentage of total
+  video_panel_ratio: 0.6
+  
+  # UI update frequency (milliseconds)
+  update_interval: 33
+
+# Output Configuration
+output:
+  # Save processed videos
+  save_processed_videos: true
+  
+  # Save JSON reports
+  save_reports: true
+  
+  # Report output directory
+  reports_dir: "reports/"
+  
+  # Screenshot directory
+  screenshots_dir: "screenshots/"
+
+# Feedback Configuration
+feedback:
+  # Enable immediate real-time feedback
+  enable_immediate: true
+  
+  # Enable break strategy feedback
+  enable_break_strategy: true
+  
+  # Enable conclusive post-bout feedback
+  enable_conclusive: true
+  
+  # Feedback update frequency (frames)
+  update_frequency: 14
+
+# Logging Configuration
+logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: "INFO"
+  
+  # Log file path
+  log_file: "logs/fencing_coach.log"
+  
+  # Maximum log file size (MB)
+  max_file_size: 100
+  
+  # Number of backup log files to keep
+  backup_count: 5
+
+# Performance Configuration
+performance:
+  # Use GPU if available
+  use_gpu: true
+  
+  # Batch size for inference
+  batch_size: 8
+  
+  # Number of worker threads for data loading
+  num_workers: 4
+  
+  # Enable mixed precision training/inference
+  mixed_precision: false
+
+# Athlete Profile Configuration
+athlete:
+  # Default athlete ID if not specified
+  default_id: "fencer_001"
+  
+  # Auto-create profile if not exists
+  auto_create_profile: true
+  
+  # Profile retention days (0 = indefinite)
+  retention_days: 0
