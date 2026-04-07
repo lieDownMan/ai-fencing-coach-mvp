@@ -37,6 +37,8 @@ class PatternAnalyzer:
         Args:
             window_size: Size of rolling window for pattern analysis
         """
+        if window_size <= 0:
+            raise ValueError("window_size must be positive")
         self.window_size = window_size
         self.action_history: List[str] = []
         self.timestamps: List[float] = []
@@ -58,6 +60,10 @@ class PatternAnalyzer:
         """
         if class_idx not in self.ACTION_CLASSES:
             raise ValueError(f"Invalid class index: {class_idx}")
+        if not np.isfinite(confidence):
+            raise ValueError("confidence must be finite")
+        if confidence < 0.0 or confidence > 1.0:
+            raise ValueError("confidence must be between 0 and 1")
         
         action = self.ACTION_CLASSES[class_idx]
         self.action_history.append(action)
@@ -169,7 +175,7 @@ class PatternAnalyzer:
         """Get average confidence score of recent predictions."""
         if not self.confidence_scores:
             return 0.0
-        return np.mean(self.confidence_scores)
+        return float(np.mean(self.confidence_scores))
     
     def get_statistics_summary(self) -> Dict:
         """
@@ -215,4 +221,7 @@ class PatternAnalyzer:
             next_action = self.action_history[i + 1]
             transitions[current][next_action] += 1
         
-        return dict(transitions)
+        return {
+            current: dict(next_actions)
+            for current, next_actions in transitions.items()
+        }
