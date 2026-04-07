@@ -5,6 +5,7 @@ Tests for the AI Fencing Coach System
 import pytest
 import numpy as np
 import torch
+from pathlib import Path
 
 
 class TestPoseEstimation:
@@ -542,6 +543,77 @@ class TestAppInterface:
         assert captured["app_kwargs"]["ui_height"] == 240
         assert captured["process_kwargs"]["fencer_id"] == "athlete_cfg"
         assert "mock feedback" in output
+
+    def test_main_cli_flags_override_config_defaults(
+        self,
+        tmp_path,
+        monkeypatch
+    ):
+        """Test explicit CLI flags take precedence over config defaults."""
+        import app as app_module
+
+        video_path = tmp_path / "clip.mp4"
+        video_path.write_bytes(b"not a real video; app is mocked")
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            "\n".join([
+                "model:",
+                "  type: fencenet",
+                "data:",
+                "  profiles_dir: config_profiles",
+                "llm:",
+                "  model_name: llava-next",
+                "  device: auto",
+                "pose:",
+                "  backend: auto",
+                "athlete:",
+                "  default_id: config_fencer",
+            ]),
+            encoding="utf-8"
+        )
+        captured = {}
+
+        class FakeApplication:
+            def __init__(self, **kwargs):
+                captured["app_kwargs"] = kwargs
+
+            def process_video(self, **kwargs):
+                captured["process_kwargs"] = kwargs
+                return {
+                    "ok": True,
+                    "video_path": kwargs["video_path"],
+                    "frames_processed": 0,
+                    "feedback": "",
+                }
+
+        monkeypatch.setattr(app_module, "FencingCoachApplication", FakeApplication)
+
+        exit_code = app_module.main([
+            "--config",
+            str(config_path),
+            "--video",
+            str(video_path),
+            "--fencer-id",
+            "cli_fencer",
+            "--profiles-dir",
+            "cli_profiles",
+            "--pose-backend",
+            "mock",
+            "--llm-model",
+            "mistral",
+            "--device",
+            "cpu",
+            "--model-type",
+            "bifencenet",
+        ])
+
+        assert exit_code == 0
+        assert captured["app_kwargs"]["use_bifencenet"] is True
+        assert captured["app_kwargs"]["profiles_dir"] == "cli_profiles"
+        assert captured["app_kwargs"]["pose_backend"] == "mock"
+        assert captured["app_kwargs"]["llm_model_name"] == "mistral"
+        assert captured["app_kwargs"]["device"] == "cpu"
+        assert captured["process_kwargs"]["fencer_id"] == "cli_fencer"
     
     def test_system_pipeline_initialization(self):
         """Test SystemPipeline initialization."""
@@ -589,6 +661,25 @@ class TestAppInterface:
 
         assert "R: 75%" in feedback
         assert "Maintain aggressive momentum" in feedback
+
+    def test_system_pipeline_break_strategy_uses_pipeline_stats(self, tmp_path):
+        """Test break strategy uses active analyzer stats instead of empty coach state."""
+        from src.app_interface import SystemPipeline
+
+        pipeline = SystemPipeline(
+            device="cpu",
+            use_bifencenet=False,
+            profiles_dir=str(tmp_path),
+            pose_backend="mock"
+        )
+        pipeline.set_fencer("athlete_001")
+        for class_idx in (4, 4, 4):
+            pipeline.pattern_analyzer.add_classification(class_idx, 0.9)
+
+        strategy = pipeline.get_break_strategy()
+
+        assert "collect a few exchanges first" not in strategy
+        assert "Increase variety" in strategy
 
     def test_system_pipeline_rejects_channel_mismatch(self):
         """Test that Phase 3 fails fast when Phase 2 emits the wrong channel count."""
@@ -796,6 +887,40 @@ class TestIntegration:
         )
         
         assert resampled.shape == (28, len(normalized[0]), 2)
+
+    def test_sample_video_mock_pipeline_smoke(self, tmp_path):
+        """Run the ignored local sample video through the mock full pipeline when present."""
+        import cv2
+        from app import FencingCoachApplication
+
+        video_path = Path("video/fencing_match.mp4")
+        if not video_path.exists():
+            pytest.skip("Local sample video is not present")
+
+        cap = cv2.VideoCapture(str(video_path))
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap.release()
+        if frame_count <= 0:
+            pytest.skip("Local sample video cannot be read by OpenCV")
+        if frame_count < 28:
+            pytest.skip("Local sample video is shorter than one model window")
+
+        app = FencingCoachApplication(
+            device="cpu",
+            profiles_dir=str(tmp_path),
+            pose_backend="mock"
+        )
+        results = app.process_video(
+            video_path=str(video_path),
+            fencer_id="sample_video_smoke"
+        )
+
+        expected_windows = ((frame_count - 28) // 14) + 1
+        assert results["ok"] is True
+        assert results["frames_processed"] == frame_count
+        assert len(results["classifications"]) == expected_windows
+        assert results["statistics"]["total_actions"] == expected_windows
+        assert results["feedback"]
 
 
 if __name__ == "__main__":
