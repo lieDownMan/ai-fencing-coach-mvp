@@ -24,6 +24,7 @@ class SystemPipeline:
     Manages all pipeline stages from video input to coaching output.
     """
 
+    SUPPORTED_CHECKPOINT_FORMAT_VERSION = 1
     INFERENCE_WINDOW_SIZE = 28
     INFERENCE_STRIDE = 14
     
@@ -57,6 +58,8 @@ class SystemPipeline:
             else None
         )
         self.model_checkpoint_loaded = False
+        self.model_checkpoint_metadata: Dict[str, Any] = {}
+        self.model_checkpoint_error: Optional[str] = None
         
         logger.info(f"Initializing System Pipeline on device: {device}")
         
@@ -90,22 +93,7 @@ class SystemPipeline:
             ).to(device)
             logger.info("Using FenceNet model")
         
-        # Load checkpoint if provided
-        if self.model_checkpoint_path and Path(self.model_checkpoint_path).exists():
-            try:
-                checkpoint = torch.load(self.model_checkpoint_path, map_location=device)
-                state_dict = (
-                    checkpoint["state_dict"]
-                    if isinstance(checkpoint, dict) and "state_dict" in checkpoint
-                    else checkpoint
-                )
-                self.model.load_state_dict(state_dict)
-                self.model_checkpoint_loaded = True
-                logger.info(f"Loaded model checkpoint: {self.model_checkpoint_path}")
-            except Exception as e:
-                logger.warning(f"Could not load checkpoint: {e}")
-        elif self.model_checkpoint_path:
-            logger.warning(f"Model checkpoint not found: {self.model_checkpoint_path}")
+        self._load_model_checkpoint()
         
         self.model.eval()
         
@@ -294,6 +282,146 @@ class SystemPipeline:
         if not np.all(np.isfinite(skeleton_array)):
             raise ValueError("skeleton_array contains non-finite values")
 
+    def _load_model_checkpoint(self):
+        """Load optional model weights and record why loading did or did not happen."""
+        if not self.model_checkpoint_path:
+            return
+
+        checkpoint_path = Path(self.model_checkpoint_path)
+        if not checkpoint_path.exists():
+            self.model_checkpoint_error = (
+                f"Model checkpoint not found: {self.model_checkpoint_path}"
+            )
+            logger.warning(self.model_checkpoint_error)
+            return
+
+        try:
+            checkpoint = torch.load(self.model_checkpoint_path, map_location=self.device)
+            state_dict, metadata = self._extract_checkpoint_payload(checkpoint)
+            self._validate_checkpoint_metadata(metadata)
+            self.model.load_state_dict(state_dict)
+        except Exception as exc:
+            self.model_checkpoint_error = str(exc)
+            logger.warning(f"Could not load checkpoint: {exc}")
+            return
+
+        self.model_checkpoint_loaded = True
+        self.model_checkpoint_metadata = metadata
+        self.model_checkpoint_error = None
+        logger.info(f"Loaded model checkpoint: {self.model_checkpoint_path}")
+
+    def _extract_checkpoint_payload(
+        self,
+        checkpoint: Any
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """Extract a state_dict and optional metadata from supported checkpoint shapes."""
+        if not isinstance(checkpoint, dict):
+            raise TypeError(
+                "Checkpoint must be a state_dict or a dict containing 'state_dict'"
+            )
+
+        metadata = self._extract_checkpoint_metadata(checkpoint)
+
+        if "state_dict" in checkpoint:
+            state_dict = checkpoint["state_dict"]
+        elif "model_state_dict" in checkpoint:
+            state_dict = checkpoint["model_state_dict"]
+        elif self._looks_like_state_dict(checkpoint):
+            state_dict = checkpoint
+        else:
+            raise ValueError(
+                "Checkpoint must contain 'state_dict' or 'model_state_dict'"
+            )
+
+        if not isinstance(state_dict, dict):
+            raise TypeError("Checkpoint state_dict must be a dictionary")
+
+        return state_dict, metadata
+
+    def _extract_checkpoint_metadata(self, checkpoint: Dict[str, Any]) -> Dict[str, Any]:
+        """Collect supported checkpoint metadata from nested or top-level fields."""
+        metadata_keys = {
+            "format_version",
+            "model_type",
+            "input_channels",
+            "num_classes",
+            "action_classes",
+        }
+        metadata = {
+            key: checkpoint[key]
+            for key in metadata_keys
+            if key in checkpoint
+        }
+
+        nested_metadata = checkpoint.get("metadata")
+        if nested_metadata is not None:
+            if not isinstance(nested_metadata, dict):
+                raise TypeError("Checkpoint metadata must be a dictionary")
+            metadata.update(nested_metadata)
+
+        return metadata
+
+    @staticmethod
+    def _looks_like_state_dict(checkpoint: Dict[str, Any]) -> bool:
+        """Return whether a dict appears to be a plain PyTorch state_dict."""
+        return bool(checkpoint) and all(
+            hasattr(value, "shape")
+            for value in checkpoint.values()
+        )
+
+    def _validate_checkpoint_metadata(self, metadata: Dict[str, Any]):
+        """Validate optional checkpoint metadata against this pipeline instance."""
+        expected_model_type = "bifencenet" if self.use_bifencenet else "fencenet"
+        expected_action_classes = self.model.get_class_names()
+
+        format_version = metadata.get("format_version")
+        if (
+            format_version is not None
+            and int(format_version) != self.SUPPORTED_CHECKPOINT_FORMAT_VERSION
+        ):
+            raise ValueError(
+                "Unsupported checkpoint format_version: "
+                f"{format_version}. Expected "
+                f"{self.SUPPORTED_CHECKPOINT_FORMAT_VERSION}."
+            )
+
+        model_type = metadata.get("model_type")
+        if (
+            model_type is not None
+            and str(model_type).lower() != expected_model_type
+        ):
+            raise ValueError(
+                "Checkpoint model_type mismatch: "
+                f"expected {expected_model_type}, got {model_type}"
+            )
+
+        input_channels = metadata.get("input_channels")
+        if (
+            input_channels is not None
+            and int(input_channels) != self.model_input_channels
+        ):
+            raise ValueError(
+                "Checkpoint input_channels mismatch: "
+                f"expected {self.model_input_channels}, got {input_channels}"
+            )
+
+        num_classes = metadata.get("num_classes")
+        if num_classes is not None and int(num_classes) != self.model.NUM_CLASSES:
+            raise ValueError(
+                "Checkpoint num_classes mismatch: "
+                f"expected {self.model.NUM_CLASSES}, got {num_classes}"
+            )
+
+        action_classes = metadata.get("action_classes")
+        if (
+            action_classes is not None
+            and list(action_classes) != expected_action_classes
+        ):
+            raise ValueError(
+                "Checkpoint action_classes mismatch: "
+                f"expected {expected_action_classes}, got {action_classes}"
+            )
+
     def get_runtime_metadata(self) -> Dict[str, Any]:
         """Return JSON-friendly metadata about the active pipeline backends."""
         pose_model = self.pose_estimator.model_path
@@ -306,12 +434,28 @@ class SystemPipeline:
             "model_input_channels": self.model_input_channels,
             "model_checkpoint": self.model_checkpoint_path,
             "model_checkpoint_loaded": self.model_checkpoint_loaded,
+            "model_checkpoint_error": self.model_checkpoint_error,
+            "model_checkpoint_metadata": self.model_checkpoint_metadata,
             "model_weights": (
                 "checkpoint" if self.model_checkpoint_loaded else "random"
             ),
             "pose_backend": self.pose_estimator.backend,
             "pose_requested_backend": self.pose_estimator.requested_backend,
             "pose_model": pose_model,
+        }
+
+    def get_model_status(self) -> Dict[str, Any]:
+        """Return JSON-friendly status for action-recognition model weights."""
+        return {
+            "model_type": "bifencenet" if self.use_bifencenet else "fencenet",
+            "model_input_channels": self.model_input_channels,
+            "model_checkpoint": self.model_checkpoint_path,
+            "model_checkpoint_loaded": self.model_checkpoint_loaded,
+            "model_checkpoint_error": self.model_checkpoint_error,
+            "model_checkpoint_metadata": self.model_checkpoint_metadata,
+            "model_weights": (
+                "checkpoint" if self.model_checkpoint_loaded else "random"
+            ),
         }
     
     def get_immediate_feedback(self) -> str:
