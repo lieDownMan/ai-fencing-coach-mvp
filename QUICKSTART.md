@@ -64,11 +64,13 @@ Write a JSON report for review or downstream analysis:
 python app.py --video path/to/bout.mp4 --fencer-id athlete_001 --pose-backend mock --report reports/bout_report.json
 ```
 
-Write an annotated review video with fencer boxes and a too-close distance cue:
+Write an annotated review video with dual fencer HUDs, current global action, speed/movement cues, and a too-close distance cue:
 
 ```bash
-python app.py --video video/fencing_match.mp4 --fencer-id athlete_001 --device cpu --pose-backend mock --annotated-video video/fencing_match_processed.mp4
+python app.py --video video/fencing_match.mp4 --fencer-id athlete_001 --device cpu --pose-backend mock --left-height-cm 170 --right-height-cm 185 --annotated-video video/fencing_match_processed.mp4
 ```
+
+The height flags are optional. Limb length and reach calibration are future work, not current CLI inputs.
 
 If `output.save_reports: true` is enabled in `config.yaml`, the CLI writes an auto-named report under `output.reports_dir` unless `--no-report` is passed.
 
