@@ -435,6 +435,113 @@ class TestLLMAgent:
 
 class TestAppInterface:
     """Test suite for application interface."""
+
+    def test_load_app_config_reads_yaml(self, tmp_path):
+        """Test app config loader reads YAML mappings."""
+        from app import load_app_config
+
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            "model:\n  type: bifencenet\nathlete:\n  default_id: athlete_cfg\n",
+            encoding="utf-8"
+        )
+
+        config = load_app_config(config_path)
+
+        assert config["model"]["type"] == "bifencenet"
+        assert config["athlete"]["default_id"] == "athlete_cfg"
+
+    def test_main_missing_video_returns_nonzero_without_initializing_app(
+        self,
+        tmp_path,
+        monkeypatch,
+        capsys
+    ):
+        """Test CLI fails fast on a missing video before app initialization."""
+        import app as app_module
+
+        class ExplodingApplication:
+            def __init__(self, *args, **kwargs):
+                raise AssertionError("Application should not be initialized")
+
+        monkeypatch.setattr(
+            app_module,
+            "FencingCoachApplication",
+            ExplodingApplication
+        )
+
+        exit_code = app_module.main(["--video", str(tmp_path / "missing.mp4")])
+        output = capsys.readouterr().out
+
+        assert exit_code == 1
+        assert "Video file not found" in output
+
+    def test_main_uses_config_defaults_for_app(
+        self,
+        tmp_path,
+        monkeypatch,
+        capsys
+    ):
+        """Test CLI wires config defaults into the application constructor."""
+        import app as app_module
+
+        video_path = tmp_path / "clip.mp4"
+        video_path.write_bytes(b"not a real video; app is mocked")
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            "\n".join([
+                "model:",
+                "  type: bifencenet",
+                "data:",
+                "  profiles_dir: profiles_from_config",
+                "llm:",
+                "  model_name: mistral",
+                "  device: cpu",
+                "pose:",
+                "  backend: mock",
+                "athlete:",
+                "  default_id: athlete_cfg",
+                "ui:",
+                "  window_width: 320",
+                "  window_height: 240",
+            ]),
+            encoding="utf-8"
+        )
+        captured = {}
+
+        class FakeApplication:
+            def __init__(self, **kwargs):
+                captured["app_kwargs"] = kwargs
+
+            def process_video(self, **kwargs):
+                captured["process_kwargs"] = kwargs
+                return {
+                    "ok": True,
+                    "video_path": kwargs["video_path"],
+                    "frames_processed": 0,
+                    "feedback": "mock feedback",
+                }
+
+        monkeypatch.setattr(app_module, "FencingCoachApplication", FakeApplication)
+
+        exit_code = app_module.main([
+            "--config",
+            str(config_path),
+            "--video",
+            str(video_path)
+        ])
+        output = capsys.readouterr().out
+
+        assert exit_code == 0
+        assert captured["app_kwargs"]["use_bifencenet"] is True
+        assert captured["app_kwargs"]["profiles_dir"] == "profiles_from_config"
+        assert captured["app_kwargs"]["llm_model_name"] == "mistral"
+        assert captured["app_kwargs"]["device"] == "cpu"
+        assert captured["app_kwargs"]["pose_backend"] == "mock"
+        assert captured["app_kwargs"]["ui_width"] == 320
+        assert captured["app_kwargs"]["ui_height"] == 240
+        assert captured["process_kwargs"]["fencer_id"] == "athlete_cfg"
+        assert "mock feedback" in output
     
     def test_system_pipeline_initialization(self):
         """Test SystemPipeline initialization."""
@@ -445,6 +552,24 @@ class TestAppInterface:
         assert pipeline.device == "cpu"
         assert pipeline.model_input_channels == 20
         assert hasattr(pipeline, 'process_video')
+
+    def test_application_missing_video_returns_error_payload(self, tmp_path):
+        """Test application process_video returns a stable missing-file error."""
+        from app import FencingCoachApplication
+
+        app = FencingCoachApplication(
+            device="cpu",
+            profiles_dir=str(tmp_path),
+            pose_backend="mock"
+        )
+
+        result = app.process_video(
+            video_path=str(tmp_path / "missing.mp4"),
+            fencer_id="athlete_001"
+        )
+
+        assert result["ok"] is False
+        assert "Video file not found" in result["error"]
 
     def test_system_pipeline_immediate_feedback_uses_pipeline_stats(self, tmp_path):
         """Test Phase 5 feedback is based on the pipeline's real analyzer state."""
@@ -610,6 +735,29 @@ class TestAppInterface:
         assert ui is not None
         assert ui.width == 1600
         assert ui.height == 900
+
+    def test_fencing_coach_ui_headless_display_skips_opencv_window(
+        self,
+        monkeypatch
+    ):
+        """Test display can render without opening a window in CI."""
+        from src.app_interface import main_ui
+
+        def fail_if_called(*args, **kwargs):
+            raise AssertionError("OpenCV window function should not be called")
+
+        monkeypatch.setattr(main_ui.cv2, "imshow", fail_if_called)
+        monkeypatch.setattr(main_ui.cv2, "waitKey", fail_if_called)
+
+        ui = main_ui.FencingCoachUI(
+            width=320,
+            height=240,
+            display_enabled=False
+        )
+        canvas = ui.display()
+        ui.close()
+
+        assert canvas.shape == (240, 320, 3)
 
 
 # Integration tests

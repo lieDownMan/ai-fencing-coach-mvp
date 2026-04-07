@@ -31,7 +31,8 @@ class SystemPipeline:
         model_checkpoint: Optional[str] = None,
         profiles_dir: str = "data/fencer_profiles/",
         pose_backend: str = "auto",
-        pose_model_path: Optional[str] = None
+        pose_model_path: Optional[str] = None,
+        llm_model_name: str = "llava-next"
     ):
         """
         Initialize System Pipeline.
@@ -43,6 +44,7 @@ class SystemPipeline:
             profiles_dir: Directory for fencer profiles
             pose_backend: Pose estimator backend ("auto", "ultralytics", or "mock")
             pose_model_path: Optional pose model path
+            llm_model_name: CoachEngine LLM model name
         """
         self.device = device
         self.use_bifencenet = use_bifencenet
@@ -102,7 +104,11 @@ class SystemPipeline:
         self.profile_manager = ProfileManager(profiles_dir=profiles_dir)
         
         # Phase 5: LLM Coaching
-        self.coach_engine = CoachEngine(profiles_dir=profiles_dir, device=device)
+        self.coach_engine = CoachEngine(
+            model_name=llm_model_name,
+            profiles_dir=profiles_dir,
+            device=device
+        )
         
         # Runtime state
         self.current_bout_stats = {}
