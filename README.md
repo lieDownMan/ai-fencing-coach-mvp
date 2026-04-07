@@ -12,7 +12,7 @@ Implemented and tested in the current code path:
 - Pose extraction backends: `mock` for deterministic development/tests and `ultralytics` for YOLO pose when the dependency and weights are installed.
 - Side-based two-fencer candidate tracking for visualization: keep the two largest pose candidates per frame and label them `fencer_L`/`fencer_R` by horizontal position.
 - Prototype distance feedback: mark global `too_close` frames from average tracked height and show per-fencer too-close status against each fencer's own detected height.
-- Annotated MP4 output with fencer boxes, skeleton keypoints, engagement-distance line, dual left/right HUD panels, speed/movement cues, global action label, optional height calibration, optional web-friendly downscaling, and too-close warning banner.
+- Annotated MP4 output with fencer boxes, skeleton keypoints, engagement-distance line, dual left/right HUD panels, speed/movement cues, global action label, optional height calibration, optional web-friendly downscaling plus H.264 transcoding, and too-close warning banner.
 - Local no-dependency browser demo at `web_app.py` for processing a video, reviewing the annotated MP4, and reading summary metrics without typing the full CLI command.
 - Single selected fencer skeleton remains the classifier input, using the largest detected person so existing FenceNet/BiFenceNet inference stays stable.
 - Explicit 10-joint, 20-channel skeleton feature order for FenceNet/BiFenceNet inference.

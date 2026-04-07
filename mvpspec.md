@@ -31,7 +31,7 @@ Implemented in the current debugged code path:
 - Pose/keypoint extraction with explicit `mock`, `ultralytics`, and `auto` backend behavior.
 - Side-based two-fencer candidate tracking for visualization. The pipeline keeps the two largest pose candidates per frame and labels them `fencer_L`/`fencer_R` by horizontal center.
 - Prototype distance feedback marks global `too_close` frames when front-ankle x-distance is less than `1.0x` average tracked fencer bounding-box height, then the annotated-video HUD also shows per-fencer distance status against each fencer's own detected height.
-- Annotated MP4 output draws fencer boxes, skeleton keypoints, engagement-distance lines, dual left/right HUD panels, speed/movement cues, the current global action label, optional left/right height calibration, optional web-friendly downscaling, and the too-close warning banner.
+- Annotated MP4 output draws fencer boxes, skeleton keypoints, engagement-distance lines, dual left/right HUD panels, speed/movement cues, the current global action label, optional left/right height calibration, optional web-friendly downscaling plus H.264 transcoding, and the too-close warning banner.
 - A local no-dependency browser demo lets reviewers process the sample/server-side video, watch the annotated MP4, and inspect summary metrics without composing terminal processing commands.
 - Single selected fencer skeleton per frame remains the classifier input. For Ultralytics results, the largest detected person is selected.
 - Spatial normalization into a fixed 10-joint, 20-channel model feature tensor.
@@ -194,7 +194,7 @@ Recent debug milestones:
 - Checkpoint loading now accepts common PyTorch state-dict formats, validates optional metadata, and reports when the app is still using random weights.
 - JSON report output can be written explicitly with `--report` or through `output.save_reports` and `output.reports_dir` in config.
 - Two-fencer candidate tracking now records `fencer_L`/`fencer_R` side labels, per-frame centers/bounding boxes/keypoints, coverage, average front-ankle x-distance, and prototype `too_close` distance cues for reports and CLI summaries.
-- Annotated video output can write a processed MP4 with fencer overlays, dual left/right HUD panels, per-fencer height-relative distance status, speed/movement cues, current global action label, optional `--annotated-max-width` downscaling, and a red `TOO CLOSE` banner when the distance heuristic triggers.
+- Annotated video output can write a processed MP4 with fencer overlays, dual left/right HUD panels, per-fencer height-relative distance status, speed/movement cues, current global action label, optional `--annotated-max-width` downscaling plus H.264 transcoding, and a red `TOO CLOSE` banner when the distance heuristic triggers.
 - Local browser demo output is available through `python web_app.py`; it reuses the same pipeline/report/annotator code and writes generated assets under `web_outputs/`.
 
 Current local sample-video smoke:
@@ -207,7 +207,7 @@ Observed result in the current environment:
 
 - `video/fencing_match.mp4` opens with 776 frames at 30 FPS.
 - Mock pose mode processes all 776 frames and records two side-based fencer candidates on each frame.
-- Annotated-video mode writes `video/fencing_match_processed.mp4` or another requested output path with fencer overlays, dual HUDs, optional `--left-height-cm` / `--right-height-cm` calibration, optional `--annotated-max-width 1280` downscaling, and distance cues.
+- Annotated-video mode writes `video/fencing_match_processed.mp4` or another requested output path with fencer overlays, dual HUDs, optional `--left-height-cm` / `--right-height-cm` calibration, optional `--annotated-max-width 1280` downscaling plus H.264 transcoding, and distance cues.
 - Sliding-window inference emits 54 classifications.
 - The post-bout feedback path completes using analytical fallback.
 - The action labels are not semantically meaningful until trained model weights are provided.

@@ -350,7 +350,7 @@ def render_home_page(
         </div>
         <button type=\"submit\">Process Video</button>
         <p class=\"note\">Tip: use <code>ultralytics</code> for real CV boxes. <code>mock</code> is deterministic and will not follow real fencers.</p>
-        <p class=\"note\"><strong>Annotated max width</strong> downscales the exported MP4 for smoother browser playback. It does not change pose detection, tracking, or inference.</p>
+        <p class=\"note\"><strong>Annotated max width</strong> downscales and H.264-transcodes the exported MP4 for smoother browser playback. It does not change pose detection, tracking, or inference.</p>
       </form>
     </section>
 
