@@ -17,6 +17,22 @@ TEXT_COLOR = (255, 255, 255)
 PANEL_COLOR = (32, 32, 32)
 
 
+def _scaled_dimensions(
+    width: int,
+    height: int,
+    max_width: Optional[int] = None
+) -> Tuple[int, int]:
+    """Return output dimensions, preserving aspect ratio when downscaling."""
+    if max_width is None or max_width <= 0 or width <= max_width:
+        return int(width), int(height)
+
+    scaled_height = int(round(height * (max_width / width)))
+    # Keep dimensions even for broad MP4 player/browser compatibility.
+    scaled_width = max(2, int(max_width) - int(max_width) % 2)
+    scaled_height = max(2, scaled_height - scaled_height % 2)
+    return scaled_width, scaled_height
+
+
 def write_annotated_video(
     video_path: str,
     output_path: Path,
@@ -25,7 +41,8 @@ def write_annotated_video(
     classifications: Optional[List[Tuple[int, float]]] = None,
     window_size: int = 28,
     window_stride: int = 14,
-    fencer_heights_cm: Optional[Dict[str, float]] = None
+    fencer_heights_cm: Optional[Dict[str, float]] = None,
+    max_width: Optional[int] = None
 ) -> Path:
     """Write a copy of the video with fencer boxes and dual HUD panels."""
     input_path = Path(video_path).expanduser()
@@ -45,8 +62,19 @@ def write_annotated_video(
         cap.release()
         raise ValueError(f"Cannot read video dimensions: {input_path}")
 
+    output_width, output_height = _scaled_dimensions(
+        width=width,
+        height=height,
+        max_width=max_width,
+    )
+
     fourcc = cv2.VideoWriter_fourcc(*codec)
-    writer = cv2.VideoWriter(str(output_file), fourcc, fps, (width, height))
+    writer = cv2.VideoWriter(
+        str(output_file),
+        fourcc,
+        fps,
+        (output_width, output_height),
+    )
     if not writer.isOpened():
         cap.release()
         raise OSError(f"Cannot open annotated video writer: {output_file}")
@@ -78,6 +106,8 @@ def write_annotated_video(
                     global_action=actions_by_frame.get(frame_index),
                     track_motion=motion_by_frame.get(frame_index, {}),
                 )
+            if (output_width, output_height) != (width, height):
+                frame = cv2.resize(frame, (output_width, output_height))
             writer.write(frame)
             frame_index += 1
     finally:
