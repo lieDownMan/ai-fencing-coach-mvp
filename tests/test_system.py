@@ -626,10 +626,57 @@ class TestAppInterface:
             ],
         }
 
-        annotated = draw_tracking_overlay(frame, tracking_frame)
+        annotated = draw_tracking_overlay(
+            frame,
+            tracking_frame,
+            fencer_heights_cm={"fencer_L": 170.0, "fencer_R": 185.0},
+            global_action={"action": "SF", "confidence": 0.82},
+            track_motion={
+                "fencer_L": {"speed_height_per_s": 0.35, "movement": "advancing"},
+                "fencer_R": {"speed_height_per_s": 0.20, "movement": "retreating"},
+            },
+        )
 
         assert annotated.shape == frame.shape
         assert np.any(annotated != frame)
+
+    def test_dual_hud_lines_use_per_fencer_height(self):
+        """Test HUD text can mark each fencer against their own height."""
+        from src.app_interface.video_annotator import _fencer_hud_lines
+
+        tracking_frame = {"engagement_distance_px": 120.0}
+        short_fencer = {
+            "track_id": "fencer_L",
+            "side": "left",
+            "bbox": [0.0, 0.0, 40.0, 160.0],
+        }
+        tall_fencer = {
+            "track_id": "fencer_R",
+            "side": "right",
+            "bbox": [100.0, 0.0, 150.0, 100.0],
+        }
+
+        short_lines = _fencer_hud_lines(
+            short_fencer,
+            tracking_frame,
+            fencer_heights_cm={"fencer_L": 170.0, "fencer_R": 190.0},
+            global_action={"action": "SF", "confidence": 0.75},
+            motion={"speed_height_per_s": 0.4, "movement": "advancing"},
+        )
+        tall_lines = _fencer_hud_lines(
+            tall_fencer,
+            tracking_frame,
+            fencer_heights_cm={"fencer_L": 170.0, "fencer_R": 190.0},
+            global_action={"action": "SF", "confidence": 0.75},
+            motion={"speed_height_per_s": 0.2, "movement": "retreating"},
+        )
+
+        assert "Height: 170 cm" in short_lines
+        assert "Status: TOO CLOSE" in short_lines
+        assert "Global action: SF (0.75)" in short_lines
+        assert "Height: 190 cm" in tall_lines
+        assert "Status: OK" in tall_lines
+        assert "Movement: retreating" in tall_lines
 
     def test_main_writes_json_report_from_cli_flag(
         self,
@@ -717,7 +764,7 @@ class TestAppInterface:
                     "frames_processed": 1,
                     "window_size": 28,
                     "window_stride": 14,
-                    "classifications": [],
+                    "classifications": [(4, 0.8)],
                     "statistics": {},
                     "feedback": "mock feedback",
                     "two_fencer_tracking": {
@@ -729,10 +776,11 @@ class TestAppInterface:
             def get_model_status(self):
                 return {"model_weights": "random", "model_type": "fencenet"}
 
-        def fake_write_annotated_video(video_path, output_path, tracking_frames):
+        def fake_write_annotated_video(video_path, output_path, tracking_frames, **kwargs):
             captured["video_path"] = video_path
             captured["output_path"] = output_path
             captured["tracking_frames"] = tracking_frames
+            captured["annotator_kwargs"] = kwargs
             return output_path
 
         monkeypatch.setattr(app_module, "FencingCoachApplication", FakeApplication)
@@ -745,6 +793,10 @@ class TestAppInterface:
             "cli_fencer",
             "--annotated-video",
             str(annotated_path),
+            "--left-height-cm",
+            "170",
+            "--right-height-cm",
+            "185",
         ])
         output = capsys.readouterr().out
 
@@ -752,6 +804,14 @@ class TestAppInterface:
         assert captured["video_path"] == str(video_path)
         assert captured["output_path"] == annotated_path
         assert captured["tracking_frames"][0]["frame_index"] == 0
+        assert captured["annotator_kwargs"]["classifications"] == [(4, 0.8)]
+        assert captured["annotator_kwargs"]["window_size"] == 28
+        assert captured["annotator_kwargs"]["window_stride"] == 14
+        assert captured["annotator_kwargs"]["fencer_heights_cm"] == {
+            "fencer_L": 170.0,
+            "fencer_R": 185.0,
+        }
+        assert "Fencer height calibration: fencer_L=170cm, fencer_R=185cm" in output
         assert "Annotated video written:" in output
 
     def test_main_missing_video_returns_nonzero_without_initializing_app(
