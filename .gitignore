@@ -23,3 +23,6 @@ Thumbs.db
 *.avi
 *.mov
 *.mkv
+
+# Generated reports
+reports/
