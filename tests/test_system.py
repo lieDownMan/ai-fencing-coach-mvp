@@ -678,6 +678,46 @@ class TestAppInterface:
         assert "Status: OK" in tall_lines
         assert "Movement: retreating" in tall_lines
 
+    def test_scaled_dimensions_downscales_for_web_playback(self):
+        """Test annotated video export can downscale to a web-friendly width."""
+        from src.app_interface.video_annotator import _scaled_dimensions
+
+        assert _scaled_dimensions(1908, 920, max_width=1280) == (1280, 616)
+        assert _scaled_dimensions(640, 480, max_width=1280) == (640, 480)
+        assert _scaled_dimensions(640, 480, max_width=None) == (640, 480)
+
+    def test_transcode_mp4_for_browser_uses_h264(
+        self,
+        tmp_path,
+        monkeypatch
+    ):
+        """Test browser MP4 transcode uses H.264/yuv420p when ffmpeg exists."""
+        from src.app_interface import video_annotator
+
+        source = tmp_path / "clip.mp4"
+        source.write_bytes(b"opencv mp4")
+        captured = {}
+
+        class Result:
+            returncode = 0
+            stderr = ""
+
+        def fake_run(command, **kwargs):
+            captured["command"] = command
+            Path(command[-1]).write_bytes(b"browser mp4")
+            return Result()
+
+        monkeypatch.setattr(video_annotator.shutil, "which", lambda _: "/usr/bin/ffmpeg")
+        monkeypatch.setattr(video_annotator.subprocess, "run", fake_run)
+
+        written = video_annotator._transcode_mp4_for_browser(source)
+
+        assert written == source
+        assert source.read_bytes() == b"browser mp4"
+        assert "libx264" in captured["command"]
+        assert "yuv420p" in captured["command"]
+        assert "+faststart" in captured["command"]
+
     def test_main_writes_json_report_from_cli_flag(
         self,
         tmp_path,
@@ -797,6 +837,8 @@ class TestAppInterface:
             "170",
             "--right-height-cm",
             "185",
+            "--annotated-max-width",
+            "1280",
         ])
         output = capsys.readouterr().out
 
@@ -811,7 +853,9 @@ class TestAppInterface:
             "fencer_L": 170.0,
             "fencer_R": 185.0,
         }
+        assert captured["annotator_kwargs"]["max_width"] == 1280
         assert "Fencer height calibration: fencer_L=170cm, fencer_R=185cm" in output
+        assert "Annotated video max width: 1280px" in output
         assert "Annotated video written:" in output
 
     def test_main_missing_video_returns_nonzero_without_initializing_app(
@@ -1254,6 +1298,147 @@ class TestAppInterface:
         assert first["statistics"]["total_actions"] == 1
         assert second["statistics"]["total_actions"] == 1
     
+    def test_web_demo_request_parses_form_values(self):
+        """Test browser form values become a typed web process request."""
+        from src.app_interface.web_demo import request_from_form
+
+        request = request_from_form({
+            "video_path": ["video/fencing_match.mp4"],
+            "fencer_id": ["athlete_001"],
+            "pose_backend": ["mock"],
+            "pose_model": [""],
+            "device": ["cpu"],
+            "left_height_cm": ["170"],
+            "right_height_cm": ["185"],
+            "annotated_max_width": ["1280"],
+        })
+
+        assert request.video_path == "video/fencing_match.mp4"
+        assert request.pose_backend == "mock"
+        assert request.left_height_cm == 170.0
+        assert request.right_height_cm == 185.0
+        assert request.annotated_max_width == 1280
+
+    def test_web_demo_renders_video_and_report_links(self):
+        """Test web demo result page includes the annotated video and summary."""
+        from src.app_interface.web_demo import (
+            WebProcessRequest,
+            WebProcessResult,
+            render_home_page,
+        )
+
+        result = WebProcessResult(
+            ok=True,
+            annotated_video_path=Path("web_outputs/demo_processed.mp4"),
+            report_path=Path("web_outputs/demo_report.json"),
+            report={
+                "frames_processed": 42,
+                "two_fencer_tracking": {
+                    "summary": {
+                        "two_fencer_coverage": 1.0,
+                        "too_close_ratio": 0.25,
+                    }
+                },
+                "statistics": {
+                    "average_confidence": 0.5,
+                    "action_frequencies": {"SF": 1.0},
+                },
+                "runtime": {"pose_backend": "mock", "model_weights": "random"},
+                "feedback": "mock feedback",
+            },
+        )
+
+        html = render_home_page(result=result, defaults=WebProcessRequest())
+
+        assert "AI Fencing Coach MVP" in html
+        assert "/outputs/demo_processed.mp4" in html
+        assert "/outputs/demo_report.json" in html
+        assert "Two-fencer coverage" in html
+        assert "mock feedback" in html
+
+    def test_web_demo_process_reuses_app_pipeline(
+        self,
+        tmp_path,
+        monkeypatch
+    ):
+        """Test web processing reuses the app pipeline and annotator writer."""
+        from src.app_interface import web_demo
+
+        video_path = tmp_path / "clip.mp4"
+        video_path.write_bytes(b"fake video; pipeline is mocked")
+        captured = {}
+
+        class FakeApplication:
+            def __init__(self, **kwargs):
+                captured["app_kwargs"] = kwargs
+
+            def process_video(self, **kwargs):
+                captured["process_kwargs"] = kwargs
+                return {
+                    "ok": True,
+                    "video_path": kwargs["video_path"],
+                    "fencer_id": kwargs["fencer_id"],
+                    "frames_processed": 1,
+                    "window_size": 28,
+                    "window_stride": 14,
+                    "classifications": [(4, 0.8)],
+                    "statistics": {
+                        "total_actions": 1,
+                        "action_frequencies": {"SF": 1.0},
+                        "offensive_ratio": 0.0,
+                        "defensive_ratio": 0.0,
+                        "js_sf_ratio": 0.0,
+                        "repetitive_patterns": [],
+                        "average_confidence": 0.8,
+                    },
+                    "feedback": "mock feedback",
+                    "two_fencer_tracking": {
+                        "schema_version": 1,
+                        "strategy": "mock",
+                        "identity_persistence": "mock",
+                        "too_close_rule": "mock",
+                        "summary": {"frames_analyzed": 1},
+                        "frames": [{"frame_index": 0, "tracks": []}],
+                    },
+                }
+
+            def get_runtime_metadata(self):
+                return {"pose_backend": "mock", "model_weights": "random"}
+
+        def fake_write_annotated_video(video_path, output_path, tracking_frames, **kwargs):
+            captured["annotator_kwargs"] = kwargs
+            output_path.write_bytes(b"mp4")
+            return output_path
+
+        monkeypatch.setattr(web_demo, "FencingCoachApplication", FakeApplication)
+        monkeypatch.setattr(web_demo, "write_annotated_video", fake_write_annotated_video)
+
+        result = web_demo.process_web_video(
+            web_demo.WebProcessRequest(
+                video_path=str(video_path),
+                fencer_id="web_fencer",
+                pose_backend="mock",
+                pose_model="",
+                device="cpu",
+                left_height_cm=170.0,
+                right_height_cm=185.0,
+                annotated_max_width=1280,
+            ),
+            repo_root=tmp_path,
+            output_dir=tmp_path / "web_outputs",
+        )
+
+        assert result.ok
+        assert result.annotated_video_path.exists()
+        assert result.report_path.exists()
+        assert captured["app_kwargs"]["pose_backend"] == "mock"
+        assert captured["process_kwargs"]["fencer_id"] == "web_fencer"
+        assert captured["annotator_kwargs"]["max_width"] == 1280
+        assert captured["annotator_kwargs"]["fencer_heights_cm"] == {
+            "fencer_L": 170.0,
+            "fencer_R": 185.0,
+        }
+
     def test_fencing_coach_ui_initialization(self):
         """Test FencingCoachUI initialization."""
         from src.app_interface import FencingCoachUI
