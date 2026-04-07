@@ -21,7 +21,8 @@ class FencingCoachUI:
         self,
         window_name: str = "AI Fencing Coach & Referee System",
         width: int = 1600,
-        height: int = 900
+        height: int = 900,
+        display_enabled: bool = True
     ):
         """
         Initialize UI.
@@ -30,10 +31,15 @@ class FencingCoachUI:
             window_name: OpenCV window title
             width: Display width
             height: Display height
+            display_enabled: Whether display() may open an OpenCV window
         """
+        if width <= 0 or height <= 0:
+            raise ValueError("UI width and height must be positive")
+
         self.window_name = window_name
         self.width = width
         self.height = height
+        self.display_enabled = display_enabled
         
         # Layout configuration
         self.video_panel_width = int(width * 0.6)
@@ -293,14 +299,21 @@ class FencingCoachUI:
         
         return lines
     
-    def display(self, wait_key: int = 1):
-        """Display UI window."""
+    def display(self, wait_key: int = 1) -> np.ndarray:
+        """Display UI window when enabled and return the rendered canvas."""
         canvas = self.render()
+        if not self.display_enabled:
+            return canvas
+
         cv2.imshow(self.window_name, canvas)
         cv2.waitKey(wait_key)
+        return canvas
     
     def close(self):
         """Close UI window."""
+        if not self.display_enabled:
+            return
+
         cv2.destroyAllWindows()
     
     def save_screenshot(self, output_path: str):

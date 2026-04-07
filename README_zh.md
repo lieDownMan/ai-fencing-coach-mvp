@@ -17,15 +17,24 @@
 
 ```text
 影片輸入
-  -> 姿態估計與雙人追蹤
-  -> 骨架正規化與動作特徵擷取
-  -> 動作理解
-     -> MVP 路徑：距離與站姿等啟發式規則
-     -> 研究路徑：FenceNet/BiFenceNet 六類步法辨識
+  -> 姿態估計
+     -> 目前程式：每個 frame 選出一個可用骨架
+     -> 研究目標：雙人追蹤與左右選手指派
+  -> 骨架正規化為 10 個關節 / 20 個 channel
+  -> FenceNet/BiFenceNet 六類步法辨識
   -> 模式分析與選手檔案更新
   -> 教練回饋
-  -> OpenCV 儀表板或處理後影片輸出
+     -> 目前程式：沒有載入真實 LLM 時使用分析式 fallback
+     -> 研究目標：在合適情境中加入真實 LLM 教練文字生成
+  -> CLI 摘要或 OpenCV 儀表板
 ```
+
+## 目前實作狀態
+
+- 可用 `--pose-backend mock` 進行穩定的本機與測試流程。
+- `--pose-backend ultralytics` 是預留給 YOLO pose 的真實姿態估計路徑，但目前 venv 尚未安裝 `ultralytics`。
+- 目前還不是完整雙人擊劍追蹤，也不是正式裁判或得分系統。
+- 如果沒有訓練好的模型權重，分類標籤只適合做 pipeline smoke test，不應解讀為可靠教練判斷。
 
 ## 快速開始
 
@@ -39,7 +48,13 @@ python app.py --interactive
 處理影片：
 
 ```bash
-python app.py --video path/to/bout.mp4 --fencer-id athlete_001 --device auto
+python app.py --video path/to/bout.mp4 --fencer-id athlete_001 --device auto --pose-backend mock
+```
+
+若本機有範例影片：
+
+```bash
+python app.py --video video/fencing_match.mp4 --fencer-id athlete_001 --device cpu --pose-backend mock
 ```
 
 ## 下一步研究問題

@@ -15,6 +15,19 @@ class SpatialNormalizer:
     """
     Normalizes skeleton coordinates by centering and scaling.
     """
+
+    MODEL_JOINT_NAMES = [
+        "nose",
+        "front_wrist",
+        "front_elbow",
+        "front_shoulder",
+        "left_hip",
+        "right_hip",
+        "left_knee",
+        "right_knee",
+        "left_ankle",
+        "right_ankle",
+    ]
     
     def __init__(self):
         """Initialize the spatial normalizer."""
@@ -37,14 +50,14 @@ class SpatialNormalizer:
         if "nose" not in first_frame:
             raise KeyError("'nose' not found in first frame skeleton")
         
-        self.reference_nose = np.array(first_frame["nose"])
+        self.reference_nose = self._as_coordinate(first_frame["nose"], "nose")
         
         # Calculate scale factor: vertical distance between nose and front ankle
         if "front_ankle" not in first_frame:
             raise KeyError("'front_ankle' not found in first frame skeleton")
         
-        head_pos = np.array(first_frame["nose"])
-        ankle_pos = np.array(first_frame["front_ankle"])
+        head_pos = self._as_coordinate(first_frame["nose"], "nose")
+        ankle_pos = self._as_coordinate(first_frame["front_ankle"], "front_ankle")
         vertical_distance = abs(ankle_pos[1] - head_pos[1])
         
         if vertical_distance < 1e-6:
@@ -69,7 +82,8 @@ class SpatialNormalizer:
             raise RuntimeError("Normalizer not fitted. Call fit() first.")
         
         normalized = {}
-        for joint_name, (x, y) in skeleton.items():
+        for joint_name, coords in skeleton.items():
+            x, y = self._as_coordinate(coords, joint_name)
             # Subtract reference nose position
             x_norm = (x - self.reference_nose[0]) / self.scale_factor
             y_norm = (y - self.reference_nose[1]) / self.scale_factor
@@ -89,23 +103,32 @@ class SpatialNormalizer:
         """
         return [self.normalize_skeleton(skeleton) for skeleton in skeleton_sequence]
     
-    def get_normalized_array(self, skeleton_sequence: List[Dict[str, Tuple[float, float]]]) -> np.ndarray:
+    def get_normalized_array(
+        self,
+        skeleton_sequence: List[Dict[str, Tuple[float, float]]],
+        joint_names: Optional[List[str]] = None,
+        already_normalized: bool = False
+    ) -> np.ndarray:
         """
         Convert normalized skeleton sequence to numpy array.
         
         Args:
             skeleton_sequence: List of skeleton dictionaries
+            joint_names: Optional explicit joint order to export
+            already_normalized: Set to True if the input coordinates are already normalized
             
         Returns:
             np.ndarray of shape (num_frames, num_joints, 2)
         """
-        normalized_seq = self.normalize_sequence(skeleton_sequence)
-        
-        # Get joint order
-        if not normalized_seq:
-            raise ValueError("Empty normalized sequence")
-        
-        joint_names = sorted(normalized_seq[0].keys())
+        if not skeleton_sequence:
+            raise ValueError("Empty skeleton sequence")
+
+        normalized_seq = (
+            skeleton_sequence
+            if already_normalized
+            else self.normalize_sequence(skeleton_sequence)
+        )
+        joint_names = joint_names or sorted(normalized_seq[0].keys())
         num_frames = len(normalized_seq)
         num_joints = len(joint_names)
         
@@ -113,7 +136,19 @@ class SpatialNormalizer:
         
         for frame_idx, frame in enumerate(normalized_seq):
             for joint_idx, joint_name in enumerate(joint_names):
-                if joint_name in frame:
-                    array[frame_idx, joint_idx] = frame[joint_name]
+                if joint_name not in frame:
+                    raise KeyError(f"'{joint_name}' not found in frame {frame_idx}")
+                self._as_coordinate(frame[joint_name], joint_name)
+                array[frame_idx, joint_idx] = frame[joint_name]
         
+        return array
+
+    @staticmethod
+    def _as_coordinate(coords: Tuple[float, float], joint_name: str) -> np.ndarray:
+        """Validate and convert a coordinate pair to a float numpy array."""
+        array = np.asarray(coords, dtype=float)
+        if array.shape != (2,):
+            raise ValueError(f"Joint '{joint_name}' must be a 2D coordinate pair")
+        if not np.all(np.isfinite(array)):
+            raise ValueError(f"Joint '{joint_name}' contains non-finite coordinates")
         return array
