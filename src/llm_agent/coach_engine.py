@@ -2,11 +2,10 @@
 Coach Engine - Orchestrates coaching feedback generation using LLM + tracking data.
 """
 
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 import logging
-from enum import Enum
 
-from .prompt_templates import PromptTemplates, FeedbackType
+from .prompt_templates import PromptTemplates
 from .model_loader import ModelLoader
 from ..tracking import PatternAnalyzer, ProfileManager
 
@@ -37,9 +36,10 @@ class CoachEngine:
         self.profile_manager = ProfileManager(profiles_dir=profiles_dir)
         self.pattern_analyzer = PatternAnalyzer()
         
-        # Load model
         try:
-            self.model_loader.load_model()
+            model_loaded = self.model_loader.load_model()
+            if not model_loaded:
+                logger.info("Coach engine will operate in analysis-only mode")
         except Exception as e:
             logger.warning(f"Could not load LLM model: {e}")
             logger.info("Coach engine will operate in analysis-only mode")
@@ -48,7 +48,9 @@ class CoachEngine:
         self,
         fencer_id: str,
         current_score: Dict[str, int],
-        num_recent_actions: int = 5
+        num_recent_actions: int = 5,
+        stats: Optional[Dict[str, Any]] = None,
+        recent_actions: Optional[List[str]] = None
     ) -> str:
         """
         Generate immediate feedback during bout.
@@ -57,21 +59,23 @@ class CoachEngine:
             fencer_id: Fencer identifier
             current_score: Current bout score
             num_recent_actions: Number of recent actions to consider
+            stats: Optional statistics from the active pipeline analyzer
+            recent_actions: Optional recent action labels from the active bout
             
         Returns:
             Feedback text
         """
         logger.info(f"Generating immediate feedback for {fencer_id}")
         
-        # Get current statistics
-        stats = self.pattern_analyzer.get_statistics_summary()
-        action_freqs = stats.get("action_frequencies", {})
+        stats = stats or self.pattern_analyzer.get_statistics_summary()
+        action_freqs = stats.get("action_frequencies", {}) or {}
         offensive_ratio = stats.get("offensive_ratio", 0.0)
         defensive_ratio = stats.get("defensive_ratio", 0.0)
-        patterns = stats.get("repetitive_patterns", [])
+        patterns = stats.get("repetitive_patterns", []) or []
         
-        # Get recent actions
-        recent_actions = self.pattern_analyzer.action_history[-num_recent_actions:]
+        if recent_actions is None:
+            recent_actions = self.pattern_analyzer.action_history
+        recent_actions = list(recent_actions[-num_recent_actions:])
         
         # Generate prompt
         prompt = PromptTemplates.get_immediate_feedback_prompt(
@@ -83,16 +87,12 @@ class CoachEngine:
             patterns=patterns
         )
         
-        # Get LLM response
-        try:
-            feedback = self.model_loader.generate(
-                prompt=prompt,
-                max_new_tokens=100,
-                temperature=0.7
-            )
-        except Exception as e:
-            logger.error(f"Error generating LLM feedback: {e}")
-            # Fallback to analytical feedback
+        feedback = self._try_generate(
+            prompt=prompt,
+            max_new_tokens=100,
+            temperature=0.7
+        )
+        if feedback is None:
             feedback = self._generate_analytical_feedback(
                 action_freqs, offensive_ratio, defensive_ratio
             )
@@ -103,7 +103,8 @@ class CoachEngine:
         self,
         fencer_id: str,
         opponent_id: Optional[str] = None,
-        current_score: Dict[str, int] = None
+        current_score: Optional[Dict[str, int]] = None,
+        fencer_stats: Optional[Dict[str, Any]] = None
     ) -> str:
         """
         Generate strategic advice during bout break.
@@ -112,6 +113,7 @@ class CoachEngine:
             fencer_id: Fencer identifier
             opponent_id: Optional opponent identifier
             current_score: Current bout score
+            fencer_stats: Optional statistics from the active pipeline analyzer
             
         Returns:
             Strategy text
@@ -120,8 +122,9 @@ class CoachEngine:
         
         current_score = current_score or {"player": 0, "opponent": 0}
         
-        # Get current fencer stats
-        fencer_stats = self.pattern_analyzer.get_statistics_summary()
+        fencer_stats = self._with_most_frequent_action(
+            fencer_stats or self.pattern_analyzer.get_statistics_summary()
+        )
         js_sf_ratio = fencer_stats.get("js_sf_ratio", 0.0)
         
         # Try to get opponent patterns
@@ -142,15 +145,12 @@ class CoachEngine:
             current_score=current_score
         )
         
-        # Get LLM response
-        try:
-            strategy = self.model_loader.generate(
-                prompt=prompt,
-                max_new_tokens=150,
-                temperature=0.7
-            )
-        except Exception as e:
-            logger.error(f"Error generating LLM strategy: {e}")
+        strategy = self._try_generate(
+            prompt=prompt,
+            max_new_tokens=150,
+            temperature=0.7
+        )
+        if strategy is None:
             strategy = self._generate_analytical_strategy(fencer_stats, opponent_patterns)
         
         return strategy
@@ -212,20 +212,55 @@ class CoachEngine:
             opponent_info=opponent_info
         )
         
-        # Get LLM response
-        try:
-            feedback = self.model_loader.generate(
-                prompt=prompt,
-                max_new_tokens=300,
-                temperature=0.7
-            )
-        except Exception as e:
-            logger.error(f"Error generating LLM conclusive feedback: {e}")
+        feedback = self._try_generate(
+            prompt=prompt,
+            max_new_tokens=300,
+            temperature=0.7
+        )
+        if feedback is None:
             feedback = self._generate_analytical_conclusive(
                 bout_statistics, historical_data, bout_result
             )
         
         return feedback
+
+    def _try_generate(
+        self,
+        prompt: str,
+        max_new_tokens: int,
+        temperature: float
+    ) -> Optional[str]:
+        """Generate with LLM when available; otherwise let callers use fallback."""
+        if not self.model_loader.is_loaded():
+            return None
+
+        try:
+            response = self.model_loader.generate(
+                prompt=prompt,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature
+            )
+        except Exception as e:
+            logger.warning(f"LLM generation failed; using analytical fallback: {e}")
+            return None
+
+        response = response.strip()
+        return response or None
+
+    def _with_most_frequent_action(self, stats: Dict[str, Any]) -> Dict[str, Any]:
+        """Ensure prompt stats include a readable most-frequent action field."""
+        enriched_stats = dict(stats)
+        action_freqs = enriched_stats.get("action_frequencies", {}) or {}
+        active_actions = [
+            (action, freq)
+            for action, freq in action_freqs.items()
+            if freq > 0
+        ]
+        if active_actions and "most_frequent_action" not in enriched_stats:
+            most_frequent_action, _ = max(active_actions, key=lambda item: item[1])
+            enriched_stats["most_frequent_action"] = most_frequent_action
+
+        return enriched_stats
     
     def _generate_analytical_feedback(
         self,
@@ -234,14 +269,30 @@ class CoachEngine:
         defensive_ratio: float
     ) -> str:
         """Generate feedback based on analysis (LLM fallback)."""
-        actions_str = ", ".join([f"{k}: {v:.0%}" for k, v in 
-                                list(action_freqs.items())[:3]])
-        
+        top_actions = [
+            (action, freq)
+            for action, freq in sorted(
+                action_freqs.items(),
+                key=lambda item: item[1],
+                reverse=True
+            )
+            if freq > 0
+        ][:3]
+        actions_str = ", ".join(
+            f"{action}: {freq:.0%}"
+            for action, freq in top_actions
+        )
+
+        if not actions_str:
+            return "Focus on execution. No stable action pattern yet; keep your distance and build clean entries."
+
         feedback = f"Focus on execution. Your primary actions: {actions_str}. "
         if offensive_ratio > 0.6:
             feedback += "Maintain aggressive momentum."
         elif defensive_ratio > 0.4:
             feedback += "Look for offensive opportunities."
+        else:
+            feedback += "Keep varying your entries and watch the opponent's response."
         
         return feedback
     
@@ -252,6 +303,8 @@ class CoachEngine:
     ) -> str:
         """Generate strategy based on analysis (LLM fallback)."""
         strategy = "Strategic Adjustment: "
+        if fencer_stats.get("total_actions", 0) == 0:
+            return strategy + "collect a few exchanges first, then adjust based on real action patterns."
         
         if opponent_patterns.get("defensive_ratio", 0) > 0.5:
             strategy += "Opponent is defensive - use more offensive actions. "

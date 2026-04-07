@@ -46,6 +46,8 @@ class ModelLoader:
         self.model = None
         self.tokenizer = None
         self.model_id = self._get_model_id()
+        self.load_attempted = False
+        self.load_error = None
         
     def _get_model_id(self) -> str:
         """Get model ID from supported models."""
@@ -56,7 +58,7 @@ class ModelLoader:
             )
         return self.SUPPORTED_MODELS[self.model_name]
     
-    def load_model(self):
+    def load_model(self) -> bool:
         """
         Load model and tokenizer.
         
@@ -66,31 +68,22 @@ class ModelLoader:
         from transformers import AutoModelForVision2Seq, AutoProcessor
         from transformers import BitsAndBytesConfig
         """
-        logger.info(f"Loading model: {self.model_id}")
-        
-        try:
-            # Placeholder - in production, use actual model loading code
-            # Example for LLaVA:
-            # if self.load_in_4bit:
-            #     from transformers import BitsAndBytesConfig
-            #     bnb_config = BitsAndBytesConfig(...)
-            #     model = AutoModelForVision2Seq.from_pretrained(
-            #         self.model_id,
-            #         quantization_config=bnb_config,
-            #         cache_dir=self.cache_dir
-            #     )
-            # else:
-            #     model = AutoModelForVision2Seq.from_pretrained(
-            #         self.model_id,
-            #         device_map=self.device,
-            #         cache_dir=self.cache_dir
-            #     )
-            
-            logger.info(f"Model loaded successfully: {self.model_id}")
-            
-        except Exception as e:
-            logger.error(f"Failed to load model: {e}")
-            raise
+        logger.info(f"Preparing LLM model: {self.model_id}")
+        self.load_attempted = True
+        self.load_error = None
+
+        # This MVP does not ship the heavyweight Hugging Face loading path yet.
+        # Returning False keeps CoachEngine in deterministic analytical fallback
+        # mode instead of pretending that a placeholder model is available.
+        logger.info(
+            "Real LLM loading is not implemented in this MVP; "
+            "using analytical coaching fallback"
+        )
+        return False
+
+    def is_loaded(self) -> bool:
+        """Return whether a real model backend is available for generation."""
+        return self.model is not None
     
     def generate(
         self,
@@ -113,7 +106,7 @@ class ModelLoader:
         Returns:
             Generated text response
         """
-        if self.model is None:
+        if not self.is_loaded():
             raise RuntimeError("Model not loaded. Call load_model() first.")
         
         logger.info(f"Generating response with {self.model_id}")
@@ -156,6 +149,9 @@ class ModelLoader:
             List of generated responses
         """
         responses = []
+        if not self.is_loaded():
+            logger.info("Model not loaded; returning empty batch responses")
+            return [""] * len(prompts)
         
         for prompt in prompts:
             try:
@@ -178,13 +174,10 @@ class ModelLoader:
             "model_id": self.model_id,
             "device": self.device,
             "quantized": self.load_in_4bit,
+            "load_attempted": self.load_attempted,
+            "load_error": self.load_error,
+            "loaded": self.is_loaded(),
         }
-        
-        if self.model is not None:
-            info["loaded"] = True
-            # Add more model-specific info if available
-        else:
-            info["loaded"] = False
         
         return info
     
