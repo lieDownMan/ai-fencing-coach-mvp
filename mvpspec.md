@@ -24,17 +24,28 @@ Current evidence gap: the repo documents plausible users, but the next research 
 
 ## 3. MVP Scope
 
-In scope:
+Implemented in the current debugged code path:
 
 - Native desktop workflow using Python and OpenCV.
-- Webcam or imported video input.
-- Two-fencer tracking in a side-view fencing scene.
-- Left/right fencer assignment by horizontal position.
-- Pose/keypoint extraction.
-- Dynamic distance and stance heuristics for lightweight coaching.
+- Imported video input through the CLI/app pipeline.
+- Pose/keypoint extraction with explicit `mock`, `ultralytics`, and `auto` backend behavior.
+- Single selected fencer skeleton per frame. For Ultralytics results, the largest detected person is selected.
+- Spatial normalization into a fixed 10-joint, 20-channel model feature tensor.
 - Six-class FenceNet/BiFenceNet footwork recognition as the model-based path.
-- Visual debugging UI with skeletons, boxes, labels, metrics, and feedback.
+- Sliding-window inference over long videos instead of collapsing every clip to 28 frames.
+- Pattern analysis for action frequencies, offensive/defensive ratio, JS/SF ratio, repeated patterns, and average confidence.
+- LLM coaching interface with deterministic analytical fallback when no real LLM is loaded.
+- Visual debugging UI rendering and headless-safe UI tests.
 - Athlete profile storage for longitudinal analysis.
+
+Planned or research-facing:
+
+- Webcam/live mode beyond the current menu shell.
+- Robust two-fencer tracking in a side-view fencing scene.
+- Left/right fencer assignment by horizontal position.
+- Dynamic distance and stance heuristics for lightweight coaching.
+- Trained checkpoints for meaningful action recognition.
+- Real LLM loading or API-backed generation.
 
 Out of scope:
 
@@ -49,26 +60,31 @@ Out of scope:
 
 ```text
 1. Input
-   Webcam stream or imported bout video.
+   Current path: imported bout video through the CLI/app pipeline.
+   Planned path: webcam stream or imported bout video.
 
 2. Pose estimation and tracking
-   Detect people, keep the two largest fencer candidates, and assign Fencer L/R by center X position.
+   Current path: extract one usable skeleton per frame using mock pose or the largest Ultralytics person detection.
+   Planned path: detect people, keep the two largest fencer candidates, and assign Fencer L/R by center X position.
 
 3. Feature extraction
-   Extract keypoints, bounding boxes, front ankles, stance width, and engagement distance.
+   Current path: export a fixed 10-joint skeleton tensor and keep `front_ankle` as a normalization reference.
+   Planned path: also extract bounding boxes, stance width, and engagement distance.
 
 4. Motion understanding
-   MVP path: apply dynamic rules such as "too close" and stance-width checks.
-   Model path: normalize skeleton sequences and classify footwork with FenceNet/BiFenceNet.
+   Current path: classify normalized skeleton windows with FenceNet/BiFenceNet.
+   Planned path: add dynamic rules such as "too close" and stance-width checks.
 
 5. Pattern analysis
    Aggregate action frequencies, offensive/defensive ratios, JS/SF ratio, and repeated patterns.
 
 6. Coaching feedback
-   Generate concise live feedback, break strategy, or post-bout summary.
+   Current path: build prompts but use analytical fallback unless a real LLM backend is loaded.
+   Planned path: generate concise live feedback, break strategy, or post-bout summary using the best available coaching backend.
 
 7. Interface and persistence
-   Show annotated video, feedback, and metrics. Save athlete profile updates where relevant.
+   Current path: return CLI summaries, render the OpenCV dashboard when requested, and save athlete profile updates.
+   Planned path: show annotated video, feedback, and metrics in a live coaching dashboard.
 ```
 
 ## 5. Core Data and State
@@ -81,6 +97,12 @@ Out of scope:
 | `stance_width` | Within-fencer front/back foot distance for form feedback. |
 | `audio_cooldown` | Prevents repeated audio prompts in live mode. |
 | athlete profile | Stores bout history and longitudinal metrics. |
+
+Current implementation note:
+
+- The current model input uses `nose`, `front_wrist`, `front_elbow`, `front_shoulder`, `left_hip`, `right_hip`, `left_knee`, `right_knee`, `left_ankle`, and `right_ankle`.
+- `front_ankle` is still required by normalization, but it is not exported as an extra model feature channel.
+- This keeps inference at `10 joints * 2 coordinates = 20 channels`.
 
 ## 6. Target Footwork Classes
 
@@ -153,7 +175,63 @@ Before claiming this is a strong HCI contribution, collect:
 - Three current alternatives or workarounds, such as coach review, video self-analysis, generic sports-analysis apps, or fencing-specific training tools.
 - One low-fidelity feedback test: show annotated clips or Wizard-of-Oz prompts and ask whether the feedback is understandable and actionable.
 
-## 11. Document Ownership
+## 11. Engineering Validation Status
+
+Recent debug milestones:
+
+- Pose backend behavior is explicit; mock mode is deterministic and real Ultralytics mode fails clearly when unavailable.
+- Preprocessing and inference now agree on `20` model input channels.
+- Long videos are preserved for sliding-window inference.
+- Pattern statistics reset between videos and profile result accounting no longer treats `completed` as a loss.
+- Coaching uses the pipeline's actual pattern statistics and falls back cleanly when no LLM is loaded.
+- CLI/config handling and UI rendering are testable without opening windows.
+
+Current local sample-video smoke:
+
+```bash
+python app.py --video video/fencing_match.mp4 --fencer-id smoke_fencer --device cpu --pose-backend mock --profiles-dir /tmp/ai-fencing-coach-smoke-profiles
+```
+
+Observed result in the current environment:
+
+- `video/fencing_match.mp4` opens with 776 frames at 30 FPS.
+- Mock pose mode processes all 776 frames.
+- Sliding-window inference emits 54 classifications.
+- The post-bout feedback path completes using analytical fallback.
+- The action labels are not semantically meaningful until trained model weights are provided.
+- Real Ultralytics pose was not run because `ultralytics` is not installed in the current venv.
+
+## 12. Further Work
+
+Further work should be split into two tracks so the prototype can keep improving without overstating what the actual coaching system already does.
+
+### 12.1 Current Prototype
+
+These items improve the reliability, testability, and clarity of the current repo:
+
+- Install and smoke-test the real `ultralytics` backend on `video/fencing_match.mp4`, then document the exact model file and dependency version used.
+- Add or link a trained FenceNet/BiFenceNet checkpoint and document the expected checkpoint format.
+- Build a small labeled clip set so tests can check semantic action correctness, not only runtime shape and plumbing.
+- Add pose-quality handling for low-confidence, missing, or intermittent skeleton frames.
+- Add JSON report output for processed videos, including frame count, classification windows, action frequencies, confidence, and feedback.
+- Add a lightweight CI profile that runs all deterministic tests while skipping local ignored media files when absent.
+- Improve CLI output so users can tell whether they are running mock pose, real YOLO pose, random model weights, or trained model weights.
+- Add a short developer note explaining that `mock` pose validates the system pipeline but does not validate pose accuracy.
+
+### 12.2 Actual Coaching System
+
+These items move beyond the current prototype toward a useful deployed or study-ready system:
+
+- Implement robust two-fencer tracking, left/right assignment, and identity persistence across exchanges.
+- Add engagement-distance, stance-width, recovery, and timing feedback grounded in fencing coaching concepts.
+- Train or fine-tune action-recognition models on fencing-specific labeled data and evaluate them against held-out real bouts.
+- Add coach-facing review UI that links feedback to specific moments in the video rather than only giving aggregate summaries.
+- Add a real LLM backend or carefully designed prompt/API layer with coach-reviewed fallback templates and guardrails.
+- Study feedback trust and usefulness with beginner/intermediate fencers and at least one coach before making strong HCI claims.
+- Compare against realistic alternatives such as coach review, self-review video, and generic sports-analysis tools.
+- Decide the deployment target: local desktop research artifact, coaching-club tool, or broader product prototype.
+
+## 13. Document Ownership
 
 - Keep this file as the canonical workflow/spec.
 - Keep [README.md](README.md) as the entry point and navigation document.

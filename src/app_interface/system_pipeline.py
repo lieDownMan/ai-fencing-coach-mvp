@@ -29,7 +29,10 @@ class SystemPipeline:
         use_bifencenet: bool = False,
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         model_checkpoint: Optional[str] = None,
-        profiles_dir: str = "data/fencer_profiles/"
+        profiles_dir: str = "data/fencer_profiles/",
+        pose_backend: str = "auto",
+        pose_model_path: Optional[str] = None,
+        llm_model_name: str = "llava-next"
     ):
         """
         Initialize System Pipeline.
@@ -39,6 +42,9 @@ class SystemPipeline:
             device: Device to use for models (cuda or cpu)
             model_checkpoint: Path to pretrained model weights
             profiles_dir: Directory for fencer profiles
+            pose_backend: Pose estimator backend ("auto", "ultralytics", or "mock")
+            pose_model_path: Optional pose model path
+            llm_model_name: CoachEngine LLM model name
         """
         self.device = device
         self.use_bifencenet = use_bifencenet
@@ -46,16 +52,21 @@ class SystemPipeline:
         logger.info(f"Initializing System Pipeline on device: {device}")
         
         # Phase 1: Pose Estimation
-        self.pose_estimator = PoseEstimator()
+        self.pose_estimator = PoseEstimator(
+            model_path=pose_model_path,
+            backend=pose_backend
+        )
         
         # Phase 2: Preprocessing
         self.spatial_normalizer = SpatialNormalizer()
         self.temporal_sampler = TemporalSampler(target_length=28)
+        self.model_joint_names = list(SpatialNormalizer.MODEL_JOINT_NAMES)
+        self.model_input_channels = len(self.model_joint_names) * 2
         
         # Phase 3: FenceNet Model
         if use_bifencenet:
             self.model = BiFenceNet(
-                input_channels=20,  # 10 joints * 2 coordinates
+                input_channels=self.model_input_channels,
                 hidden_channels=64,
                 num_tcn_blocks=6,
                 device=device
@@ -63,7 +74,7 @@ class SystemPipeline:
             logger.info("Using BiFenceNet model")
         else:
             self.model = FenceNet(
-                input_channels=20,
+                input_channels=self.model_input_channels,
                 hidden_channels=64,
                 num_tcn_blocks=6,
                 device=device
@@ -74,10 +85,17 @@ class SystemPipeline:
         if model_checkpoint and Path(model_checkpoint).exists():
             try:
                 checkpoint = torch.load(model_checkpoint, map_location=device)
-                self.model.load_state_dict(checkpoint)
+                state_dict = (
+                    checkpoint["state_dict"]
+                    if isinstance(checkpoint, dict) and "state_dict" in checkpoint
+                    else checkpoint
+                )
+                self.model.load_state_dict(state_dict)
                 logger.info(f"Loaded model checkpoint: {model_checkpoint}")
             except Exception as e:
                 logger.warning(f"Could not load checkpoint: {e}")
+        elif model_checkpoint:
+            logger.warning(f"Model checkpoint not found: {model_checkpoint}")
         
         self.model.eval()
         
@@ -86,7 +104,11 @@ class SystemPipeline:
         self.profile_manager = ProfileManager(profiles_dir=profiles_dir)
         
         # Phase 5: LLM Coaching
-        self.coach_engine = CoachEngine(profiles_dir=profiles_dir, device=device)
+        self.coach_engine = CoachEngine(
+            model_name=llm_model_name,
+            profiles_dir=profiles_dir,
+            device=device
+        )
         
         # Runtime state
         self.current_bout_stats = {}
@@ -114,6 +136,7 @@ class SystemPipeline:
         logger.info(f"Processing video: {video_path}")
         
         self.current_fencer_id = fencer_id
+        self.pattern_analyzer.clear_history()
         results = {
             "video_path": video_path,
             "fencer_id": fencer_id,
@@ -136,12 +159,13 @@ class SystemPipeline:
             logger.info("Phase 2: Preprocessing skeleton...")
             self.spatial_normalizer.fit(skeletons)
             normalized_skeletons = self.spatial_normalizer.normalize_sequence(skeletons)
-            resampled_skeletons = self.temporal_sampler.sample(normalized_skeletons)
-            
-            # Convert to numpy array
             skeleton_array = self.spatial_normalizer.get_normalized_array(
-                normalized_skeletons
+                normalized_skeletons,
+                joint_names=self.model_joint_names,
+                already_normalized=True
             )
+            if skeleton_array.shape[0] < self.temporal_sampler.target_length:
+                skeleton_array = self.temporal_sampler.sample_array(skeleton_array)
             
             # Phase 3: Model Inference
             logger.info("Phase 3: Running FenceNet inference...")
@@ -154,6 +178,7 @@ class SystemPipeline:
                 self.pattern_analyzer.add_classification(class_idx, confidence)
             
             results["statistics"] = self.pattern_analyzer.get_statistics_summary()
+            self.current_bout_stats = results["statistics"]
             
             logger.info("Video processing complete")
             
@@ -180,56 +205,109 @@ class SystemPipeline:
         Returns:
             List of (class_idx, confidence) tuples
         """
+        self._validate_inference_array(skeleton_array)
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+
         classifications = []
         num_frames = skeleton_array.shape[0]
+        actual_channels = skeleton_array.shape[1] * skeleton_array.shape[2]
+        if actual_channels != self.model_input_channels:
+            raise ValueError(
+                "Skeleton array channel mismatch: "
+                f"expected {self.model_input_channels}, got {actual_channels}"
+            )
         
         # Sliding window inference
         window_size = 28  # Match temporal sampler
         stride = 14  # 50% overlap
-        
+
+        windows = [
+            skeleton_array[start_idx:start_idx + window_size]
+            for start_idx in range(0, num_frames - window_size + 1, stride)
+        ]
+        if not windows:
+            return classifications
+
         with torch.no_grad():
-            for start_idx in range(0, num_frames - window_size + 1, stride):
-                end_idx = start_idx + window_size
-                window = skeleton_array[start_idx:end_idx]
-                
-                # Prepare input tensor
-                # Reshape from (28, 10, 2) to (28, 20) then to (1, 20, 28)
-                flat_window = window.reshape(window_size, -1)  # (28, 20)
-                input_tensor = torch.from_numpy(flat_window).float()
-                input_tensor = input_tensor.permute(1, 0).unsqueeze(0)  # (1, 20, 28)
+            if batch_process:
+                batches = [
+                    windows[start_idx:start_idx + batch_size]
+                    for start_idx in range(0, len(windows), batch_size)
+                ]
+            else:
+                batches = [[window] for window in windows]
+
+            for batch_windows in batches:
+                # Prepare input tensor:
+                # (batch, 28, 10, 2) -> (batch, 28, 20) -> (batch, 20, 28)
+                batch_array = np.stack(batch_windows, axis=0)
+                flat_windows = batch_array.reshape(len(batch_windows), window_size, -1)
+                input_tensor = torch.from_numpy(flat_windows).float()
+                input_tensor = input_tensor.permute(0, 2, 1)
                 input_tensor = input_tensor.to(self.device)
                 
                 # Forward pass
                 logits = self.model(input_tensor)
-                probabilities = torch.softmax(logits, dim=1)[0]
-                
-                # Get prediction
-                pred_class = torch.argmax(probabilities).item()
-                confidence = probabilities[pred_class].item()
-                
-                classifications.append((pred_class, confidence))
+                probabilities = torch.softmax(logits, dim=1)
+
+                pred_classes = torch.argmax(probabilities, dim=1)
+                confidences = probabilities.gather(
+                    1,
+                    pred_classes.unsqueeze(1)
+                ).squeeze(1)
+
+                classifications.extend(
+                    (int(pred_class), float(confidence))
+                    for pred_class, confidence in zip(
+                        pred_classes.cpu(),
+                        confidences.cpu()
+                    )
+                )
         
         return classifications
+
+    def _validate_inference_array(self, skeleton_array: np.ndarray):
+        """Validate Phase 3 inference input shape and values."""
+        if not isinstance(skeleton_array, np.ndarray):
+            raise TypeError("skeleton_array must be a numpy array")
+        if skeleton_array.ndim != 3 or skeleton_array.shape[2] != 2:
+            raise ValueError(
+                "skeleton_array must have shape (num_frames, num_joints, 2)"
+            )
+        if skeleton_array.shape[0] == 0:
+            raise ValueError("skeleton_array must contain at least one frame")
+        if skeleton_array.shape[1] == 0:
+            raise ValueError("skeleton_array must contain at least one joint")
+        if not np.all(np.isfinite(skeleton_array)):
+            raise ValueError("skeleton_array contains non-finite values")
     
     def get_immediate_feedback(self) -> str:
         """Get immediate feedback during bout."""
         if not self.current_fencer_id:
             return "Set fencer ID first"
+
+        stats = self.pattern_analyzer.get_statistics_summary()
         
         return self.coach_engine.generate_immediate_feedback(
             fencer_id=self.current_fencer_id,
-            current_score=self.current_score
+            current_score=self.current_score,
+            stats=stats,
+            recent_actions=list(self.pattern_analyzer.action_history)
         )
     
     def get_break_strategy(self) -> str:
         """Get strategy advice during break."""
         if not self.current_fencer_id:
             return "Set fencer ID first"
+
+        stats = self.pattern_analyzer.get_statistics_summary()
         
         return self.coach_engine.generate_break_strategy(
             fencer_id=self.current_fencer_id,
             opponent_id=self.current_opponent_id,
-            current_score=self.current_score
+            current_score=self.current_score,
+            fencer_stats=stats
         )
     
     def get_conclusive_feedback(self, bout_result: str) -> str:
@@ -286,5 +364,6 @@ class SystemPipeline:
     def reset_bout(self):
         """Reset for new bout."""
         self.pattern_analyzer.clear_history()
+        self.current_bout_stats = {}
         self.current_score = {"player": 0, "opponent": 0}
         logger.info("Bout reset")

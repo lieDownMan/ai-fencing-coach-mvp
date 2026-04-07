@@ -24,6 +24,8 @@ class TemporalSampler:
         Args:
             target_length: Target number of frames (default: 28)
         """
+        if target_length <= 0:
+            raise ValueError("target_length must be positive")
         self.target_length = target_length
     
     def sample(self, skeleton_sequence: List[Dict[str, Tuple[float, float]]]) -> List[Dict[str, Tuple[float, float]]]:
@@ -39,11 +41,12 @@ class TemporalSampler:
         """
         num_frames = len(skeleton_sequence)
         
-        if num_frames == self.target_length:
-            return skeleton_sequence
-        
         if num_frames == 0:
             raise ValueError("Empty skeleton sequence")
+        self._validate_consistent_keys(skeleton_sequence)
+
+        if num_frames == self.target_length:
+            return skeleton_sequence
         
         if num_frames < self.target_length:
             # Interpolate to increase number of frames
@@ -127,6 +130,13 @@ class TemporalSampler:
             Resampled array of shape (target_length, num_joints, 2)
         """
         num_frames = skeleton_array.shape[0]
+        if skeleton_array.ndim != 3 or skeleton_array.shape[2] != 2:
+            raise ValueError(
+                "skeleton_array must have shape (num_frames, num_joints, 2)"
+            )
+        if num_frames == 0:
+            raise ValueError("Empty skeleton array")
+
         num_joints = skeleton_array.shape[1]
         
         if num_frames == self.target_length:
@@ -151,3 +161,15 @@ class TemporalSampler:
                 resampled[target_idx] = frame1 + alpha * (frame2 - frame1)
         
         return resampled
+
+    @staticmethod
+    def _validate_consistent_keys(
+        skeleton_sequence: List[Dict[str, Tuple[float, float]]]
+    ):
+        """Ensure every frame exposes the same joints before interpolation."""
+        expected_keys = set(skeleton_sequence[0].keys())
+        for frame_idx, frame in enumerate(skeleton_sequence[1:], start=1):
+            if set(frame.keys()) != expected_keys:
+                raise KeyError(
+                    f"Frame {frame_idx} has inconsistent skeleton joints"
+                )

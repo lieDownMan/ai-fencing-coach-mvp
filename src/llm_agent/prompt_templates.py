@@ -71,12 +71,21 @@ Format your response with clear sections for strengths, improvements, and next s
         Returns:
             Formatted prompt for LLM
         """
+        top_actions = ", ".join(
+            f"{action}: {frequency:.0%}"
+            for action, frequency in sorted(
+                action_frequencies.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )[:3]
+        )
+
         context = f"""Current Bout Status:
 - Score: Your {current_score.get('player', 0)} - Opponent {current_score.get('opponent', 0)}
 - Recent Actions: {', '.join(recent_actions[-5:])}
 - Offensive Ratio: {offensive_ratio:.1%}
 - Defensive Ratio: {defensive_ratio:.1%}
-- Top Actions: {sorted(action_frequencies.items(), key=lambda x: x[1], reverse=True)[:3]}
+- Top Actions: {top_actions}
 """
         
         if patterns:
@@ -141,6 +150,10 @@ Provide tactical adjustments for the next minute of bout."""
         Returns:
             Formatted prompt for LLM
         """
+        average_confidence = bout_stats.get(
+            "average_confidence",
+            bout_stats.get("avg_confidence", 0)
+        )
         context = f"""Post-Bout Performance Analysis:
 
 Bout Result: {bout_result.upper()}
@@ -149,7 +162,7 @@ This Bout Metrics:
 - Defensive Ratio: {bout_stats.get('defensive_ratio', 0):.1%}
 - Offensive Ratio: {bout_stats.get('offensive_ratio', 0):.1%}
 - JS/SF Ratio: {bout_stats.get('js_sf_ratio', 0):.2f}
-- Average Action Confidence: {bout_stats.get('avg_confidence', 0):.1%}
+- Average Action Confidence: {average_confidence:.1%}
 
 Historical Comparison:
 - Previous Average Offensive Ratio: {historical_progression.get('avg_offensive', 0):.1%}
