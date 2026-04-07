@@ -58,6 +58,14 @@ Use a real YOLO pose backend when `ultralytics` and the pose model are installed
 python app.py --video path/to/bout.mp4 --fencer-id athlete_001 --pose-backend ultralytics --pose-model yolov8n-pose.pt
 ```
 
+Write a JSON report for review or downstream analysis:
+
+```bash
+python app.py --video path/to/bout.mp4 --fencer-id athlete_001 --pose-backend mock --report reports/bout_report.json
+```
+
+If `output.save_reports: true` is enabled in `config.yaml`, the CLI writes an auto-named report under `output.reports_dir` unless `--no-report` is passed.
+
 ## Help
 
 ```bash
@@ -67,6 +75,7 @@ python app.py --help
 ## Outputs To Check
 
 - `data/fencer_profiles/` for athlete profile JSON files.
+- `reports/` for JSON video reports when enabled by config or `--report`.
 - CLI summary output for frames processed and post-bout feedback.
 - The OpenCV preview window for interactive visual debugging.
 

@@ -25,6 +25,8 @@ class SystemPipeline:
     """
 
     SUPPORTED_CHECKPOINT_FORMAT_VERSION = 1
+    INFERENCE_WINDOW_SIZE = 28
+    INFERENCE_STRIDE = 14
     
     def __init__(
         self,
@@ -138,7 +140,9 @@ class SystemPipeline:
             "fencer_id": fencer_id,
             "frames_processed": 0,
             "classifications": [],
-            "statistics": {}
+            "statistics": {},
+            "window_size": self.INFERENCE_WINDOW_SIZE,
+            "window_stride": self.INFERENCE_STRIDE,
         }
         
         try:
@@ -215,8 +219,8 @@ class SystemPipeline:
             )
         
         # Sliding window inference
-        window_size = 28  # Match temporal sampler
-        stride = 14  # 50% overlap
+        window_size = self.INFERENCE_WINDOW_SIZE
+        stride = self.INFERENCE_STRIDE
 
         windows = [
             skeleton_array[start_idx:start_idx + window_size]
@@ -417,6 +421,28 @@ class SystemPipeline:
                 "Checkpoint action_classes mismatch: "
                 f"expected {expected_action_classes}, got {action_classes}"
             )
+
+    def get_runtime_metadata(self) -> Dict[str, Any]:
+        """Return JSON-friendly metadata about the active pipeline backends."""
+        pose_model = self.pose_estimator.model_path
+        if pose_model is None and self.pose_estimator.backend == "ultralytics":
+            pose_model = self.pose_estimator.DEFAULT_MODEL_PATH
+
+        return {
+            "device": self.device,
+            "model_type": "bifencenet" if self.use_bifencenet else "fencenet",
+            "model_input_channels": self.model_input_channels,
+            "model_checkpoint": self.model_checkpoint_path,
+            "model_checkpoint_loaded": self.model_checkpoint_loaded,
+            "model_checkpoint_error": self.model_checkpoint_error,
+            "model_checkpoint_metadata": self.model_checkpoint_metadata,
+            "model_weights": (
+                "checkpoint" if self.model_checkpoint_loaded else "random"
+            ),
+            "pose_backend": self.pose_estimator.backend,
+            "pose_requested_backend": self.pose_estimator.requested_backend,
+            "pose_model": pose_model,
+        }
 
     def get_model_status(self) -> Dict[str, Any]:
         """Return JSON-friendly status for action-recognition model weights."""

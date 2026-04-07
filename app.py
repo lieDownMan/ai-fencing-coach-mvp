@@ -6,13 +6,16 @@ It demonstrates the complete pipeline from video input to coaching feedback.
 """
 
 import argparse
+import json
 import logging
 from pathlib import Path
+import re
 from typing import Any, Dict, Optional, Sequence
 
 import yaml
 
 from src.app_interface.system_pipeline import SystemPipeline
+from src.tracking import PatternAnalyzer
 
 # Configure logging
 logging.basicConfig(
@@ -77,6 +80,139 @@ def _format_model_status(status: Dict[str, Any]) -> str:
         error = status.get("model_checkpoint_error") or "checkpoint was not loaded"
         return f"Model weights: random ({model_type}; {error})"
     return f"Model weights: random ({model_type}; no checkpoint provided)"
+
+
+def _config_bool(value: Any, default: bool = False) -> bool:
+    """Parse optional YAML/CLI-style booleans predictably."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return bool(value)
+
+
+def _safe_filename_component(value: Any, fallback: str) -> str:
+    """Return a filesystem-safe component for generated report filenames."""
+    component = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or fallback))
+    component = component.strip("._")
+    return component or fallback
+
+
+def _as_int(value: Any, default: int = 0) -> int:
+    """Convert JSON-ish numeric values to int without leaking numpy scalars."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_float(value: Any, default: float = 0.0) -> float:
+    """Convert JSON-ish numeric values to float without leaking numpy scalars."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _json_default(value: Any) -> Any:
+    """Handle values json.dump cannot serialize by default."""
+    if isinstance(value, Path):
+        return str(value)
+    if hasattr(value, "item"):
+        return value.item()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
+def build_video_report(
+    results: Dict[str, Any],
+    runtime_metadata: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Build a stable JSON report payload for a processed video."""
+    window_size = _as_int(results.get("window_size"), default=28)
+    window_stride = _as_int(results.get("window_stride"), default=14)
+    classification_windows = []
+
+    for window_index, classification in enumerate(results.get("classifications", [])):
+        class_idx, confidence = classification
+        class_idx_int = _as_int(class_idx, default=-1)
+        start_frame = window_index * window_stride
+        classification_windows.append({
+            "window_index": window_index,
+            "window_start_frame": start_frame,
+            "window_end_frame_exclusive": start_frame + window_size,
+            "class_idx": class_idx_int,
+            "action": PatternAnalyzer.ACTION_CLASSES.get(class_idx_int, "unknown"),
+            "confidence": _as_float(confidence),
+        })
+
+    statistics = results.get("statistics") or {}
+
+    return {
+        "schema_version": 1,
+        "ok": bool(results.get("ok", False)),
+        "video_path": str(results.get("video_path", "")),
+        "fencer_id": str(results.get("fencer_id", "")),
+        "opponent_id": results.get("opponent_id"),
+        "frames_processed": _as_int(results.get("frames_processed")),
+        "window_size": window_size,
+        "window_stride": window_stride,
+        "classification_window_count": len(classification_windows),
+        "classification_windows": classification_windows,
+        "statistics": {
+            "total_actions": _as_int(
+                statistics.get("total_actions"),
+                default=len(classification_windows)
+            ),
+            "action_frequencies": statistics.get("action_frequencies", {}),
+            "offensive_ratio": _as_float(statistics.get("offensive_ratio")),
+            "defensive_ratio": _as_float(statistics.get("defensive_ratio")),
+            "js_sf_ratio": _as_float(statistics.get("js_sf_ratio")),
+            "repetitive_patterns": statistics.get("repetitive_patterns", []),
+            "average_confidence": _as_float(
+                statistics.get("average_confidence")
+            ),
+        },
+        "feedback": str(results.get("feedback", "")),
+        "runtime": runtime_metadata or {},
+    }
+
+
+def _default_report_path(results: Dict[str, Any], reports_dir: str) -> Path:
+    """Build the default report path for a processed video result."""
+    video_stem = _safe_filename_component(
+        Path(str(results.get("video_path") or "video")).stem,
+        "video"
+    )
+    fencer_id = _safe_filename_component(results.get("fencer_id"), "fencer")
+    return Path(reports_dir).expanduser() / f"{video_stem}_{fencer_id}_report.json"
+
+
+def write_json_report(
+    results: Dict[str, Any],
+    output_path: Optional[Path] = None,
+    reports_dir: str = "reports/",
+    runtime_metadata: Optional[Dict[str, Any]] = None
+) -> Path:
+    """Write a processed-video JSON report and return the written path."""
+    report_path = (
+        Path(output_path).expanduser()
+        if output_path is not None
+        else _default_report_path(results, reports_dir)
+    )
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report = build_video_report(results, runtime_metadata=runtime_metadata)
+
+    with report_path.open("w", encoding="utf-8") as report_file:
+        json.dump(report, report_file, indent=2, sort_keys=True, default=_json_default)
+        report_file.write("\n")
+
+    return report_path
 
 
 class FencingCoachApplication:
@@ -204,6 +340,7 @@ class FencingCoachApplication:
 
             results["ok"] = True
             results["feedback"] = feedback
+            results["opponent_id"] = opponent_id
             return results
         except Exception as e:
             if raise_on_error:
@@ -215,6 +352,10 @@ class FencingCoachApplication:
     def get_model_status(self) -> Dict[str, Any]:
         """Return action-recognition model checkpoint status."""
         return self.pipeline.get_model_status()
+
+    def get_runtime_metadata(self) -> Dict[str, Any]:
+        """Return JSON-friendly runtime metadata for reports."""
+        return self.pipeline.get_runtime_metadata()
 
     def run_interactive_mode(self):
         """Run interactive UI for real-time coaching."""
@@ -355,6 +496,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Path to YOLO pose model weights"
     )
     parser.add_argument(
+        "--report",
+        type=str,
+        help="Path to write a JSON report for a processed video"
+    )
+    parser.add_argument(
+        "--reports-dir",
+        type=str,
+        help="Directory for auto-named JSON reports when enabled by config"
+    )
+    parser.add_argument(
+        "--no-report",
+        action="store_true",
+        help="Disable config-driven JSON report writing"
+    )
+    parser.add_argument(
         "--interactive",
         action="store_true",
         help="Run in interactive mode"
@@ -391,6 +547,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     pose_model = args.pose_model or _config_value(
         config, "pose", "model", default=None
+    )
+    report_path = Path(args.report).expanduser() if args.report else None
+    reports_dir = args.reports_dir or _config_value(
+        config, "output", "reports_dir", default="reports/"
+    )
+    save_report_from_config = _config_bool(
+        _config_value(config, "output", "save_reports", default=False)
+    )
+    should_write_report = (
+        report_path is not None
+        or (save_report_from_config and not args.no_report)
     )
     fencer_id = args.fencer_id or _config_value(
         config, "athlete", "default_id", default="fencer_001"
@@ -452,6 +619,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(_format_model_status(model_status_getter()))
     if results.get("feedback"):
         print(f"Feedback: {results['feedback']}")
+    if should_write_report:
+        try:
+            metadata_getter = getattr(app, "get_runtime_metadata", None)
+            runtime_metadata = metadata_getter() if metadata_getter else {}
+            written_report = write_json_report(
+                results,
+                output_path=report_path,
+                reports_dir=reports_dir,
+                runtime_metadata=runtime_metadata
+            )
+        except OSError as e:
+            logger.error(f"Could not write JSON report: {e}")
+            print(f"Could not write JSON report: {e}")
+            return 1
+        print(f"Report written: {written_report}")
 
     return 0
 
