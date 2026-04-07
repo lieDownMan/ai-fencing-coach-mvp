@@ -45,6 +45,23 @@ class TestPoseEstimation:
         with pytest.raises(RuntimeError, match="Pose estimator is unavailable"):
             estimator.extract_frame_skeleton(np.zeros((10, 10, 3), dtype=np.uint8))
 
+    def test_pose_estimator_mock_frame_fencers_returns_left_right_candidates(self):
+        """Test mock pose exposes two visualizable fencer candidates."""
+        from src.pose_estimation import PoseEstimator
+
+        estimator = PoseEstimator(backend="mock")
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        detections = estimator.extract_frame_fencers(frame)
+        tracking_frame = estimator.fencer_tracker.build_frame(0, detections)
+
+        assert len(detections) == 2
+        assert tracking_frame["tracked_fencer_count"] == 2
+        assert [track["track_id"] for track in tracking_frame["tracks"]] == [
+            "fencer_L",
+            "fencer_R",
+        ]
+        assert tracking_frame["engagement_distance_px"] > 0
+
     def test_pose_estimator_validate_rejects_invalid_coordinates(self):
         """Test skeleton validation rejects missing or non-finite coordinates."""
         from src.pose_estimation import PoseEstimator
@@ -308,6 +325,36 @@ class TestTracking:
         assert transitions == {"R": {"SF": 1}, "SF": {"R": 1}}
         assert type(transitions["R"]) is dict
     
+    def test_fencer_tracker_assigns_left_right_by_center_x(self):
+        """Test two-fencer tracker keeps largest candidates and labels left/right."""
+        from src.tracking import FencerTracker
+
+        tracker = FencerTracker()
+        left = {
+            "nose": (100.0, 10.0),
+            "front_ankle": (120.0, 100.0),
+        }
+        right = {
+            "nose": (300.0, 10.0),
+            "front_ankle": (280.0, 100.0),
+        }
+
+        frame = tracker.build_frame(
+            7,
+            [
+                tracker.candidate_from_skeleton(right, source_rank=0),
+                tracker.candidate_from_skeleton(left, source_rank=1),
+            ]
+        )
+        summary = tracker.summarize([frame])
+
+        assert frame["frame_index"] == 7
+        assert [track["side"] for track in frame["tracks"]] == ["left", "right"]
+        assert frame["tracks"][0]["track_id"] == "fencer_L"
+        assert frame["engagement_distance_px"] == 160.0
+        assert summary["frames_with_two_fencers"] == 1
+        assert summary["two_fencer_coverage"] == 1.0
+
     def test_profile_manager_initialization(self):
         """Test ProfileManager initialization."""
         from src.tracking import ProfileManager
@@ -475,6 +522,27 @@ class TestAppInterface:
                 "average_confidence": 0.575,
             },
             "feedback": "Practice recovering after lunges.",
+            "two_fencer_tracking": {
+                "schema_version": 1,
+                "strategy": "largest_two_candidates_sorted_by_center_x",
+                "identity_persistence": "side-based",
+                "summary": {
+                    "frames_analyzed": 42,
+                    "frames_with_two_fencers": 40,
+                    "two_fencer_coverage": 40 / 42,
+                    "average_engagement_distance_px": 312.5,
+                },
+                "frames": [
+                    {
+                        "frame_index": 0,
+                        "tracked_fencer_count": 2,
+                        "tracks": [
+                            {"track_id": "fencer_L", "center": [10.0, 20.0]},
+                            {"track_id": "fencer_R", "center": [50.0, 20.0]},
+                        ],
+                    }
+                ],
+            },
         }
 
         report_path = write_json_report(
@@ -492,6 +560,9 @@ class TestAppInterface:
         assert report["statistics"]["average_confidence"] == 0.575
         assert report["feedback"] == "Practice recovering after lunges."
         assert report["runtime"]["pose_backend"] == "mock"
+        tracking = report["two_fencer_tracking"]
+        assert tracking["summary"]["frames_with_two_fencers"] == 40
+        assert tracking["frames"][0]["tracks"][0]["track_id"] == "fencer_L"
 
     def test_main_writes_json_report_from_cli_flag(
         self,
@@ -963,6 +1034,8 @@ class TestAppInterface:
 
         assert calls == [(56, 10, 2)]
         assert len(results["classifications"]) == 3
+        assert results["two_fencer_tracking"]["summary"]["frames_analyzed"] == 56
+        assert results["two_fencer_tracking"]["summary"]["frames_with_one_fencer"] == 56
 
     def test_system_pipeline_resets_pattern_history_per_video(self):
         """Test Phase 4 statistics are per-video, not accumulated across videos."""
@@ -1093,6 +1166,9 @@ class TestIntegration:
         assert results["frames_processed"] == frame_count
         assert len(results["classifications"]) == expected_windows
         assert results["statistics"]["total_actions"] == expected_windows
+        tracking_summary = results["two_fencer_tracking"]["summary"]
+        assert tracking_summary["frames_with_two_fencers"] == frame_count
+        assert tracking_summary["two_fencer_coverage"] == 1.0
         assert results["feedback"]
 
 
