@@ -142,6 +142,45 @@ def _as_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _optional_positive_float(value: Any, label: str) -> Optional[float]:
+    """Parse optional positive numeric CLI/config values."""
+    if value is None or value == "":
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be a number") from exc
+    if parsed <= 0:
+        raise ValueError(f"{label} must be greater than 0")
+    return parsed
+
+
+def _build_height_calibration(
+    left_height_cm: Any = None,
+    right_height_cm: Any = None
+) -> Dict[str, float]:
+    """Build optional per-side height calibration for annotated videos."""
+    calibration: Dict[str, float] = {}
+    left_height = _optional_positive_float(left_height_cm, "left height")
+    right_height = _optional_positive_float(right_height_cm, "right height")
+    if left_height is not None:
+        calibration["fencer_L"] = left_height
+    if right_height is not None:
+        calibration["fencer_R"] = right_height
+    return calibration
+
+
+def _format_height_calibration(calibration: Dict[str, float]) -> str:
+    """Format optional fencer height calibration for CLI output."""
+    if not calibration:
+        return "Fencer height calibration: auto from detected bbox height"
+    parts = [
+        f"{track_id}={height_cm:.0f}cm"
+        for track_id, height_cm in sorted(calibration.items())
+    ]
+    return "Fencer height calibration: " + ", ".join(parts)
+
+
 def _json_default(value: Any) -> Any:
     """Handle values json.dump cannot serialize by default."""
     if isinstance(value, Path):
@@ -553,6 +592,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Path to write an annotated MP4 with fencer boxes and distance cues"
     )
     parser.add_argument(
+        "--left-height-cm",
+        type=float,
+        help="Optional left fencer height in centimeters for annotated-video HUD calibration"
+    )
+    parser.add_argument(
+        "--right-height-cm",
+        type=float,
+        help="Optional right fencer height in centimeters for annotated-video HUD calibration"
+    )
+    parser.add_argument(
         "--interactive",
         action="store_true",
         help="Run in interactive mode"
@@ -600,6 +649,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if annotated_video_value
         else None
     )
+    left_height_value = (
+        args.left_height_cm
+        if args.left_height_cm is not None
+        else _config_value(config, "tracking", "left_height_cm", default=None)
+    )
+    right_height_value = (
+        args.right_height_cm
+        if args.right_height_cm is not None
+        else _config_value(config, "tracking", "right_height_cm", default=None)
+    )
+    try:
+        height_calibration = _build_height_calibration(
+            left_height_cm=left_height_value,
+            right_height_cm=right_height_value
+        )
+    except ValueError as e:
+        logger.error(f"Configuration error: {e}")
+        print(f"Configuration error: {e}")
+        return 2
     reports_dir = args.reports_dir or _config_value(
         config, "output", "reports_dir", default="reports/"
     )
@@ -668,6 +736,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     tracking_summary = (results.get("two_fencer_tracking") or {}).get("summary")
     if tracking_summary:
         print(_format_tracking_summary(tracking_summary))
+    if annotated_video_path is not None:
+        print(_format_height_calibration(height_calibration))
     model_status_getter = getattr(app, "get_model_status", None)
     if model_status_getter:
         print(_format_model_status(model_status_getter()))
@@ -696,7 +766,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 output_path=annotated_video_path,
                 tracking_frames=(
                     results.get("two_fencer_tracking") or {}
-                ).get("frames", [])
+                ).get("frames", []),
+                classifications=results.get("classifications", []),
+                window_size=_as_int(results.get("window_size"), default=28),
+                window_stride=_as_int(results.get("window_stride"), default=14),
+                fencer_heights_cm=height_calibration
             )
         except (OSError, ValueError) as e:
             logger.error(f"Could not write annotated video: {e}")
