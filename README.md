@@ -10,6 +10,7 @@ Implemented and tested in the current code path:
 
 - Side-view fencing video from a webcam or imported video file.
 - Pose extraction backends: `mock` for deterministic development/tests and `ultralytics` for YOLO pose when the dependency and weights are installed.
+- Opt-in real Ultralytics pose smoke coverage for `video/fencing_match.mp4` when `ultralytics` and a local YOLO pose model are available.
 - Side-based two-fencer candidate tracking for visualization: keep the two largest pose candidates per frame and label them `fencer_L`/`fencer_R` by horizontal position.
 - Prototype distance feedback: mark global `too_close` frames from average tracked height and show per-fencer too-close status against each fencer's own detected height.
 - Annotated MP4 output with fencer boxes, skeleton keypoints, engagement-distance line, dual left/right HUD panels, speed/movement cues, global action label, optional height calibration, optional web-friendly downscaling plus H.264 transcoding, and too-close warning banner.
@@ -30,7 +31,6 @@ Still planned or research-facing:
 - Coach-validated distance thresholds, stance-width checks, limb/reach calibration, and recovery/timing heuristics for live form feedback.
 - Trained fencing model checkpoints. The loader and expected format are documented, but trained weights are not included yet.
 - Real LLM model loading or API integration.
-- Real Ultralytics pose smoke testing in this environment. The current venv does not have `ultralytics` installed.
 
 Out of scope for this MVP:
 
