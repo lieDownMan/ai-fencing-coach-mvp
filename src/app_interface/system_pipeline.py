@@ -83,10 +83,17 @@ class SystemPipeline:
         if model_checkpoint and Path(model_checkpoint).exists():
             try:
                 checkpoint = torch.load(model_checkpoint, map_location=device)
-                self.model.load_state_dict(checkpoint)
+                state_dict = (
+                    checkpoint["state_dict"]
+                    if isinstance(checkpoint, dict) and "state_dict" in checkpoint
+                    else checkpoint
+                )
+                self.model.load_state_dict(state_dict)
                 logger.info(f"Loaded model checkpoint: {model_checkpoint}")
             except Exception as e:
                 logger.warning(f"Could not load checkpoint: {e}")
+        elif model_checkpoint:
+            logger.warning(f"Model checkpoint not found: {model_checkpoint}")
         
         self.model.eval()
         
@@ -190,6 +197,10 @@ class SystemPipeline:
         Returns:
             List of (class_idx, confidence) tuples
         """
+        self._validate_inference_array(skeleton_array)
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+
         classifications = []
         num_frames = skeleton_array.shape[0]
         actual_channels = skeleton_array.shape[1] * skeleton_array.shape[2]
@@ -202,30 +213,66 @@ class SystemPipeline:
         # Sliding window inference
         window_size = 28  # Match temporal sampler
         stride = 14  # 50% overlap
-        
+
+        windows = [
+            skeleton_array[start_idx:start_idx + window_size]
+            for start_idx in range(0, num_frames - window_size + 1, stride)
+        ]
+        if not windows:
+            return classifications
+
         with torch.no_grad():
-            for start_idx in range(0, num_frames - window_size + 1, stride):
-                end_idx = start_idx + window_size
-                window = skeleton_array[start_idx:end_idx]
-                
-                # Prepare input tensor
-                # Reshape from (28, 10, 2) to (28, 20) then to (1, 20, 28)
-                flat_window = window.reshape(window_size, -1)  # (28, 20)
-                input_tensor = torch.from_numpy(flat_window).float()
-                input_tensor = input_tensor.permute(1, 0).unsqueeze(0)  # (1, 20, 28)
+            if batch_process:
+                batches = [
+                    windows[start_idx:start_idx + batch_size]
+                    for start_idx in range(0, len(windows), batch_size)
+                ]
+            else:
+                batches = [[window] for window in windows]
+
+            for batch_windows in batches:
+                # Prepare input tensor:
+                # (batch, 28, 10, 2) -> (batch, 28, 20) -> (batch, 20, 28)
+                batch_array = np.stack(batch_windows, axis=0)
+                flat_windows = batch_array.reshape(len(batch_windows), window_size, -1)
+                input_tensor = torch.from_numpy(flat_windows).float()
+                input_tensor = input_tensor.permute(0, 2, 1)
                 input_tensor = input_tensor.to(self.device)
                 
                 # Forward pass
                 logits = self.model(input_tensor)
-                probabilities = torch.softmax(logits, dim=1)[0]
-                
-                # Get prediction
-                pred_class = torch.argmax(probabilities).item()
-                confidence = probabilities[pred_class].item()
-                
-                classifications.append((pred_class, confidence))
+                probabilities = torch.softmax(logits, dim=1)
+
+                pred_classes = torch.argmax(probabilities, dim=1)
+                confidences = probabilities.gather(
+                    1,
+                    pred_classes.unsqueeze(1)
+                ).squeeze(1)
+
+                classifications.extend(
+                    (int(pred_class), float(confidence))
+                    for pred_class, confidence in zip(
+                        pred_classes.cpu(),
+                        confidences.cpu()
+                    )
+                )
         
         return classifications
+
+    def _validate_inference_array(self, skeleton_array: np.ndarray):
+        """Validate Phase 3 inference input shape and values."""
+        if not isinstance(skeleton_array, np.ndarray):
+            raise TypeError("skeleton_array must be a numpy array")
+        if skeleton_array.ndim != 3 or skeleton_array.shape[2] != 2:
+            raise ValueError(
+                "skeleton_array must have shape (num_frames, num_joints, 2)"
+            )
+        if skeleton_array.shape[0] == 0:
+            raise ValueError("skeleton_array must contain at least one frame")
+        if skeleton_array.shape[1] == 0:
+            raise ValueError("skeleton_array must contain at least one joint")
+        if not np.all(np.isfinite(skeleton_array)):
+            raise ValueError("skeleton_array contains non-finite values")
     
     def get_immediate_feedback(self) -> str:
         """Get immediate feedback during bout."""
