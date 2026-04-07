@@ -15,6 +15,19 @@ class SpatialNormalizer:
     """
     Normalizes skeleton coordinates by centering and scaling.
     """
+
+    MODEL_JOINT_NAMES = [
+        "nose",
+        "front_wrist",
+        "front_elbow",
+        "front_shoulder",
+        "left_hip",
+        "right_hip",
+        "left_knee",
+        "right_knee",
+        "left_ankle",
+        "right_ankle",
+    ]
     
     def __init__(self):
         """Initialize the spatial normalizer."""
@@ -89,23 +102,32 @@ class SpatialNormalizer:
         """
         return [self.normalize_skeleton(skeleton) for skeleton in skeleton_sequence]
     
-    def get_normalized_array(self, skeleton_sequence: List[Dict[str, Tuple[float, float]]]) -> np.ndarray:
+    def get_normalized_array(
+        self,
+        skeleton_sequence: List[Dict[str, Tuple[float, float]]],
+        joint_names: Optional[List[str]] = None,
+        already_normalized: bool = False
+    ) -> np.ndarray:
         """
         Convert normalized skeleton sequence to numpy array.
         
         Args:
             skeleton_sequence: List of skeleton dictionaries
+            joint_names: Optional explicit joint order to export
+            already_normalized: Set to True if the input coordinates are already normalized
             
         Returns:
             np.ndarray of shape (num_frames, num_joints, 2)
         """
-        normalized_seq = self.normalize_sequence(skeleton_sequence)
-        
-        # Get joint order
-        if not normalized_seq:
-            raise ValueError("Empty normalized sequence")
-        
-        joint_names = sorted(normalized_seq[0].keys())
+        if not skeleton_sequence:
+            raise ValueError("Empty skeleton sequence")
+
+        normalized_seq = (
+            skeleton_sequence
+            if already_normalized
+            else self.normalize_sequence(skeleton_sequence)
+        )
+        joint_names = joint_names or sorted(normalized_seq[0].keys())
         num_frames = len(normalized_seq)
         num_joints = len(joint_names)
         
@@ -113,7 +135,8 @@ class SpatialNormalizer:
         
         for frame_idx, frame in enumerate(normalized_seq):
             for joint_idx, joint_name in enumerate(joint_names):
-                if joint_name in frame:
-                    array[frame_idx, joint_idx] = frame[joint_name]
+                if joint_name not in frame:
+                    raise KeyError(f"'{joint_name}' not found in frame {frame_idx}")
+                array[frame_idx, joint_idx] = frame[joint_name]
         
         return array

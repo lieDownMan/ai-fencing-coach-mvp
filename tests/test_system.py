@@ -63,6 +63,27 @@ class TestPreprocessing:
         sampler = TemporalSampler(target_length=28)
         assert sampler.target_length == 28
 
+    def test_model_joint_array_has_twenty_channels(self):
+        """Test that the model feature joint set excludes normalization-only aliases."""
+        from src.preprocessing import SpatialNormalizer
+
+        skeleton = {
+            joint_name: (float(idx), float(idx + 10))
+            for idx, joint_name in enumerate(SpatialNormalizer.MODEL_JOINT_NAMES)
+        }
+        skeleton["nose"] = (0.0, 0.0)
+        skeleton["front_ankle"] = (0.0, 100.0)
+
+        normalizer = SpatialNormalizer()
+        normalizer.fit([skeleton])
+        array = normalizer.get_normalized_array(
+            [skeleton],
+            joint_names=SpatialNormalizer.MODEL_JOINT_NAMES
+        )
+
+        assert array.shape == (1, 10, 2)
+        assert array.shape[1] * array.shape[2] == 20
+
 
 class TestModels:
     """Test suite for model architectures."""
@@ -209,7 +230,18 @@ class TestAppInterface:
         pipeline = SystemPipeline(device="cpu", use_bifencenet=False)
         assert pipeline is not None
         assert pipeline.device == "cpu"
+        assert pipeline.model_input_channels == 20
         assert hasattr(pipeline, 'process_video')
+
+    def test_system_pipeline_rejects_channel_mismatch(self):
+        """Test that Phase 3 fails fast when Phase 2 emits the wrong channel count."""
+        from src.app_interface import SystemPipeline
+
+        pipeline = SystemPipeline(device="cpu", use_bifencenet=False)
+        skeleton_array = np.zeros((28, 11, 2), dtype=np.float32)
+
+        with pytest.raises(ValueError, match="channel mismatch"):
+            pipeline._run_inference(skeleton_array)
     
     def test_fencing_coach_ui_initialization(self):
         """Test FencingCoachUI initialization."""
@@ -253,7 +285,7 @@ class TestIntegration:
         # Test sampler
         sampler = TemporalSampler(target_length=28)
         resampled = sampler.sample_array(
-            normalizer.get_normalized_array(normalized)
+            normalizer.get_normalized_array(normalized, already_normalized=True)
         )
         
         assert resampled.shape == (28, len(normalized[0]), 2)
