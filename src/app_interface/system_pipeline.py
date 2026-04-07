@@ -130,6 +130,7 @@ class SystemPipeline:
         logger.info(f"Processing video: {video_path}")
         
         self.current_fencer_id = fencer_id
+        self.pattern_analyzer.clear_history()
         results = {
             "video_path": video_path,
             "fencer_id": fencer_id,
@@ -171,6 +172,7 @@ class SystemPipeline:
                 self.pattern_analyzer.add_classification(class_idx, confidence)
             
             results["statistics"] = self.pattern_analyzer.get_statistics_summary()
+            self.current_bout_stats = results["statistics"]
             
             logger.info("Video processing complete")
             

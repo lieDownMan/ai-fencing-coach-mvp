@@ -3,7 +3,6 @@ Profile Manager - Manages athlete profiles and historical statistics.
 """
 
 import json
-import os
 from pathlib import Path
 from typing import Dict, Optional, List, Any
 from datetime import datetime
@@ -50,6 +49,9 @@ class ProfileManager:
                 "total_bouts": 0,
                 "wins": 0,
                 "losses": 0,
+                "draws": 0,
+                "completed_bouts": 0,
+                "unknown_results": 0,
                 "average_offensive_ratio": 0.0,
                 "average_defensive_ratio": 0.0,
                 "average_js_sf_ratio": 0.0,
@@ -113,7 +115,7 @@ class ProfileManager:
         bout_record = {
             "timestamp": datetime.now().isoformat(),
             "opponent_id": opponent_id,
-            "result": result,
+            "result": self._normalize_result(result),
             "statistics": bout_data
         }
         
@@ -142,28 +144,34 @@ class ProfileManager:
         
         total_bouts = len(bouts)
         wins = sum(1 for bout in bouts if bout.get("result") == "win")
-        losses = total_bouts - wins
+        losses = sum(1 for bout in bouts if bout.get("result") == "loss")
+        draws = sum(1 for bout in bouts if bout.get("result") == "draw")
+        completed_bouts = sum(1 for bout in bouts if bout.get("result") == "completed")
+        unknown_results = sum(1 for bout in bouts if bout.get("result") is None)
         
         # Calculate averages
         offensive_ratios = [
-            bout["statistics"].get("offensive_ratio", 0.0)
+            bout.get("statistics", {}).get("offensive_ratio", 0.0)
             for bout in bouts
-            if "statistics" in bout
+            if isinstance(bout.get("statistics"), dict)
         ]
         defensive_ratios = [
-            bout["statistics"].get("defensive_ratio", 0.0)
+            bout.get("statistics", {}).get("defensive_ratio", 0.0)
             for bout in bouts
-            if "statistics" in bout
+            if isinstance(bout.get("statistics"), dict)
         ]
         js_sf_ratios = [
-            bout["statistics"].get("js_sf_ratio", 0.0)
+            bout.get("statistics", {}).get("js_sf_ratio", 0.0)
             for bout in bouts
-            if "statistics" in bout
+            if isinstance(bout.get("statistics"), dict)
         ]
         
         profile["overall_stats"]["total_bouts"] = total_bouts
         profile["overall_stats"]["wins"] = wins
         profile["overall_stats"]["losses"] = losses
+        profile["overall_stats"]["draws"] = draws
+        profile["overall_stats"]["completed_bouts"] = completed_bouts
+        profile["overall_stats"]["unknown_results"] = unknown_results
         profile["overall_stats"]["average_offensive_ratio"] = (
             sum(offensive_ratios) / len(offensive_ratios) if offensive_ratios else 0.0
         )
@@ -213,7 +221,7 @@ class ProfileManager:
         
         # Collect trends
         for bout in bouts:
-            if "statistics" in bout:
+            if isinstance(bout.get("statistics"), dict):
                 stats = bout["statistics"]
                 metrics["offensive_ratio_trend"].append(stats.get("offensive_ratio", 0.0))
                 metrics["defensive_ratio_trend"].append(stats.get("defensive_ratio", 0.0))
@@ -271,3 +279,22 @@ class ProfileManager:
         except Exception as e:
             logger.error(f"Error deleting profile: {e}")
             return False
+
+    @staticmethod
+    def _normalize_result(result: Optional[str]) -> Optional[str]:
+        """Normalize bout result labels without turning unknowns into losses."""
+        if result is None:
+            return None
+
+        normalized = result.strip().lower()
+        if normalized in {"win", "won", "w"}:
+            return "win"
+        if normalized in {"loss", "lost", "lose", "l"}:
+            return "loss"
+        if normalized in {"draw", "tie", "tied"}:
+            return "draw"
+        if normalized in {"completed", "complete", "done"}:
+            return "completed"
+
+        logger.warning(f"Unknown bout result '{result}', storing as unknown")
+        return None
