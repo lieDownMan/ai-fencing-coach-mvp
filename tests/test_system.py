@@ -686,6 +686,38 @@ class TestAppInterface:
         assert _scaled_dimensions(640, 480, max_width=1280) == (640, 480)
         assert _scaled_dimensions(640, 480, max_width=None) == (640, 480)
 
+    def test_transcode_mp4_for_browser_uses_h264(
+        self,
+        tmp_path,
+        monkeypatch
+    ):
+        """Test browser MP4 transcode uses H.264/yuv420p when ffmpeg exists."""
+        from src.app_interface import video_annotator
+
+        source = tmp_path / "clip.mp4"
+        source.write_bytes(b"opencv mp4")
+        captured = {}
+
+        class Result:
+            returncode = 0
+            stderr = ""
+
+        def fake_run(command, **kwargs):
+            captured["command"] = command
+            Path(command[-1]).write_bytes(b"browser mp4")
+            return Result()
+
+        monkeypatch.setattr(video_annotator.shutil, "which", lambda _: "/usr/bin/ffmpeg")
+        monkeypatch.setattr(video_annotator.subprocess, "run", fake_run)
+
+        written = video_annotator._transcode_mp4_for_browser(source)
+
+        assert written == source
+        assert source.read_bytes() == b"browser mp4"
+        assert "libx264" in captured["command"]
+        assert "yuv420p" in captured["command"]
+        assert "+faststart" in captured["command"]
+
     def test_main_writes_json_report_from_cli_flag(
         self,
         tmp_path,

@@ -83,7 +83,7 @@ Open `http://127.0.0.1:7860`, keep `ultralytics` selected for real CV boxes, and
 
 If port `7860` is already in use, run `python web_app.py --port 7861` and open `http://127.0.0.1:7861` instead.
 
-`Annotated max width` only downscales the exported annotated MP4 for browser playback. It does not change pose detection, tracking, or inference.
+`Annotated max width` only downscales and H.264-transcodes the exported annotated MP4 for browser playback. It does not change pose detection, tracking, or inference.
 
 If `output.save_reports: true` is enabled in `config.yaml`, the CLI writes an auto-named report under `output.reports_dir` unless `--no-report` is passed.
 
