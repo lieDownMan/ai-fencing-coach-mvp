@@ -10,7 +10,8 @@ Implemented and tested in the current code path:
 
 - Side-view fencing video from a webcam or imported video file.
 - Pose extraction backends: `mock` for deterministic development/tests and `ultralytics` for YOLO pose when the dependency and weights are installed.
-- Single selected fencer skeleton per frame, using the largest detected person for the Ultralytics backend.
+- Side-based two-fencer candidate tracking for visualization: keep the two largest pose candidates per frame and label them `fencer_L`/`fencer_R` by horizontal position.
+- Single selected fencer skeleton remains the classifier input, using the largest detected person so existing FenceNet/BiFenceNet inference stays stable.
 - Explicit 10-joint, 20-channel skeleton feature order for FenceNet/BiFenceNet inference.
 - Sliding-window FenceNet/BiFenceNet-style six-class footwork recognition.
 - Pattern analysis for action frequency, offensive/defensive ratio, JS/SF ratio, repeated patterns, and average confidence.
@@ -22,7 +23,7 @@ Implemented and tested in the current code path:
 
 Still planned or research-facing:
 
-- Robust two-fencer tracking and left/right fencer assignment.
+- Robust identity persistence through fencer crossing, occlusion, and exchange resets.
 - Distance, stance-width, and engagement heuristics for live form feedback.
 - Trained fencing model checkpoints. The loader and expected format are documented, but trained weights are not included yet.
 - Real LLM model loading or API integration.
@@ -62,8 +63,8 @@ The canonical workflow is:
 ```text
 Video input
   -> pose estimation
-     -> current path: one selected fencer skeleton per frame
-     -> planned path: two-fencer tracking and left/right assignment
+     -> current path: side-based two-fencer candidates for visualization plus one selected skeleton for classification
+     -> planned path: robust identity persistence through crossings and occlusion
   -> skeleton normalization into a 10-joint / 20-channel feature tensor
   -> sliding-window FenceNet/BiFenceNet six-class action recognition
   -> pattern analysis and athlete profile update
@@ -103,7 +104,7 @@ Process a video file:
 python app.py --video path/to/bout.mp4 --fencer-id athlete_001 --device auto --pose-backend mock
 ```
 
-Write a JSON report:
+Write a JSON report with classification windows and two-fencer tracking frames:
 
 ```bash
 python app.py --video path/to/bout.mp4 --fencer-id athlete_001 --pose-backend mock --report reports/bout_report.json
