@@ -352,8 +352,37 @@ class TestTracking:
         assert [track["side"] for track in frame["tracks"]] == ["left", "right"]
         assert frame["tracks"][0]["track_id"] == "fencer_L"
         assert frame["engagement_distance_px"] == 160.0
+        assert frame["distance_status"] == "ok"
         assert summary["frames_with_two_fencers"] == 1
         assert summary["two_fencer_coverage"] == 1.0
+
+    def test_fencer_tracker_marks_too_close_distance(self):
+        """Test the prototype distance rule marks collapsed distance."""
+        from src.tracking import FencerTracker
+
+        tracker = FencerTracker()
+        left = {
+            "nose": (100.0, 0.0),
+            "front_ankle": (140.0, 100.0),
+        }
+        right = {
+            "nose": (170.0, 0.0),
+            "front_ankle": (180.0, 100.0),
+        }
+
+        frame = tracker.build_frame(
+            0,
+            [
+                tracker.candidate_from_skeleton(left),
+                tracker.candidate_from_skeleton(right),
+            ]
+        )
+        summary = tracker.summarize([frame])
+
+        assert frame["distance_status"] == "too_close"
+        assert frame["coaching_cue"] == "Too close: recover distance."
+        assert summary["frames_too_close"] == 1
+        assert summary["too_close_ratio"] == 1.0
 
     def test_profile_manager_initialization(self):
         """Test ProfileManager initialization."""
@@ -529,6 +558,8 @@ class TestAppInterface:
                 "summary": {
                     "frames_analyzed": 42,
                     "frames_with_two_fencers": 40,
+                    "frames_too_close": 4,
+                    "too_close_ratio": 4 / 42,
                     "two_fencer_coverage": 40 / 42,
                     "average_engagement_distance_px": 312.5,
                 },
@@ -562,7 +593,43 @@ class TestAppInterface:
         assert report["runtime"]["pose_backend"] == "mock"
         tracking = report["two_fencer_tracking"]
         assert tracking["summary"]["frames_with_two_fencers"] == 40
+        assert tracking["summary"]["frames_too_close"] == 4
         assert tracking["frames"][0]["tracks"][0]["track_id"] == "fencer_L"
+
+
+    def test_draw_tracking_overlay_renders_too_close_warning(self):
+        """Test annotator changes the frame when drawing a too-close warning."""
+        from src.app_interface.video_annotator import draw_tracking_overlay
+
+        frame = np.zeros((180, 320, 3), dtype=np.uint8)
+        tracking_frame = {
+            "frame_index": 0,
+            "distance_status": "too_close",
+            "coaching_cue": "Too close: recover distance.",
+            "engagement_distance_px": 42.0,
+            "engagement_distance_ratio": 0.5,
+            "tracks": [
+                {
+                    "track_id": "fencer_L",
+                    "side": "left",
+                    "bbox": [30.0, 30.0, 100.0, 150.0],
+                    "center": [65.0, 90.0],
+                    "skeleton": {"front_ankle": [90.0, 150.0]},
+                },
+                {
+                    "track_id": "fencer_R",
+                    "side": "right",
+                    "bbox": [120.0, 30.0, 190.0, 150.0],
+                    "center": [155.0, 90.0],
+                    "skeleton": {"front_ankle": [132.0, 150.0]},
+                },
+            ],
+        }
+
+        annotated = draw_tracking_overlay(frame, tracking_frame)
+
+        assert annotated.shape == frame.shape
+        assert np.any(annotated != frame)
 
     def test_main_writes_json_report_from_cli_flag(
         self,
@@ -623,6 +690,69 @@ class TestAppInterface:
         assert report["fencer_id"] == "cli_fencer"
         assert report["classification_windows"][0]["action"] == "SF"
         assert report["runtime"]["model_weights"] == "random"
+
+    def test_main_writes_annotated_video_from_cli_flag(
+        self,
+        tmp_path,
+        monkeypatch,
+        capsys
+    ):
+        """Test CLI --annotated-video renders from tracking frames."""
+        import app as app_module
+
+        video_path = tmp_path / "clip.mp4"
+        video_path.write_bytes(b"not a real video; annotator is mocked")
+        annotated_path = tmp_path / "clip_processed.mp4"
+        captured = {}
+
+        class FakeApplication:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+            def process_video(self, **kwargs):
+                return {
+                    "ok": True,
+                    "video_path": kwargs["video_path"],
+                    "fencer_id": kwargs["fencer_id"],
+                    "frames_processed": 1,
+                    "window_size": 28,
+                    "window_stride": 14,
+                    "classifications": [],
+                    "statistics": {},
+                    "feedback": "mock feedback",
+                    "two_fencer_tracking": {
+                        "summary": {"frames_analyzed": 1, "frames_with_two_fencers": 1},
+                        "frames": [{"frame_index": 0, "tracks": []}],
+                    },
+                }
+
+            def get_model_status(self):
+                return {"model_weights": "random", "model_type": "fencenet"}
+
+        def fake_write_annotated_video(video_path, output_path, tracking_frames):
+            captured["video_path"] = video_path
+            captured["output_path"] = output_path
+            captured["tracking_frames"] = tracking_frames
+            return output_path
+
+        monkeypatch.setattr(app_module, "FencingCoachApplication", FakeApplication)
+        monkeypatch.setattr(app_module, "write_annotated_video", fake_write_annotated_video)
+
+        exit_code = app_module.main([
+            "--video",
+            str(video_path),
+            "--fencer-id",
+            "cli_fencer",
+            "--annotated-video",
+            str(annotated_path),
+        ])
+        output = capsys.readouterr().out
+
+        assert exit_code == 0
+        assert captured["video_path"] == str(video_path)
+        assert captured["output_path"] == annotated_path
+        assert captured["tracking_frames"][0]["frame_index"] == 0
+        assert "Annotated video written:" in output
 
     def test_main_missing_video_returns_nonzero_without_initializing_app(
         self,
