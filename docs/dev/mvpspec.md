@@ -246,6 +246,6 @@ These items move beyond the current prototype toward a useful deployed or study-
 ## 13. Document Ownership
 
 - Keep this file as the canonical workflow/spec.
-- Keep [../README.md](../README.md) as the repository entry point and [README.md](README.md) as the full documentation overview.
+- Keep [../../README.md](../../README.md) as the repository entry point, [../README.md](../README.md) as the docs index, and [README.md](README.md) as the full development overview.
 - Keep [QUICKSTART.md](QUICKSTART.md) as commands only.
 - Treat [detailedstructure.md](detailedstructure.md) and [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md) as historical pointers unless the team decides to delete them later.

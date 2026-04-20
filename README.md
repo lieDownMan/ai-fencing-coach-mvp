@@ -35,19 +35,33 @@ The full project documentation now lives under [`docs/`](docs).
 
 Start here:
 
-- [Full Project Overview](docs/README.md)
-- [MVP Spec](docs/mvpspec.md)
-- [Quickstart](docs/QUICKSTART.md)
-- [Training Guide](docs/TRAINING.md)
-- [Checkpoints Guide](docs/CHECKPOINTS.md)
+- [Docs Index](docs/README.md)
+- [Development Overview](docs/dev/README.md)
+- [Research Index](docs/research/README.md)
+
+### Docs Map
+
+Development docs:
+
+- [Project Overview](docs/dev/README.md)
+- [MVP Spec](docs/dev/mvpspec.md)
+- [Quickstart](docs/dev/QUICKSTART.md)
+- [Training Guide](docs/dev/TRAINING.md)
+- [Checkpoints Guide](docs/dev/CHECKPOINTS.md)
+- [Contributing Guide](docs/dev/CONTRIBUTING.md)
+- [Chinese Overview](docs/dev/README_zh.md)
 
 Research workflow documents:
 
-- [Related Work Memo](docs/RELATED_WORK.md)
-- [Research Brief](docs/RESEARCH_BRIEF.md)
-- [Evidence Workflow](docs/EVIDENCE_WORKFLOW.md)
-- [Interview Guide](docs/INTERVIEW_GUIDE.md)
-- [Chinese Interview Script](docs/INTERVIEW_SCRIPT_ZH.md)
+- [Research Brief](docs/research/RESEARCH_BRIEF.md)
+- [Related Work Memo](docs/research/RELATED_WORK.md)
+- [Evidence Workflow](docs/research/EVIDENCE_WORKFLOW.md)
+- [Interview Guide](docs/research/INTERVIEW_GUIDE.md)
+- [Interview Record Template](docs/research/INTERVIEW_RECORD_TEMPLATE.md)
+- [Interview Synthesis Template](docs/research/INTERVIEW_SYNTHESIS_TEMPLATE.md)
+- [Research Brief Revision Checklist](docs/research/RESEARCH_BRIEF_REVISION_CHECKLIST.md)
+- [Chinese Interview Script](docs/research/INTERVIEW_SCRIPT_ZH.md)
+- [Chinese Proposal Intro](docs/research/PROPOSAL_INTRO_ZH.md)
 
 ## Current Scope
 
@@ -81,6 +95,9 @@ ai-fencing-coach-mvp/
 ├── config.yaml
 ├── requirements.txt
 ├── docs/
+│   ├── README.md
+│   ├── dev/
+│   └── research/
 ├── scripts/
 ├── src/
 ├── tests/
