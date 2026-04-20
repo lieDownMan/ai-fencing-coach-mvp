@@ -87,6 +87,32 @@ If port `7860` is already in use, run `python web_app.py --port 7861` and open `
 
 If `output.save_reports: true` is enabled in `config.yaml`, the CLI writes an auto-named report under `output.reports_dir` unless `--no-report` is passed.
 
+## Prepare Training Data
+
+Prepare the public FFD dataset:
+
+```bash
+python scripts/prepare_ffd.py --ffd-root /path/to/ffd --output data/training/ffd_prepared.npz
+```
+
+Write a starter custom-label CSV:
+
+```bash
+python scripts/prepare_labeled_clips.py --write-template labels/clip_labels_template.csv
+```
+
+Prepare labeled clips from your own videos:
+
+```bash
+python scripts/prepare_labeled_clips.py --labels-csv labels/my_clips.csv --output data/training/my_labeled_clips.npz --pose-backend ultralytics --pose-model yolov8n-pose.pt
+```
+
+Train a model:
+
+```bash
+python train.py --dataset data/training/ffd_prepared.npz --output-dir weights/fencenet_ffd_run1 --model-type fencenet
+```
+
 ## Help
 
 ```bash

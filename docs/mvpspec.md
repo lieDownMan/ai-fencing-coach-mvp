@@ -35,8 +35,8 @@ Implemented in the current debugged code path:
 - Annotated MP4 output draws fencer boxes, skeleton keypoints, engagement-distance lines, dual left/right HUD panels, speed/movement cues, the current global action label, optional left/right height calibration, optional web-friendly downscaling plus H.264 transcoding, and the too-close warning banner.
 - A local no-dependency browser demo lets reviewers process the sample/server-side video, watch the annotated MP4, and inspect summary metrics without composing terminal processing commands.
 - Single selected fencer skeleton per frame remains the classifier input. For Ultralytics results, the largest detected person is selected.
-- Spatial normalization into a fixed 10-joint, 20-channel model feature tensor.
-- Six-class FenceNet/BiFenceNet footwork recognition as the model-based path.
+- Spatial normalization into the paper's fixed 9-joint, 18-channel model feature tensor, with `nose` and `front_ankle` retained as normalization references.
+- Six-class FenceNet/BiFenceNet footwork recognition using the CVPRW 2022 TCN architecture as the model-based path.
 - Sliding-window inference over long videos instead of collapsing every clip to 28 frames.
 - Pattern analysis for action frequencies, offensive/defensive ratio, JS/SF ratio, repeated patterns, and average confidence.
 - LLM coaching interface with deterministic analytical fallback when no real LLM is loaded.
@@ -74,7 +74,7 @@ Out of scope:
    Planned path: add identity persistence through crossings, occlusion, and exchange resets.
 
 3. Feature extraction
-   Current path: export a fixed 10-joint skeleton tensor, keep `front_ankle` as a normalization reference, and store fencer bounding boxes plus engagement distance for visualization. Optional left/right height inputs calibrate the annotated-video HUD only.
+   Current path: export a fixed 9-joint skeleton tensor, keep `nose` and `front_ankle` as normalization references, and store fencer bounding boxes plus engagement distance for visualization. Optional left/right height inputs calibrate the annotated-video HUD only.
    Planned path: also extract stance width, limb/reach calibration, and stronger scale-normalized motion metrics.
 
 4. Motion understanding
@@ -107,9 +107,9 @@ Out of scope:
 
 Current implementation note:
 
-- The current model input uses `nose`, `front_wrist`, `front_elbow`, `front_shoulder`, `left_hip`, `right_hip`, `left_knee`, `right_knee`, `left_ankle`, and `right_ankle`.
-- `front_ankle` is still required by normalization, but it is not exported as an extra model feature channel.
-- This keeps inference at `10 joints * 2 coordinates = 20 channels`.
+- The current model input uses `front_wrist`, `front_elbow`, `front_shoulder`, `left_hip`, `right_hip`, `left_knee`, `right_knee`, `left_ankle`, and `right_ankle`.
+- `nose` and `front_ankle` are still required by normalization, but they are not exported as model feature channels.
+- This keeps inference at `9 joints * 2 coordinates = 18 channels`.
 
 ## 6. Target Footwork Classes
 
@@ -187,7 +187,7 @@ Before claiming this is a strong HCI contribution, collect:
 Recent debug milestones:
 
 - Pose backend behavior is explicit; mock mode is deterministic and real Ultralytics mode fails clearly when unavailable.
-- Preprocessing and inference now agree on `20` model input channels.
+- Preprocessing and inference now agree on the paper's `18` model input channels.
 - Long videos are preserved for sliding-window inference.
 - Pattern statistics reset between videos and profile result accounting no longer treats `completed` as a loss.
 - Coaching uses the pipeline's actual pattern statistics and falls back cleanly when no LLM is loaded.

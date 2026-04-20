@@ -2,6 +2,7 @@
 Spatial Normalizer - Normalize skeleton coordinates.
 - Subtract nose position from all joints in the first frame
 - Divide by vertical distance between head and front ankle in first frame
+- Export the 9 FenceNet classification joints from Zhu et al. CVPRW 2022
 """
 
 import numpy as np
@@ -17,7 +18,6 @@ class SpatialNormalizer:
     """
 
     MODEL_JOINT_NAMES = [
-        "nose",
         "front_wrist",
         "front_elbow",
         "front_shoulder",

@@ -12,7 +12,7 @@ Use a dictionary with metadata plus a `state_dict`:
 {
     "format_version": 1,
     "model_type": "fencenet",  # or "bifencenet"
-    "input_channels": 20,
+    "input_channels": 18,
     "num_classes": 6,
     "action_classes": ["R", "IS", "WW", "JS", "SF", "SB"],
     "state_dict": model.state_dict(),
@@ -23,7 +23,7 @@ The loader validates metadata when present:
 
 - `format_version` must be `1`.
 - `model_type` must match the selected CLI model type.
-- `input_channels` must be `20`.
+- `input_channels` must be `18` for the paper's 9-joint, 2D skeleton feature tensor.
 - `num_classes` must be `6`.
 - `action_classes` must be `["R", "IS", "WW", "JS", "SF", "SB"]`.
 
