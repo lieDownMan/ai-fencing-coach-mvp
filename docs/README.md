@@ -1,5 +1,7 @@
 # AI Fencing Coach MVP
 
+This file is the full documentation overview. For the GitHub landing-page version, use [../README.md](../README.md).
+
 This repository is a desktop MVP for an AI-assisted fencing coach. It uses video input, pose estimation, fencing-specific motion analysis, and coaching feedback to help beginner and intermediate fencers review distance, footwork, and tactical tendencies.
 
 The current positioning is: a coaching support tool, not a referee replacement. The product value should be judged by whether real fencers and coaches can use the feedback during practice or post-bout review, not by model accuracy alone.
@@ -151,8 +153,10 @@ See [QUICKSTART.md](QUICKSTART.md) for the minimal command reference.
 
 ```text
 ai-fencing-coach-mvp/
+├── README.md
 ├── app.py
 ├── web_app.py
+├── train.py
 ├── config.yaml
 ├── requirements.txt
 ├── docs/
@@ -169,7 +173,9 @@ ai-fencing-coach-mvp/
 │   ├── models/
 │   ├── tracking/
 │   ├── llm_agent/
+│   ├── training/
 │   └── app_interface/
+├── scripts/
 └── tests/
 ```
 

@@ -2,7 +2,8 @@
 
 此文件是簡短中文導覽。主要規格與工作流程請以英文文件為準：
 
-- [README.md](README.md)：專案入口與文件地圖。
+- [../README.md](../README.md)：GitHub 專案入口頁。
+- [README.md](README.md)：完整文件總覽。
 - [mvpspec.md](mvpspec.md)：MVP 範圍、系統工作流程與 HCI 研究定位。
 - [QUICKSTART.md](QUICKSTART.md)：最小安裝與執行命令。
 - [CONTRIBUTING.md](CONTRIBUTING.md)：開發與貢獻規範。
