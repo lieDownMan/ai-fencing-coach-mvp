@@ -16,8 +16,8 @@ Implemented and tested in the current code path:
 - Annotated MP4 output with fencer boxes, skeleton keypoints, engagement-distance line, dual left/right HUD panels, speed/movement cues, global action label, optional height calibration, optional web-friendly downscaling plus H.264 transcoding, and too-close warning banner.
 - Local no-dependency browser demo at `web_app.py` for processing a video, reviewing the annotated MP4, and reading summary metrics without typing the full CLI command.
 - Single selected fencer skeleton remains the classifier input, using the largest detected person so existing FenceNet/BiFenceNet inference stays stable.
-- Explicit 10-joint, 20-channel skeleton feature order for FenceNet/BiFenceNet inference.
-- Sliding-window FenceNet/BiFenceNet-style six-class footwork recognition.
+- Explicit 9-joint, 18-channel skeleton feature order from the FenceNet paper; `nose` and `front_ankle` remain normalization references.
+- Sliding-window FenceNet/BiFenceNet six-class footwork recognition using the CVPRW 2022 TCN block stack.
 - Pattern analysis for action frequency, offensive/defensive ratio, JS/SF ratio, repeated patterns, and average confidence.
 - Athlete profile storage for longitudinal review.
 - LLM coaching interface with deterministic analytical fallback. A real LLM backend is not loaded by default in this MVP.
@@ -49,6 +49,7 @@ Use these documents as the current source of truth:
 | [mvpspec.md](mvpspec.md) | Canonical workflow, scope, and research positioning spec. Start here for design decisions. |
 | [QUICKSTART.md](QUICKSTART.md) | Minimal setup and run commands. |
 | [CHECKPOINTS.md](CHECKPOINTS.md) | Expected FenceNet/BiFenceNet checkpoint format and loading behavior. |
+| [TRAINING.md](TRAINING.md) | FFD preparation, custom clip labeling, and FenceNet/BiFenceNet training workflow. |
 | [README_zh.md](README_zh.md) | Short Chinese summary and doc navigation. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development and contribution conventions. |
 
@@ -68,7 +69,7 @@ Video input
   -> pose estimation
      -> current path: side-based two-fencer candidates for visualization plus one selected skeleton for classification
      -> planned path: robust identity persistence through crossings and occlusion
-  -> skeleton normalization into a 10-joint / 20-channel feature tensor
+  -> skeleton normalization into a 9-joint / 18-channel feature tensor
   -> sliding-window FenceNet/BiFenceNet six-class action recognition
   -> pattern analysis and athlete profile update
   -> coaching feedback
@@ -154,11 +155,12 @@ ai-fencing-coach-mvp/
 ├── web_app.py
 ├── config.yaml
 ├── requirements.txt
-├── mvpspec.md
-├── QUICKSTART.md
-├── README.md
-├── README_zh.md
-├── CONTRIBUTING.md
+├── docs/
+│   ├── README.md
+│   ├── mvpspec.md
+│   ├── QUICKSTART.md
+│   ├── README_zh.md
+│   └── CONTRIBUTING.md
 ├── data/
 ├── video/
 ├── src/
