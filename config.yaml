@@ -5,19 +5,14 @@ model:
   # FenceNet architecture options: "fencenet" or "bifencenet"
   type: "fencenet"
   
-  # Input channels: 10 joints * 2 coordinates = 20
-  input_channels: 20
-  
-  # Hidden channels in TCN blocks
-  hidden_channels: 64
-  
-  # Number of TCN blocks to stack
-  num_tcn_blocks: 6
-  
-  # Convolution kernel size
-  kernel_size: 3
-  
-  # Dropout rate
+  # Paper input channels: 9 classification joints * 2 coordinates = 18.
+  # Nose and front_ankle are still required for spatial normalization.
+  input_channels: 18
+
+  # TCN blocks follow Zhu et al. CVPRW 2022 Figure 1a:
+  # (18->32, k=8, d=1), (32->64, k=8, d=2),
+  # (64->64, k=7, d=4), (64->128, k=5, d=6).
+  # Dropout rate for spatial dropout inside TCN blocks
   dropout: 0.5
 
 # Preprocessing Configuration
@@ -80,6 +75,7 @@ pose:
   # Required joints for fencing analysis
   required_joints:
     - "nose"
+    - "front_ankle"
     - "front_wrist"
     - "front_elbow"
     - "front_shoulder"

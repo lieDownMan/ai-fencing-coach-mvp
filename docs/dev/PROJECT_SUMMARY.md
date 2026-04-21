@@ -4,7 +4,9 @@ This file is a historical generated implementation snapshot. It is no longer the
 
 Use these documents instead:
 
-- [README.md](README.md) for the project overview and documentation map.
+- [../../README.md](../../README.md) for the repository entry point.
+- [../README.md](../README.md) for the docs index.
+- [README.md](README.md) for the full project overview and documentation map.
 - [mvpspec.md](mvpspec.md) for the canonical MVP workflow, scope, and research positioning.
 - [QUICKSTART.md](QUICKSTART.md) for setup and run commands.
 - [CONTRIBUTING.md](CONTRIBUTING.md) for development conventions.
