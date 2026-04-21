@@ -29,3 +29,6 @@ reports/
 
 # Generated local web demo outputs
 web_outputs/
+
+data/
+venv/

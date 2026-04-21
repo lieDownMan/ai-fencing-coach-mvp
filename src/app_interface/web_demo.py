@@ -26,7 +26,7 @@ from src.app_interface.video_annotator import write_annotated_video
 logger = logging.getLogger(__name__)
 
 DEFAULT_WEB_OUTPUT_DIR = Path("web_outputs")
-DEFAULT_VIDEO_PATH = Path("video/fencing_match.mp4")
+DEFAULT_VIDEO_PATH = Path("data/videos/fencing_match.mp4")
 DEFAULT_ANNOTATED_MAX_WIDTH = 1280
 
 
