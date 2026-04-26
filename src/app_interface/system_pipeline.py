@@ -71,7 +71,9 @@ class SystemPipeline:
         
         # Phase 2: Preprocessing
         self.spatial_normalizer = SpatialNormalizer()
-        self.temporal_sampler = TemporalSampler(target_length=28)
+        self.temporal_sampler = TemporalSampler(
+            target_length=self.INFERENCE_WINDOW_SIZE
+        )
         self.model_joint_names = list(SpatialNormalizer.MODEL_JOINT_NAMES)
         self.model_input_channels = len(self.model_joint_names) * 2
         
@@ -79,16 +81,12 @@ class SystemPipeline:
         if use_bifencenet:
             self.model = BiFenceNet(
                 input_channels=self.model_input_channels,
-                hidden_channels=64,
-                num_tcn_blocks=6,
                 device=device
             ).to(device)
             logger.info("Using BiFenceNet model")
         else:
             self.model = FenceNet(
                 input_channels=self.model_input_channels,
-                hidden_channels=64,
-                num_tcn_blocks=6,
                 device=device
             ).to(device)
             logger.info("Using FenceNet model")
@@ -269,7 +267,7 @@ class SystemPipeline:
 
             for batch_windows in batches:
                 # Prepare input tensor:
-                # (batch, 28, 10, 2) -> (batch, 28, 20) -> (batch, 20, 28)
+                # (batch, 28, 9, 2) -> (batch, 28, 18) -> (batch, 18, 28)
                 batch_array = np.stack(batch_windows, axis=0)
                 flat_windows = batch_array.reshape(len(batch_windows), window_size, -1)
                 input_tensor = torch.from_numpy(flat_windows).float()

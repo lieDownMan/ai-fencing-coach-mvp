@@ -165,8 +165,8 @@ class TestPreprocessing:
         with pytest.raises(KeyError, match="inconsistent"):
             sampler.sample(sequence)
 
-    def test_model_joint_array_has_twenty_channels(self):
-        """Test that the model feature joint set excludes normalization-only aliases."""
+    def test_model_joint_array_has_eighteen_channels(self):
+        """Test model features match the paper's 9 classification joints."""
         from src.preprocessing import SpatialNormalizer
 
         skeleton = {
@@ -183,8 +183,9 @@ class TestPreprocessing:
             joint_names=SpatialNormalizer.MODEL_JOINT_NAMES
         )
 
-        assert array.shape == (1, 10, 2)
-        assert array.shape[1] * array.shape[2] == 20
+        assert "nose" not in SpatialNormalizer.MODEL_JOINT_NAMES
+        assert array.shape == (1, 9, 2)
+        assert array.shape[1] * array.shape[2] == 18
 
 
 class TestModels:
@@ -195,9 +196,9 @@ class TestModels:
         from src.models import TCNBlock
         
         tcn = TCNBlock(
-            in_channels=20,
-            out_channels=64,
-            kernel_size=3,
+            in_channels=18,
+            out_channels=32,
+            kernel_size=8,
             dilation=1
         )
         assert tcn is not None
@@ -207,20 +208,20 @@ class TestModels:
         """Test TCNBlock forward pass."""
         from src.models import TCNBlock
         
-        tcn = TCNBlock(in_channels=20, out_channels=64)
-        x = torch.randn(2, 20, 28)  # batch, channels, time
+        tcn = TCNBlock(in_channels=18, out_channels=32, kernel_size=8)
+        x = torch.randn(2, 18, 28)  # batch, channels, time
         output = tcn(x)
         
         assert output.shape[0] == 2  # batch size
-        assert output.shape[1] == 64  # output channels
+        assert output.shape[1] == 32  # output channels
 
     def test_tcn_block_preserves_time_length(self):
         """Test TCNBlock keeps sequence length stable across dilations."""
         from src.models import TCNBlock
 
         for dilation in (1, 2, 4):
-            tcn = TCNBlock(in_channels=20, out_channels=20, dilation=dilation)
-            x = torch.randn(2, 20, 28)
+            tcn = TCNBlock(in_channels=18, out_channels=18, dilation=dilation)
+            x = torch.randn(2, 18, 28)
             output = tcn(x)
 
             assert output.shape == x.shape
@@ -229,17 +230,23 @@ class TestModels:
         """Test FenceNet initialization."""
         from src.models import FenceNet
         
-        model = FenceNet(input_channels=20, hidden_channels=64)
+        model = FenceNet(input_channels=18)
         assert model is not None
         assert isinstance(model, torch.nn.Module)
         assert model.NUM_CLASSES == 6
+        assert len(model.tcn_blocks) == 4
+        assert model.tcn_blocks[0].in_channels == 18
+        assert model.tcn_blocks[0].out_channels == 32
+        assert model.tcn_blocks[0].kernel_size == 8
+        assert model.tcn_blocks[-1].out_channels == 128
+        assert model.fc1.in_features == 128
     
     def test_fencenet_forward(self):
         """Test FenceNet forward pass."""
         from src.models import FenceNet
         
-        model = FenceNet(input_channels=20, hidden_channels=64)
-        x = torch.randn(2, 20, 28)  # batch, channels, time
+        model = FenceNet(input_channels=18)
+        x = torch.randn(2, 18, 28)  # batch, channels, time
         logits = model(x)
         
         assert logits.shape == (2, 6)  # batch, num_classes
@@ -248,16 +255,18 @@ class TestModels:
         """Test BiFenceNet initialization."""
         from src.models import BiFenceNet
         
-        model = BiFenceNet(input_channels=20, hidden_channels=64)
+        model = BiFenceNet(input_channels=18)
         assert model is not None
         assert isinstance(model, torch.nn.Module)
+        assert len(model.forward_tcn_blocks) == 4
+        assert len(model.reverse_tcn_blocks) == 4
 
     def test_bifencenet_forward(self):
         """Test BiFenceNet forward pass."""
         from src.models import BiFenceNet
 
-        model = BiFenceNet(input_channels=20, hidden_channels=64)
-        x = torch.randn(2, 20, 28)
+        model = BiFenceNet(input_channels=18)
+        x = torch.randn(2, 18, 28)
         logits = model(x)
 
         assert logits.shape == (2, 6)
@@ -1028,7 +1037,7 @@ class TestAppInterface:
         pipeline = SystemPipeline(device="cpu", use_bifencenet=False)
         assert pipeline is not None
         assert pipeline.device == "cpu"
-        assert pipeline.model_input_channels == 20
+        assert pipeline.model_input_channels == 18
         assert hasattr(pipeline, 'process_video')
 
     def test_application_missing_video_returns_error_payload(self, tmp_path):
@@ -1092,7 +1101,7 @@ class TestAppInterface:
         from src.app_interface import SystemPipeline
 
         pipeline = SystemPipeline(device="cpu", use_bifencenet=False)
-        skeleton_array = np.zeros((28, 11, 2), dtype=np.float32)
+        skeleton_array = np.zeros((28, 10, 2), dtype=np.float32)
 
         with pytest.raises(ValueError, match="channel mismatch"):
             pipeline._run_inference(skeleton_array)
@@ -1108,7 +1117,7 @@ class TestAppInterface:
             profiles_dir=tempfile.mkdtemp(),
             pose_backend="mock"
         )
-        skeleton_array = np.zeros((56, 10, 2), dtype=np.float32)
+        skeleton_array = np.zeros((56, 9, 2), dtype=np.float32)
 
         classifications = pipeline._run_inference(
             skeleton_array,
@@ -1131,7 +1140,7 @@ class TestAppInterface:
             profiles_dir=tempfile.mkdtemp(),
             pose_backend="mock"
         )
-        skeleton_array = np.zeros((28, 10, 2), dtype=np.float32)
+        skeleton_array = np.zeros((28, 9, 2), dtype=np.float32)
         skeleton_array[0, 0, 0] = np.nan
 
         with pytest.raises(ValueError, match="non-finite"):
@@ -1146,7 +1155,7 @@ class TestAppInterface:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             checkpoint_path = Path(tmpdir) / "model.pt"
-            model = FenceNet(input_channels=20, hidden_channels=64)
+            model = FenceNet(input_channels=18)
             torch.save({"state_dict": model.state_dict()}, checkpoint_path)
 
             pipeline = SystemPipeline(
@@ -1170,12 +1179,12 @@ class TestAppInterface:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             checkpoint_path = Path(tmpdir) / "model.pt"
-            model = FenceNet(input_channels=20, hidden_channels=64)
+            model = FenceNet(input_channels=18)
             torch.save(
                 {
                     "format_version": 1,
                     "model_type": "fencenet",
-                    "input_channels": 20,
+                    "input_channels": 18,
                     "num_classes": 6,
                     "action_classes": model.get_class_names(),
                     "state_dict": model.state_dict(),
@@ -1204,13 +1213,13 @@ class TestAppInterface:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             checkpoint_path = Path(tmpdir) / "model.pt"
-            model = FenceNet(input_channels=20, hidden_channels=64)
+            model = FenceNet(input_channels=18)
             torch.save(
                 {
                     "metadata": {
                         "format_version": 1,
                         "model_type": "bifencenet",
-                        "input_channels": 20,
+                        "input_channels": 18,
                         "num_classes": 6,
                         "action_classes": model.get_class_names(),
                     },
@@ -1244,7 +1253,7 @@ class TestAppInterface:
             pose_backend="mock"
         )
 
-        skeleton_array = np.zeros((56, 10, 2), dtype=np.float32)
+        skeleton_array = np.zeros((56, 9, 2), dtype=np.float32)
         calls = []
 
         def fake_get_normalized_array(*args, **kwargs):
@@ -1257,6 +1266,7 @@ class TestAppInterface:
         pipeline.pose_estimator.extract_video_skeleton = lambda _: [
             {
                 **{joint: (float(idx), float(idx + 1)) for idx, joint in enumerate(SpatialNormalizer.MODEL_JOINT_NAMES)},
+                "nose": (0.0, 0.0),
                 "front_ankle": (0.0, 100.0),
             }
             for _ in range(56)
@@ -1266,7 +1276,7 @@ class TestAppInterface:
 
         results = pipeline.process_video("synthetic.mp4", "athlete_001")
 
-        assert calls == [(56, 10, 2)]
+        assert calls == [(56, 9, 2)]
         assert len(results["classifications"]) == 3
         assert results["two_fencer_tracking"]["summary"]["frames_analyzed"] == 56
         assert results["two_fencer_tracking"]["summary"]["frames_with_one_fencer"] == 56
@@ -1286,6 +1296,7 @@ class TestAppInterface:
         pipeline.pose_estimator.extract_video_skeleton = lambda _: [
             {
                 **{joint: (float(idx), float(idx + 1)) for idx, joint in enumerate(SpatialNormalizer.MODEL_JOINT_NAMES)},
+                "nose": (0.0, 0.0),
                 "front_ankle": (0.0, 100.0),
             }
             for _ in range(28)
