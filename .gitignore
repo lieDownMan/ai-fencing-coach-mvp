@@ -32,7 +32,10 @@ reports/
 web_outputs/
 
 data/
+.venv/
 venv/
+logs/
+
 
 FFD/
 FFD.zip

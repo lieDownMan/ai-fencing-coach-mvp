@@ -3,17 +3,15 @@
 train_fencenet.py — Full training pipeline for FenceNet v2.
 
 Features:
-  • Leave-One-Person-Out (LOPO) 10-fold cross-validation
-  • ReduceLROnPlateau scheduler
-  • Early stopping
+  • Grouped K-Fold cross-validation (Prevents Data Leakage)
+  • AdamW + CosineAnnealingLR for stable convergence
+  • Label Smoothing for better generalization
   • Majority-voting evaluation per video
   • Per-epoch confusion matrix logging
   • Best-model checkpointing → weights/fencenet/best_model.pth
 
 Usage:
-    python train_fencenet.py --data_dir <path_to_json_samples>
-
-See FENCENET_TRAINING.md for the full specification.
+    python train_fencenet.py --data_dir data/json_samples
 """
 
 import argparse
@@ -22,23 +20,18 @@ import json
 import logging
 import os
 import sys
-import time
-from collections import Counter, defaultdict
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
-
 import random
+from collections import Counter, defaultdict
+from typing import Dict, List, Tuple
 
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader
 
 # ---------------------------------------------------------------------------
 # Imports from project
 # ---------------------------------------------------------------------------
-
-# Allow running from project root
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from src.data.fencing_dataset import (
@@ -46,14 +39,12 @@ from src.data.fencing_dataset import (
     NUM_CHANNELS,
     NUM_CLASSES,
     FencingDataset,
-    eval_collate_fn,
 )
 from src.models.fencenet_v2 import FenceNetV2
 
 # ---------------------------------------------------------------------------
 # Logging setup
 # ---------------------------------------------------------------------------
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s │ %(levelname)-7s │ %(message)s",
@@ -65,49 +56,51 @@ logger = logging.getLogger("train_fencenet")
 # Helpers
 # ---------------------------------------------------------------------------
 
-
-def build_random_folds(
+def build_grouped_folds(
     dataset: FencingDataset,
     n_folds: int = 5,
     seed: int = 42,
 ) -> List[Tuple[List[int], List[int]]]:
     """
-    Build random stratified K-fold splits.
-
-    Stratified: each fold preserves the class distribution of the full dataset.
-
-    Returns a list of (train_indices, val_indices) tuples.
+    Build Grouped K-fold splits to prevent Data Leakage.
+    Ensures all augmented versions of the same base video stay in the same fold.
     """
-    n = len(dataset)
-
-    # Group indices by label for stratified split
-    label_to_indices: Dict[int, List[int]] = defaultdict(list)
+    groups = defaultdict(list)
+    
     for i, sample in enumerate(dataset.samples):
-        label_to_indices[sample["label"]].append(i)
+        # 嘗試從 sample 中取得 file_path，若無則依賴順序推斷 (假設1影片=6增強版本)
+        file_path = sample.get("file_path", "")
+        if file_path:
+            base_name = os.path.basename(file_path).split("_orig")[0].split("_flip")[0].split("_noise")[0].split("_twarp")[0]
+        else:
+            base_name = f"dummy_video_{i // 6}"
+            
+        groups[base_name].append(i)
 
-    # Shuffle each group
+    unique_videos = list(groups.keys())
     rng = random.Random(seed)
-    for indices in label_to_indices.values():
-        rng.shuffle(indices)
-
-    # Assign each index to a fold (round-robin within each class)
-    fold_assignment = [0] * n
-    for label, indices in label_to_indices.items():
-        for rank, idx in enumerate(indices):
-            fold_assignment[idx] = rank % n_folds
+    rng.shuffle(unique_videos)
 
     folds = []
+    chunk_size = max(1, len(unique_videos) // n_folds)
+    
     for fold_id in range(n_folds):
-        val_idx = [i for i in range(n) if fold_assignment[i] == fold_id]
-        train_idx = [i for i in range(n) if fold_assignment[i] != fold_id]
+        start_idx = fold_id * chunk_size
+        end_idx = (fold_id + 1) * chunk_size if fold_id < n_folds - 1 else len(unique_videos)
+        
+        val_videos = set(unique_videos[start_idx:end_idx])
+            
+        train_idx, val_idx = [], []
+        for vid, indices in groups.items():
+            if vid in val_videos:
+                val_idx.extend(indices)
+            else:
+                train_idx.extend(indices)
+                
         folds.append((train_idx, val_idx))
-        logger.info(
-            f"  Fold {fold_id + 1:>2d}: "
-            f"train={len(train_idx)}  val={len(val_idx)}"
-        )
+        logger.info(f"  Fold {fold_id + 1:>2d}: train={len(train_idx)} val={len(val_idx)}")
 
     return folds
-
 
 def confusion_matrix_str(cm: np.ndarray, class_names: List[str]) -> str:
     """Pretty-print a confusion matrix."""
@@ -118,11 +111,9 @@ def confusion_matrix_str(cm: np.ndarray, class_names: List[str]) -> str:
         lines.append(f"  {class_names[i]:>4s}  {row_str}")
     return "\n".join(lines)
 
-
 # ---------------------------------------------------------------------------
 # Majority-voting evaluation
 # ---------------------------------------------------------------------------
-
 
 @torch.no_grad()
 def evaluate_majority_voting(
@@ -130,20 +121,9 @@ def evaluate_majority_voting(
     dataset: FencingDataset,
     indices: List[int],
     device: torch.device,
-    batch_size: int = 64,
 ) -> Tuple[float, np.ndarray]:
-    """
-    Evaluate with majority voting — each video may yield multiple 28-frame
-    subsequences; the predicted label is the mode of sub-predictions.
-
-    Returns:
-        accuracy:  float, percentage of correctly classified videos.
-        cm:        np.ndarray of shape (NUM_CLASSES, NUM_CLASSES), confusion
-                   matrix where cm[true][pred] is the count.
-    """
     model.eval()
 
-    # Build evaluation dataset (is_train=False → returns all subsequences)
     eval_ds = FencingDataset(
         data_dir=dataset.data_dir,
         sample_indices=indices,
@@ -158,12 +138,10 @@ def evaluate_majority_voting(
         subseqs, label = eval_ds[i]           # subseqs: (N, 18, 28)
         true_label = label.item()
 
-        # Run all subsequences through the model
         subseqs = subseqs.to(device)
         logits = model(subseqs)                # (N, 6)
         preds = logits.argmax(dim=1).cpu().numpy()
 
-        # Majority vote
         counter = Counter(preds.tolist())
         pred_label = counter.most_common(1)[0][0]
 
@@ -175,11 +153,9 @@ def evaluate_majority_voting(
     accuracy = correct / total * 100 if total > 0 else 0.0
     return accuracy, cm
 
-
 # ---------------------------------------------------------------------------
 # Single-fold training
 # ---------------------------------------------------------------------------
-
 
 def train_one_fold(
     fold_idx: int,
@@ -189,13 +165,7 @@ def train_one_fold(
     device: torch.device,
     args: argparse.Namespace,
 ) -> Tuple[float, nn.Module]:
-    """
-    Train FenceNetV2 for one fold.
 
-    Returns (best_val_accuracy, best_model_state_dict).
-    """
-
-    # --- Data loaders (training uses random crop → is_train=True) ---
     train_ds = FencingDataset(
         data_dir=args.data_dir,
         sample_indices=train_indices,
@@ -210,17 +180,22 @@ def train_one_fold(
         drop_last=False,
     )
 
-    # --- Model ---
+    # 針對 Underfitting：降低 Dropout 讓模型保有更多學習能力
     model = FenceNetV2(
         input_channels=NUM_CHANNELS,
         kernel_size=3,
-        dropout=0.2,
+        dropout=0.1, 
     ).to(device)
 
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="max", factor=0.5, patience=8, verbose=True,
+    # 針對 Underfitting/Overconfidence：加入 label_smoothing
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+    
+    # 使用 AdamW 取代 Adam，幫助模型更穩定收斂
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    
+    # 餘弦退火排程器，主動調節學習率
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=args.epochs, eta_min=1e-6
     )
 
     best_acc = 0.0
@@ -235,11 +210,11 @@ def train_one_fold(
         running_total = 0
 
         for features, labels in train_loader:
-            features = features.to(device)     # (B, 18, 28)
-            labels = labels.to(device)         # (B,)
+            features = features.to(device)     
+            labels = labels.to(device)         
 
             optimizer.zero_grad()
-            logits = model(features)           # (B, 6)
+            logits = model(features)           
             loss = criterion(logits, labels)
             loss.backward()
             optimizer.step()
@@ -252,11 +227,11 @@ def train_one_fold(
         train_loss = running_loss / running_total
         train_acc = running_correct / running_total * 100
 
-        # ---------- Validation (majority voting) ----------
-        val_acc, cm = evaluate_majority_voting(
-            model, dataset, val_indices, device, batch_size=args.batch_size,
-        )
-        scheduler.step(val_acc)
+        # ---------- Validation ----------
+        val_acc, cm = evaluate_majority_voting(model, dataset, val_indices, device)
+        
+        # 餘弦退火是在每個 epoch 結束時強制 step
+        scheduler.step()
 
         current_lr = optimizer.param_groups[0]["lr"]
         logger.info(
@@ -265,7 +240,6 @@ def train_one_fold(
             f"Val Acc {val_acc:5.1f}% │ LR {current_lr:.2e}"
         )
 
-        # Log confusion matrix every 10 epochs or at the last epoch
         if epoch % 10 == 0 or epoch == args.epochs:
             logger.info(
                 f"Fold {fold_idx} │ Confusion Matrix (epoch {epoch}):\n"
@@ -289,93 +263,73 @@ def train_one_fold(
 
     return best_acc, best_state
 
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
-
 def main():
-    parser = argparse.ArgumentParser(
-        description="Train FenceNet v2 with random K-fold cross-validation."
-    )
-    parser.add_argument(
-        "--data_dir",
-        type=str,
-        required=True,
-        help="Directory containing JSON sample files.",
-    )
+    parser = argparse.ArgumentParser(description="Train FenceNet v2 with Grouped K-fold CV.")
+    parser.add_argument("--data_dir", type=str, required=True)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--patience", type=int, default=15,
-                        help="Early stopping patience (epochs).")
-    parser.add_argument("--n_folds", type=int, default=5,
-                        help="Number of folds for random K-fold CV.")
+    parser.add_argument("--patience", type=int, default=20) # 放寬耐心值，讓模型有時間爬出局部解
+    parser.add_argument("--n_folds", type=int, default=5)
     parser.add_argument("--num_workers", type=int, default=4)
-    parser.add_argument(
-        "--output_dir",
-        type=str,
-        default="weights/fencenet",
-        help="Where to save the best model weights.",
-    )
-    parser.add_argument(
-        "--log_dir",
-        type=str,
-        default="logs/fencenet",
-        help="Directory for training logs (JSON summaries).",
-    )
+    parser.add_argument("--output_dir", type=str, default="weights/fencenet")
+    parser.add_argument("--log_dir", type=str, default="logs/fencenet")
     args = parser.parse_args()
+
+    # --- 設定 log 同時輸出到檔案 ---
+    os.makedirs(args.log_dir, exist_ok=True)
+    log_file_path = os.path.join(args.log_dir, "train.log")
+    file_handler = logging.FileHandler(log_file_path, mode="a", encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s │ %(levelname)-7s │ %(message)s",
+                          datefmt="%Y-%m-%d %H:%M:%S")
+    )
+    logger.addHandler(file_handler)
+    logger.info(f"Training log will be saved to → {log_file_path}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
 
-    # --- Load full dataset (metadata only) ---
     full_dataset = FencingDataset(data_dir=args.data_dir, is_train=True)
     logger.info(f"Loaded {len(full_dataset)} samples from {args.data_dir}")
 
-    # --- Build random K-fold splits ---
-    folds = build_random_folds(full_dataset, n_folds=args.n_folds)
+    folds = build_grouped_folds(full_dataset, n_folds=args.n_folds)
     logger.info(f"Number of folds: {len(folds)}")
 
-    # --- Train each fold ---
     fold_results: List[dict] = []
     overall_best_acc = 0.0
     overall_best_state = None
 
     for fold_idx, (train_idx, val_idx) in enumerate(folds, 1):
-        logger.info(f"\n{'='*60}")
-        logger.info(f"  FOLD {fold_idx} / {len(folds)}")
-        logger.info(f"{'='*60}")
+        logger.info(f"\n{'='*60}\n  FOLD {fold_idx} / {len(folds)}\n{'='*60}")
 
-        acc, state = train_one_fold(
-            fold_idx, full_dataset, train_idx, val_idx, device, args
-        )
+        acc, state = train_one_fold(fold_idx, full_dataset, train_idx, val_idx, device, args)
         fold_results.append({"fold": fold_idx, "val_accuracy": acc})
 
         if acc > overall_best_acc:
             overall_best_acc = acc
             overall_best_state = state
 
-    # --- Summary ---
     accs = [r["val_accuracy"] for r in fold_results]
     mean_acc = np.mean(accs)
     std_acc = np.std(accs)
-    logger.info(f"\n{'='*60}")
-    logger.info(f"  CROSS-VALIDATION RESULTS")
-    logger.info(f"{'='*60}")
+    logger.info(f"\n{'='*60}\n  CROSS-VALIDATION RESULTS\n{'='*60}")
     for r in fold_results:
         logger.info(f"  Fold {r['fold']:>2d}: {r['val_accuracy']:5.1f}%")
     logger.info(f"  Mean accuracy: {mean_acc:.1f}% ± {std_acc:.1f}%")
     logger.info(f"  Best single-fold accuracy: {overall_best_acc:.1f}%")
 
-    # --- Save best model ---
     os.makedirs(args.output_dir, exist_ok=True)
     save_path = os.path.join(args.output_dir, "best_model.pth")
-    torch.save(overall_best_state, save_path)
-    logger.info(f"  Best model saved → {save_path}")
+    if overall_best_state is not None:
+        torch.save(overall_best_state, save_path)
+        logger.info(f"  Best model saved → {save_path}")
 
-    # --- Save JSON log ---
     os.makedirs(args.log_dir, exist_ok=True)
     log_path = os.path.join(args.log_dir, "cv_results.json")
     log_data = {
@@ -388,7 +342,6 @@ def main():
     with open(log_path, "w") as f:
         json.dump(log_data, f, indent=2)
     logger.info(f"  Training log saved → {log_path}")
-
 
 if __name__ == "__main__":
     main()
