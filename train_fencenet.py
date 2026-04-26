@@ -27,6 +27,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import random
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -64,25 +66,43 @@ logger = logging.getLogger("train_fencenet")
 # ---------------------------------------------------------------------------
 
 
-def build_lopo_folds(
+def build_random_folds(
     dataset: FencingDataset,
+    n_folds: int = 5,
+    seed: int = 42,
 ) -> List[Tuple[List[int], List[int]]]:
     """
-    Build Leave-One-Person-Out folds.
+    Build random stratified K-fold splits.
 
-    Returns a list of (train_indices, val_indices) tuples, one per unique
-    fencer.
+    Stratified: each fold preserves the class distribution of the full dataset.
+
+    Returns a list of (train_indices, val_indices) tuples.
     """
-    fencer_ids = dataset.get_fencer_ids()
-    unique_ids = dataset.get_unique_fencer_ids()
+    n = len(dataset)
+
+    # Group indices by label for stratified split
+    label_to_indices: Dict[int, List[int]] = defaultdict(list)
+    for i, sample in enumerate(dataset.samples):
+        label_to_indices[sample["label"]].append(i)
+
+    # Shuffle each group
+    rng = random.Random(seed)
+    for indices in label_to_indices.values():
+        rng.shuffle(indices)
+
+    # Assign each index to a fold (round-robin within each class)
+    fold_assignment = [0] * n
+    for label, indices in label_to_indices.items():
+        for rank, idx in enumerate(indices):
+            fold_assignment[idx] = rank % n_folds
 
     folds = []
-    for held_out in unique_ids:
-        train_idx = [i for i, fid in enumerate(fencer_ids) if fid != held_out]
-        val_idx = [i for i, fid in enumerate(fencer_ids) if fid == held_out]
+    for fold_id in range(n_folds):
+        val_idx = [i for i in range(n) if fold_assignment[i] == fold_id]
+        train_idx = [i for i in range(n) if fold_assignment[i] != fold_id]
         folds.append((train_idx, val_idx))
         logger.info(
-            f"  Fold {len(folds):>2d}: hold-out={held_out!r}  "
+            f"  Fold {fold_id + 1:>2d}: "
             f"train={len(train_idx)}  val={len(val_idx)}"
         )
 
@@ -277,7 +297,7 @@ def train_one_fold(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Train FenceNet v2 with LOPO cross-validation."
+        description="Train FenceNet v2 with random K-fold cross-validation."
     )
     parser.add_argument(
         "--data_dir",
@@ -290,6 +310,8 @@ def main():
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--patience", type=int, default=15,
                         help="Early stopping patience (epochs).")
+    parser.add_argument("--n_folds", type=int, default=5,
+                        help="Number of folds for random K-fold CV.")
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument(
         "--output_dir",
@@ -311,13 +333,9 @@ def main():
     # --- Load full dataset (metadata only) ---
     full_dataset = FencingDataset(data_dir=args.data_dir, is_train=True)
     logger.info(f"Loaded {len(full_dataset)} samples from {args.data_dir}")
-    logger.info(
-        f"Unique fencers: {full_dataset.get_unique_fencer_ids()} "
-        f"({len(full_dataset.get_unique_fencer_ids())} total)"
-    )
 
-    # --- Build LOPO folds ---
-    folds = build_lopo_folds(full_dataset)
+    # --- Build random K-fold splits ---
+    folds = build_random_folds(full_dataset, n_folds=args.n_folds)
     logger.info(f"Number of folds: {len(folds)}")
 
     # --- Train each fold ---
