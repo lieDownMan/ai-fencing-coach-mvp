@@ -1,6 +1,6 @@
 """
 System Pipeline - Orchestrates the complete fencing coaching system.
-Coordinates: Pose Estimation -> Preprocessing -> FenceNet -> Tracking -> LLM Coaching
+Coordinates: Pose Estimation -> Preprocessing -> FenceNetV2 -> Heuristics -> Tracking -> LLM Coaching
 """
 
 import torch
@@ -11,7 +11,9 @@ import logging
 
 from ..pose_estimation import PoseEstimator
 from ..preprocessing import SpatialNormalizer, TemporalSampler
-from ..models import FenceNet, BiFenceNet
+from ..models import FenceNet, FenceNetV2, BiFenceNet
+from ..inference.sliding_window import SlidingWindowInference
+from ..inference.heuristics_engine import HeuristicsEngine
 from ..tracking import FencerTracker, PatternAnalyzer, ProfileManager
 from ..llm_agent import CoachEngine
 
@@ -26,7 +28,7 @@ class SystemPipeline:
 
     SUPPORTED_CHECKPOINT_FORMAT_VERSION = 1
     INFERENCE_WINDOW_SIZE = 28
-    INFERENCE_STRIDE = 14
+    INFERENCE_STRIDE = 10
     
     def __init__(
         self,
@@ -68,6 +70,7 @@ class SystemPipeline:
             model_path=pose_model_path,
             backend=pose_backend
         )
+        logger.info(f"Using {pose_backend}, {pose_model_path} pose estimation")
         
         # Phase 2: Preprocessing
         self.spatial_normalizer = SpatialNormalizer()
@@ -85,15 +88,25 @@ class SystemPipeline:
             ).to(device)
             logger.info("Using BiFenceNet model")
         else:
-            self.model = FenceNet(
+            self.model = FenceNetV2(
                 input_channels=self.model_input_channels,
-                device=device
             ).to(device)
-            logger.info("Using FenceNet model")
+            logger.info("Using FenceNetV2 model")
         
         self._load_model_checkpoint()
         
         self.model.eval()
+
+        # Phase 3b: Sliding Window Inference (wraps its own FenceNetV2 copy)
+        self.sliding_window = SlidingWindowInference(
+            model_path=self.model_checkpoint_path,
+            device=device,
+            window_size=self.INFERENCE_WINDOW_SIZE,
+            stride=self.INFERENCE_STRIDE,
+        )
+
+        # Phase 3c: Geometric Heuristics Engine
+        self.heuristics_engine = HeuristicsEngine()
         
         # Phase 4: Pattern Tracking
         self.fencer_tracker = FencerTracker()
@@ -139,6 +152,8 @@ class SystemPipeline:
             "fencer_id": fencer_id,
             "frames_processed": 0,
             "classifications": [],
+            "action_segments": [],
+            "posture_errors": [],
             "statistics": {},
             "window_size": self.INFERENCE_WINDOW_SIZE,
             "window_stride": self.INFERENCE_STRIDE,
@@ -168,10 +183,25 @@ class SystemPipeline:
             if skeleton_array.shape[0] < self.temporal_sampler.target_length:
                 skeleton_array = self.temporal_sampler.sample_array(skeleton_array)
             
-            # Phase 3: Model Inference
-            logger.info("Phase 3: Running FenceNet inference...")
+            # Phase 3a: Legacy Model Inference (kept for backward compat)
+            logger.info("Phase 3a: Running FenceNet inference (legacy)...")
             classifications = self._run_inference(skeleton_array, batch_process)
             results["classifications"] = classifications
+            
+            # Phase 3b: Sliding Window Action Spotting (new)
+            logger.info("Phase 3b: Running sliding window action spotting...")
+            action_segments = self.sliding_window.run(skeleton_array)
+            results["action_segments"] = action_segments
+            logger.info("Detected %d action segments", len(action_segments))
+            
+            # Phase 3c: Geometric Posture Evaluation (new)
+            logger.info("Phase 3c: Running geometric heuristics...")
+            posture_errors = self.heuristics_engine.evaluate(
+                action_segments, skeletons
+            )
+            results["posture_errors"] = posture_errors
+            if posture_errors:
+                logger.info("Detected %d posture errors", len(posture_errors))
             
             # Phase 4: Pattern Analysis
             logger.info("Phase 4: Analyzing patterns...")
