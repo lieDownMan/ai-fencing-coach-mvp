@@ -23,6 +23,17 @@ preprocessing:
   # Spatial normalization method: "center_scale" or "standardize"
   normalization: "center_scale"
 
+# Inference Configuration (Sliding Window + Heuristics)
+inference:
+  # Sliding window stride (spec: 10 frames ~0.33s at 30fps)
+  stride: 10
+
+  # Minimum softmax confidence to accept an action (below → Idle)
+  confidence_threshold: 0.6
+
+  # Model weights path
+  model_weights: "weights/fencenet/best_model.pth"
+
 # Data Configuration
 data:
   # Directory for video files

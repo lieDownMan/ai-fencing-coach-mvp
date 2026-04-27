@@ -397,3 +397,84 @@ class CoachEngine:
             return "Advanced"
         else:
             return "Intermediate"
+
+    def generate_posture_feedback(
+        self,
+        action_segments: List[Dict[str, Any]],
+        posture_errors: List[Dict[str, Any]],
+    ) -> str:
+        """
+        Generate coaching feedback from action segments and posture errors.
+
+        This implements Module 3 (Feedback Generation) from the spec.
+
+        Args:
+            action_segments: List of detected action segments from sliding window.
+            posture_errors: List of posture error dicts from heuristics engine.
+
+        Returns:
+            Coaching feedback text.
+        """
+        # Create raw sequence of actions
+        action_list = [seg["action"] for seg in action_segments]
+        
+        # Count action occurrences for the analytical fallback
+        from collections import Counter
+        action_counts = dict(Counter(action_list))
+
+        prompt = PromptTemplates.get_posture_coaching_prompt(
+            action_list=action_list,
+            posture_errors=posture_errors,
+        )
+
+        feedback = self._try_generate(
+            prompt=prompt,
+            max_new_tokens=150,
+            temperature=0.7,
+        )
+        if feedback is None:
+            feedback = self._generate_analytical_posture_feedback(
+                action_counts, posture_errors
+            )
+
+        return feedback
+
+    @staticmethod
+    def _generate_analytical_posture_feedback(
+        action_counts: Dict[str, int],
+        posture_errors: List[Dict[str, Any]],
+    ) -> str:
+        """Analytical fallback when LLM is unavailable."""
+        parts = []
+
+        # Action summary
+        if action_counts:
+            action_strs = [
+                f"{count}× {action}"
+                for action, count in sorted(
+                    action_counts.items(), key=lambda x: x[1], reverse=True
+                )
+            ]
+            parts.append(f"Actions detected: {', '.join(action_strs)}.")
+
+        # Error summary
+        if posture_errors:
+            high = [e for e in posture_errors if e.get("severity") == "high"]
+            medium = [e for e in posture_errors if e.get("severity") == "medium"]
+            if high:
+                parts.append(
+                    f"{len(high)} high-severity issue(s): "
+                    + "; ".join(e["error"] for e in high)
+                    + "."
+                )
+            if medium:
+                parts.append(
+                    f"{len(medium)} medium-severity issue(s): "
+                    + "; ".join(e["error"] for e in medium)
+                    + "."
+                )
+        else:
+            parts.append("No posture errors detected — good form!")
+
+        return " ".join(parts)
+

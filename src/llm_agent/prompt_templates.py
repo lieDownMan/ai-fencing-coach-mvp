@@ -204,3 +204,46 @@ Historical Comparison:
             summary += f"- {action}: {freq:.1%}\n"
         
         return summary
+
+    POSTURE_COACHING_SYSTEM_PROMPT = """You are a professional fencing coach. \
+Analyze the objective data from a student's training drill and provide concise, \
+encouraging, but direct technical correction and tactical advice in under 100 words."""
+
+    @staticmethod
+    def get_posture_coaching_prompt(
+        action_list: List[str],
+        posture_errors: List[Dict[str, Any]],
+    ) -> str:
+        """
+        Generate posture coaching prompt (spec Module 3 template).
+
+        Args:
+            action_list: Ordered list of detected action labels,
+                e.g. ``["SF", "SF", "SB", "R", "IS", "WW", "SF", "R", "SB", "JS"]``.
+            posture_errors: List of posture error dicts from HeuristicsEngine.
+
+        Returns:
+            Formatted prompt for LLM.
+        """
+        # Build action summary line — raw list, matching spec template
+        action_line = str(action_list) if action_list else "[]"
+
+        # Build error lines
+        if posture_errors:
+            error_lines = []
+            for i, err in enumerate(posture_errors, 1):
+                action = err.get("action", "Unknown")
+                error_msg = err.get("error", "Unknown error")
+                detail = err.get("detail", "")
+                error_lines.append(f"  {i}. During a {action}: {error_msg}. {detail}")
+            errors_block = "\n".join(error_lines)
+        else:
+            errors_block = "  No posture errors detected."
+
+        return f"""You are a professional fencing coach. Here is the objective data analysis of a student's drill:
+- Action Stats: {action_line}
+- Detected Posture Errors:
+{errors_block}
+Provide a concise, encouraging, but direct technical correction and tactical advice in under 100 words."""
+
+

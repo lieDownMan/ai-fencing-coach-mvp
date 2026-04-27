@@ -26,7 +26,7 @@ from src.app_interface.video_annotator import write_annotated_video
 logger = logging.getLogger(__name__)
 
 DEFAULT_WEB_OUTPUT_DIR = Path("web_outputs")
-DEFAULT_VIDEO_PATH = Path("video/fencing_match.mp4")
+DEFAULT_VIDEO_PATH = Path("data/videos/fencing_match.mp4")
 DEFAULT_ANNOTATED_MAX_WIDTH = 1280
 
 
@@ -373,6 +373,39 @@ def _render_result(result: Optional[WebProcessResult]) -> str:
     video_name = result.annotated_video_path.name if result.annotated_video_path else ""
     report_name = result.report_path.name if result.report_path else ""
     action_frequencies = statistics.get("action_frequencies") or {}
+    action_segments = report.get("action_segments") or []
+    posture_errors = report.get("posture_errors") or []
+    posture_feedback = report.get("posture_feedback") or ""
+
+    # Build action segments summary
+    segments_html = ""
+    if action_segments:
+        seg_items = "".join(
+            f"<li>{escape(seg.get('action','?'))} "
+            f"(frames {seg.get('start_frame',0)}–{seg.get('end_frame',0)}, "
+            f"conf {float(seg.get('confidence',0)):.2f})</li>"
+            for seg in action_segments[:20]  # cap display
+        )
+        segments_html = f"""
+    <section class=\"card\">
+      <h2>Action Segments ({len(action_segments)} detected)</h2>
+      <ul>{seg_items}</ul>
+    </section>"""
+
+    # Build posture errors summary
+    errors_html = ""
+    if posture_errors:
+        err_items = "".join(
+            f"<li><strong>[{escape(err.get('severity',''))}]</strong> "
+            f"{escape(err.get('error',''))} during {escape(err.get('action','?'))} "
+            f"— {escape(err.get('detail',''))}</li>"
+            for err in posture_errors
+        )
+        errors_html = f"""
+    <section class=\"card error\">
+      <h2>Posture Issues ({len(posture_errors)} found)</h2>
+      <ul>{err_items}</ul>
+    </section>"""
 
     return f"""
     <section class=\"card\">
@@ -382,17 +415,19 @@ def _render_result(result: Optional[WebProcessResult]) -> str:
     </section>
     <section class=\"cards\">
       {_metric_card('Frames', report.get('frames_processed', 0))}
-      {_metric_card('Two-fencer coverage', _percent(summary.get('two_fencer_coverage')))}
-      {_metric_card('Too-close ratio', _percent(summary.get('too_close_ratio')))}
+      {_metric_card('Action segments', len(action_segments))}
+      {_metric_card('Posture issues', len(posture_errors))}
       {_metric_card('Avg confidence', f"{float(statistics.get('average_confidence') or 0.0):.2f}")}
     </section>
+    {segments_html}
+    {errors_html}
     <section class=\"card\">
-      <h2>Summary</h2>
+      <h2>Coaching Feedback</h2>
+      <p><strong>Posture coaching:</strong> {escape(posture_feedback)}</p>
+      <p><strong>General feedback:</strong> {escape(str(report.get('feedback', '')))}</p>
+      <p><strong>Top actions:</strong> {escape(_format_actions(action_frequencies))}</p>
       <p><strong>Pose backend:</strong> {escape(str(runtime.get('pose_backend', 'unknown')))}</p>
       <p><strong>Model weights:</strong> {escape(str(runtime.get('model_weights', 'unknown')))}</p>
-      <p><strong>Top actions:</strong> {escape(_format_actions(action_frequencies))}</p>
-      <p><strong>Feedback:</strong> {escape(str(report.get('feedback', '')))}</p>
-      <p class=\"note\">Action labels remain prototype-level unless a trained FenceNet/BiFenceNet checkpoint is loaded.</p>
     </section>
     """
 
@@ -493,3 +528,4 @@ def _css() -> str:
     .error { border-color: #ff5c5c; }
     @media (max-width: 800px) { .grid, .cards { grid-template-columns: 1fr; } main { padding: 16px; } }
     """
+

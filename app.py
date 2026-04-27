@@ -252,6 +252,8 @@ def build_video_report(
         "window_stride": window_stride,
         "classification_window_count": len(classification_windows),
         "classification_windows": classification_windows,
+        "action_segments": results.get("action_segments", []),
+        "posture_errors": results.get("posture_errors", []),
         "two_fencer_tracking": tracking_report,
         "statistics": {
             "total_actions": _as_int(
@@ -268,6 +270,7 @@ def build_video_report(
             ),
         },
         "feedback": str(results.get("feedback", "")),
+        "posture_feedback": str(results.get("posture_feedback", "")),
         "runtime": runtime_metadata or {},
     }
 
@@ -381,8 +384,11 @@ class FencingCoachApplication:
             "fencer_id": fencer_id,
             "frames_processed": 0,
             "classifications": [],
+            "action_segments": [],
+            "posture_errors": [],
             "statistics": {},
             "feedback": "",
+            "posture_feedback": "",
         }
 
     def process_video(
@@ -427,8 +433,16 @@ class FencingCoachApplication:
             feedback = self.pipeline.get_conclusive_feedback(bout_result="completed")
             logger.info(f"Feedback: {feedback}")
 
+            # Generate posture-specific feedback (new pipeline)
+            posture_feedback = self.pipeline.coach_engine.generate_posture_feedback(
+                action_segments=results.get("action_segments", []),
+                posture_errors=results.get("posture_errors", []),
+            )
+            logger.info(f"Posture feedback: {posture_feedback}")
+
             results["ok"] = True
             results["feedback"] = feedback
+            results["posture_feedback"] = posture_feedback
             results["opponent_id"] = opponent_id
             return results
         except Exception as e:
