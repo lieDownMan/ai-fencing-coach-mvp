@@ -4,7 +4,7 @@ Geometric Heuristics Engine — Posture evaluator for fencing actions.
 Applies rule-based geometric checks to raw YOLO skeleton coordinates
 within the time-windows identified by the Action Spotter (sliding window).
 
-Spec reference: fixing_app.md § Module 2
+Spec reference: fixing_app.md § Module 2 + Module 4 (target_side)
 """
 
 from __future__ import annotations
@@ -17,20 +17,25 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# YOLO joint name → index mapping (matching PoseEstimator.REQUIRED_JOINTS)
+# Front-limb mapping by target_side (spec Module 4 rule update)
 # ---------------------------------------------------------------------------
-# These names match the skeleton dicts produced by PoseEstimator.
-JOINT = {
-    "nose": "nose",
-    "front_wrist": "front_wrist",
-    "front_shoulder": "front_shoulder",
-    "left_hip": "left_hip",
-    "right_hip": "right_hip",
-    "left_knee": "left_knee",
-    "right_knee": "right_knee",
-    "left_ankle": "left_ankle",
-    "right_ankle": "right_ankle",
-    "front_ankle": "front_ankle",
+# If target_side == "left", the fencer faces right → front leg = right,
+#                                                     front arm = right.
+# If target_side == "right", the fencer faces left → front leg = left,
+#                                                      front arm = left.
+FRONT_LIMBS = {
+    "left": {
+        "hip": "right_hip",
+        "knee": "right_knee",
+        "ankle": "right_ankle",
+        "wrist": "front_wrist",        # PoseEstimator already maps this
+    },
+    "right": {
+        "hip": "left_hip",
+        "knee": "left_knee",
+        "ankle": "left_ankle",
+        "wrist": "front_wrist",
+    },
 }
 
 # Actions that trigger each rule
@@ -104,6 +109,7 @@ def _pelvis_center(skeleton: Dict[str, Any]) -> Optional[np.ndarray]:
 
 def check_lunge_overextension(
     skeletons: List[Dict[str, Any]],
+    target_side: str = "left",
 ) -> Optional[Dict[str, Any]]:
     """
     Rule A — Lunge Over-extension (Knee over toes).
@@ -111,14 +117,23 @@ def check_lunge_overextension(
     Find the frame with maximum front-ankle displacement (peak lunge),
     then check the front-leg angle at [Hip, Knee, Ankle].
 
+    Parameters
+    ----------
+    skeletons : list[dict]
+        Skeleton dicts for the action window.
+    target_side : str
+        ``"left"`` or ``"right"`` — which side of the screen the target
+        fencer stands on.  Determines which leg is the front leg.
+
     Returns an error dict or None.
     """
     if not skeletons:
         return None
 
-    # Determine which side is the "front" leg.
-    # We use right side as default (matching PoseEstimator right-handed assumption).
-    hip_key, knee_key, ankle_key = "right_hip", "right_knee", "right_ankle"
+    limbs = FRONT_LIMBS.get(target_side, FRONT_LIMBS["left"])
+    hip_key = limbs["hip"]
+    knee_key = limbs["knee"]
+    ankle_key = limbs["ankle"]
 
     # Find frame of maximum displacement (front ankle x-displacement from frame 0)
     ref_ankle = _get_joint(skeletons[0], ankle_key)
@@ -158,6 +173,7 @@ def check_lunge_overextension(
 
 def check_guard_dropped(
     skeletons: List[Dict[str, Any]],
+    target_side: str = "left",
 ) -> Optional[Dict[str, Any]]:
     """
     Rule B — Weapon Hand Height (Guard dropped).
@@ -165,13 +181,23 @@ def check_guard_dropped(
     Check if the front wrist Y-coordinate drops below the pelvis center
     Y-coordinate in any frame.  (Y axis increases downward.)
 
+    Parameters
+    ----------
+    skeletons : list[dict]
+        Skeleton dicts for the action window.
+    target_side : str
+        ``"left"`` or ``"right"``.
+
     Returns an error dict or None.
     """
+    limbs = FRONT_LIMBS.get(target_side, FRONT_LIMBS["left"])
+    wrist_key = limbs["wrist"]
+
     worst_frame = None
     worst_diff = 0.0
 
     for idx, skel in enumerate(skeletons):
-        wrist = _get_joint(skel, "front_wrist")
+        wrist = _get_joint(skel, wrist_key)
         pelvis = _pelvis_center(skel)
         if wrist is None or pelvis is None:
             continue
@@ -193,12 +219,20 @@ def check_guard_dropped(
 
 def check_center_of_mass_bounce(
     skeletons: List[Dict[str, Any]],
+    target_side: str = "left",
 ) -> Optional[Dict[str, Any]]:
     """
     Rule C — Center of Mass Bouncing.
 
     Calculate the vertical variance of the pelvis center across the window.
     If it exceeds 10 % of the bounding-box height, flag it.
+
+    Parameters
+    ----------
+    skeletons : list[dict]
+        Skeleton dicts for the action window.
+    target_side : str
+        ``"left"`` or ``"right"`` (unused currently but kept for API consistency).
 
     Returns an error dict or None.
     """
@@ -246,11 +280,23 @@ class HeuristicsEngine:
     """
     Dispatches geometric posture checks based on the identified action label.
 
+    Parameters
+    ----------
+    target_side : str
+        ``"left"`` or ``"right"`` — which side of the screen the target
+        fencer stands on.  Passed through to every rule checker so it
+        knows which limbs are "front".
+
     Usage::
 
-        engine = HeuristicsEngine()
+        engine = HeuristicsEngine(target_side="left")
         errors = engine.evaluate(action_segments, raw_skeletons)
     """
+
+    def __init__(self, target_side: str = "left"):
+        if target_side not in ("left", "right"):
+            raise ValueError(f"target_side must be 'left' or 'right', got '{target_side}'")
+        self.target_side = target_side
 
     def evaluate(
         self,
@@ -293,7 +339,7 @@ class HeuristicsEngine:
 
             # Rule A: Lunge over-extension (attacking actions)
             if action in LUNGE_ACTIONS:
-                err = check_lunge_overextension(window_skeletons)
+                err = check_lunge_overextension(window_skeletons, self.target_side)
                 if err:
                     err["action"] = action
                     err["segment_index"] = seg_idx
@@ -303,7 +349,7 @@ class HeuristicsEngine:
 
             # Rule B: Guard dropped (all actions)
             if action in ALL_ACTIONS:
-                err = check_guard_dropped(window_skeletons)
+                err = check_guard_dropped(window_skeletons, self.target_side)
                 if err:
                     err["action"] = action
                     err["segment_index"] = seg_idx
@@ -313,7 +359,7 @@ class HeuristicsEngine:
 
             # Rule C: Center of mass bouncing (step actions)
             if action in STEP_ACTIONS:
-                err = check_center_of_mass_bounce(window_skeletons)
+                err = check_center_of_mass_bounce(window_skeletons, self.target_side)
                 if err:
                     err["action"] = action
                     err["segment_index"] = seg_idx

@@ -69,7 +69,7 @@ Aggregate the results from Modules 1 and 2, and call an LLM API (e.g., OpenAI, G
 * **Prompt Template**:
     ```text
     You are a professional fencing coach. Here is the objective data analysis of a student's 1-minute drill:
-    - Action Stats: 5 Step Forwards, 8 Step Backwards, 2 Rapid Lunges.
+    - Action Stats: ["SF", "SF", "SB", "R", "IS", "WW", "SF", "R" , "SB", "JS"]
     - Detected Posture Errors:
       1. During the 2nd Step Forward, the weapon hand dropped below the waist line.
       2. During the 1st Lunge, the front knee angle was less than 90 degrees (over-lunging).
@@ -91,6 +91,47 @@ Since real fencing videos contain two fencers (and often a referee), the system 
   Pass the `target_side` to Module 2 (Geometric Evaluator) so it knows which side is the "front" limb. 
   * If `"left"`, the fencer faces right -> Front leg is Right Leg (Index 14, 16), Front arm is Right Arm (Index 8, 10).
   * If `"right"`, the fencer faces left -> Front leg is Left Leg (Index 13, 15), Front arm is Left Arm (Index 7, 9).
+
+### Module 5: Activity Gatekeeper & State Machine (Idle vs. Active)
+To prevent computational waste and hallucination during non-fencing (resting/walking) periods in a continuous camera feed, implement a lightweight geometric gatekeeper *before* the Sliding Window.
+
+* **State Machine Definition**:
+  * System starts in `State: IDLE`.
+  * If `IDLE`: Only run YOLO extraction at 5 FPS (skip frames) to save compute. Do NOT feed data to FenceNet.
+  * If `ACTIVE`: Run YOLO at full FPS (30 FPS) and feed data to the Sliding Window (Module 1).
+* **Transition Logic (Heuristic-based)**:
+  * **To ACTIVE**: Calculate the Knee Angle of the target fencer. If `Knee_Angle < 155°` (indicating the fencer has dropped into the "En Garde" stance) and the bounding box is moving, switch to `ACTIVE`. Require this condition to hold for at least 15 consecutive frames (0.5s) to prevent false triggers.
+  * **To IDLE**: If the fencer stands up (`Knee_Angle > 165°`) or turns their back to the camera (shoulder width approaches 0 due to 2D projection), OR if the distance between the two fencers exceeds 60% of the frame width, switch to `IDLE` after a 2-second cooldown.
+* **Logging**: 
+  The final JSON report should only include timestamps where the system was in the `ACTIVE` state.
+
+### Module 6: Prediction Validation UI (Model Debugging Interface)
+
+**Objective**: Build a rapid prototyping Web UI to visually validate the Sliding Window predictions and Target Tracking accuracy. The UI must ensure 100% perfect synchronization between the video frames and the model's output.
+
+* **Recommended Framework**: `Gradio` or `Streamlit` (for rapid Python UI development).
+* **Core Workflow**:
+  1. **Upload**: User uploads a raw fencing video (`.mp4`).
+  2. **Parameter Selection**: User selects `target_side` (Left / Right Fencer).
+  3. **Processing**: System runs Module 4 (Tracking), Module 5 (Gatekeeper), and Module 3 (FenceNet).
+  4. **Burn-in Rendering**: System uses OpenCV to generate an annotated output video.
+  5. **Playback**: The UI displays the annotated video alongside a downloadable JSON log.
+
+* **Video Annotation Requirements (OpenCV `cv2.putText` & `cv2.rectangle`)**:
+  To guarantee exact temporal synchronization, the predictions must be rendered directly onto the output video frames.
+  * **Bounding Box**: Draw a bounding box around the selected `track_id` (the target fencer).
+  * **Skeleton Overlay**: Draw the YOLO pose connections for the target fencer to verify tracking quality.
+  * **Status HUD (Heads-Up Display)**: In the top-left corner of the video, display:
+    * `State`: `ACTIVE` (Green) or `IDLE` (Red) - from the Gatekeeper.
+    * `Knee Angle`: Display current knee angle to verify the En Garde check.
+    * `Current Action`: The action predicted by FenceNet for the *current sliding window* (e.g., `Action: JS`, `Action: SF`).
+    * `Confidence`: `0.92` (Only display if `State` is `ACTIVE`).
+
+* **UI Layout Components**:
+  * **Input Section**: `File Uploader` and `Radio Buttons` (Target Fencer: Left/Right).
+  * **Action Button**: `Run Analysis`.
+  * **Output Section 1 (Visual)**: A `Video Player` component playing the annotated `.mp4`.
+  * **Output Section 2 (Data)**: A `Dataframe/Table` showing the parsed action timeline (e.g., Start Time, End Time, Action Label) for easy cross-referencing.
 ---
 
 ## 3. Agent Action Items

@@ -211,32 +211,22 @@ encouraging, but direct technical correction and tactical advice in under 100 wo
 
     @staticmethod
     def get_posture_coaching_prompt(
-        action_stats: Dict[str, Any],
+        action_list: List[str],
         posture_errors: List[Dict[str, Any]],
     ) -> str:
         """
         Generate posture coaching prompt (spec Module 3 template).
 
         Args:
-            action_stats: Action segment counts (e.g. {"SF": 5, "SB": 8, "R": 2}).
+            action_list: Ordered list of detected action labels,
+                e.g. ``["SF", "SF", "SB", "R", "IS", "WW", "SF", "R", "SB", "JS"]``.
             posture_errors: List of posture error dicts from HeuristicsEngine.
 
         Returns:
             Formatted prompt for LLM.
         """
-        # Build action summary line
-        if action_stats:
-            action_parts = [
-                f"{count} {action}{'s' if count != 1 else ''}"
-                for action, count in sorted(
-                    action_stats.items(),
-                    key=lambda x: x[1],
-                    reverse=True,
-                )
-            ]
-            action_line = ", ".join(action_parts)
-        else:
-            action_line = "No actions detected"
+        # Build action summary line — raw list, matching spec template
+        action_line = str(action_list) if action_list else "[]"
 
         # Build error lines
         if posture_errors:
@@ -251,8 +241,9 @@ encouraging, but direct technical correction and tactical advice in under 100 wo
             errors_block = "  No posture errors detected."
 
         return f"""You are a professional fencing coach. Here is the objective data analysis of a student's drill:
-- Action Stats: {action_line}.
+- Action Stats: {action_line}
 - Detected Posture Errors:
 {errors_block}
 Provide a concise, encouraging, but direct technical correction and tactical advice in under 100 words."""
+
 
