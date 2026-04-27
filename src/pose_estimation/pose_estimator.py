@@ -120,7 +120,8 @@ class PoseEstimator:
 
     def extract_frame_fencers(
         self,
-        frame: np.ndarray
+        frame: np.ndarray,
+        persist_track: bool = False
     ) -> List[Dict[str, Any]]:
         """
         Extract up to all valid fencer candidates from a single frame.
@@ -139,7 +140,11 @@ class PoseEstimator:
                 "YOLO pose model, or use backend='mock' for tests."
             )
 
-        results = self.model(frame, verbose=False)
+        if persist_track:
+            results = self.model.track(frame, verbose=False, persist=True, tracker="bytetrack.yaml")
+        else:
+            results = self.model(frame, verbose=False)
+            
         if not results:
             return []
 
@@ -278,6 +283,12 @@ class PoseEstimator:
 
         boxes = self._extract_boxes(result, keypoints.shape[0])
         box_confidences = self._extract_box_confidences(result, keypoints.shape[0])
+        
+        track_ids = None
+        result_boxes = getattr(result, "boxes", None)
+        if result_boxes is not None and getattr(result_boxes, "id", None) is not None:
+            track_ids = self._to_numpy(result_boxes.id)
+            
         detections = []
 
         for person_idx in range(keypoints.shape[0]):
@@ -308,6 +319,10 @@ class PoseEstimator:
                     float((bbox[1] + bbox[3]) / 2.0),
                 ]
                 candidate["area"] = self._bbox_area(bbox)
+                
+            if track_ids is not None and person_idx < len(track_ids):
+                candidate["track_id"] = int(track_ids[person_idx])
+                
             detections.append(candidate)
 
         detections.sort(key=lambda detection: detection.get("area", 0.0), reverse=True)

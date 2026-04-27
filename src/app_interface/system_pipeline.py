@@ -38,7 +38,8 @@ class SystemPipeline:
         profiles_dir: str = "data/fencer_profiles/",
         pose_backend: str = "auto",
         pose_model_path: Optional[str] = None,
-        llm_model_name: str = "llava-next"
+        llm_model_name: str = "llava-next",
+        target_side: str = "left"
     ):
         """
         Initialize System Pipeline.
@@ -97,6 +98,8 @@ class SystemPipeline:
         
         self.model.eval()
 
+        self.target_side = target_side
+
         # Phase 3b: Sliding Window Inference (wraps its own FenceNetV2 copy)
         self.sliding_window = SlidingWindowInference(
             model_path=self.model_checkpoint_path,
@@ -106,7 +109,7 @@ class SystemPipeline:
         )
 
         # Phase 3c: Geometric Heuristics Engine
-        self.heuristics_engine = HeuristicsEngine()
+        self.heuristics_engine = HeuristicsEngine(target_side=self.target_side)
         
         # Phase 4: Pattern Tracking
         self.fencer_tracker = FencerTracker()
@@ -191,6 +194,16 @@ class SystemPipeline:
             # Phase 3b: Sliding Window Action Spotting (new)
             logger.info("Phase 3b: Running sliding window action spotting...")
             action_segments = self.sliding_window.run(skeleton_array)
+            
+            # Map action segments bounds back to actual video frames
+            frame_map = tracking_payload.get("active_to_video_map", [])
+            for seg in action_segments:
+                start_idx = seg["start_frame"]
+                end_idx = min(seg["end_frame"] - 1, len(frame_map) - 1)
+                if start_idx < len(frame_map) and end_idx >= 0:
+                    seg["video_start_frame"] = frame_map[start_idx]
+                    seg["video_end_frame"  ] = frame_map[end_idx]
+            
             results["action_segments"] = action_segments
             logger.info("Detected %d action segments", len(action_segments))
             
@@ -223,27 +236,65 @@ class SystemPipeline:
         self,
         video_path: str
     ) -> Tuple[List[Dict[str, Tuple[float, float]]], Dict[str, Any]]:
-        """Extract classifier skeletons and two-fencer tracking metadata."""
-        skeleton_extractor = getattr(self.pose_estimator, "extract_video_skeleton")
-        if getattr(skeleton_extractor, "__func__", None) is PoseEstimator.extract_video_skeleton:
-            pose_payload = self.pose_estimator.extract_video_fencer_tracks(video_path)
-            skeletons = pose_payload.get("skeletons", [])
-            tracking_payload = {
-                key: value
-                for key, value in pose_payload.items()
-                if key != "skeletons"
-            }
-            return skeletons, tracking_payload
+        """Extract classifier skeletons using Target Tracking (M4) and Gatekeeper (M5)."""
+        import cv2
+        from ..inference.target_tracker import TargetTracker
+        from ..inference.activity_gatekeeper import ActivityGatekeeper
+        
+        tracker = TargetTracker(target_side=self.target_side)
+        gatekeeper = ActivityGatekeeper(fps=30)
+        
+        skeletons = []
+        tracking_frames = []
+        active_to_video_map = []
+        
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise ValueError(f"Cannot open video: {video_path}")
 
-        skeletons = list(skeleton_extractor(video_path) or [])
-        tracking_frames = [
-            self.fencer_tracker.build_frame(
-                frame_index,
-                [self.fencer_tracker.candidate_from_skeleton(skeleton)]
+        frame_count = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            
+            should_extract = gatekeeper.should_extract_pose()
+            if not should_extract:
+                frame_count += 1
+                continue
+            
+            detections = self.pose_estimator.extract_frame_fencers(frame, persist_track=True)
+            target_skel, opp_skel = tracker.process_frame_detections(detections, frame_count)
+            
+            is_active = gatekeeper.update(
+                target_skeleton=target_skel, 
+                opponent_skeleton=opp_skel, 
+                frame_width=frame.shape[1], 
+                target_side=self.target_side
             )
-            for frame_index, skeleton in enumerate(skeletons)
-        ]
-        return skeletons, self.fencer_tracker.build_payload(tracking_frames)
+            
+            if is_active and target_skel is not None:
+                if self.pose_estimator.validate_skeleton(target_skel):
+                    skeletons.append(target_skel)
+                    active_to_video_map.append(frame_count)
+                    
+            frame_data = self.fencer_tracker.build_frame(frame_count, detections)
+            frame_data["gatekeeper_state"] = gatekeeper.state
+            knee_angle = gatekeeper._get_knee_angle(target_skel, self.target_side) if target_skel else 180.0
+            frame_data["knee_angle"] = knee_angle
+            
+            tracking_frames.append(frame_data)
+            
+            frame_count += 1
+            if frame_count % 100 == 0:
+                logger.info(f"Processed {frame_count} frames")
+                
+        cap.release()
+        logger.info(f"Extraction complete. Active skeleton frames: {len(skeletons)}/{frame_count}")
+        payload = self.fencer_tracker.build_payload(tracking_frames)
+        payload["active_to_video_map"] = active_to_video_map
+        payload["locked_track_id"] = tracker.locked_track_id
+        return skeletons, payload
 
     def _run_inference(
         self,

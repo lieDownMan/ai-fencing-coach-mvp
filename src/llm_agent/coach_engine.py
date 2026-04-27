@@ -415,12 +415,15 @@ class CoachEngine:
         Returns:
             Coaching feedback text.
         """
-        # Count action occurrences
+        # Create raw sequence of actions
+        action_list = [seg["action"] for seg in action_segments]
+        
+        # Count action occurrences for the analytical fallback
         from collections import Counter
-        action_counts = dict(Counter(seg["action"] for seg in action_segments))
+        action_counts = dict(Counter(action_list))
 
         prompt = PromptTemplates.get_posture_coaching_prompt(
-            action_stats=action_counts,
+            action_list=action_list,
             posture_errors=posture_errors,
         )
 
