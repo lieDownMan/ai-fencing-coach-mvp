@@ -237,6 +237,9 @@ def build_video_report(
             tracking_payload.get("identity_persistence", "")
         ),
         "too_close_rule": str(tracking_payload.get("too_close_rule", "")),
+        "target_side": tracking_payload.get("target_side"),
+        "weapon_hand": tracking_payload.get("weapon_hand"),
+        "source_fps": tracking_payload.get("source_fps"),
         "summary": tracking_payload.get("summary", {}),
         "frames": tracking_payload.get("frames", []),
     }

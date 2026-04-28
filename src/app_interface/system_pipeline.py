@@ -30,6 +30,8 @@ class SystemPipeline:
     SUPPORTED_CHECKPOINT_FORMAT_VERSION = 1
     INFERENCE_WINDOW_SIZE = 28
     INFERENCE_STRIDE = 10
+    STEP_ACTIONS = {"SF", "SB"}
+    STEP_TRACKING_MOTION_MIN_PX = 20.0
     
     def __init__(
         self,
@@ -111,6 +113,7 @@ class SystemPipeline:
             device=device,
             window_size=self.INFERENCE_WINDOW_SIZE,
             stride=self.INFERENCE_STRIDE,
+            target_side=self.target_side,
         )
 
         # Phase 3c: Geometric Heuristics Engine
@@ -211,6 +214,11 @@ class SystemPipeline:
                 if start_idx < len(frame_map) and end_idx >= 0:
                     seg["video_start_frame"] = frame_map[start_idx]
                     seg["video_end_frame"  ] = frame_map[end_idx]
+
+            action_segments = self._refine_step_segments_with_tracking(
+                action_segments,
+                tracking_payload,
+            )
             
             results["action_segments"] = action_segments
             logger.info("Detected %d action segments", len(action_segments))
@@ -434,6 +442,127 @@ class SystemPipeline:
             raise ValueError("skeleton_array must contain at least one joint")
         if not np.all(np.isfinite(skeleton_array)):
             raise ValueError("skeleton_array contains non-finite values")
+
+    def _refine_step_segments_with_tracking(
+        self,
+        action_segments: List[Dict[str, Any]],
+        tracking_payload: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """
+        Reconcile final SF/SB labels with target motion in tracked video frames.
+
+        This is especially helpful for oldstyle debugging because the final HUD
+        is judged against the actual pixel-space motion that the user sees.
+        """
+        frames_meta = tracking_payload.get("frames", [])
+        frames_by_index = {
+            int(frame.get("frame_index", index)): frame
+            for index, frame in enumerate(frames_meta)
+        }
+        if not frames_by_index:
+            return action_segments
+
+        corrections = 0
+        refined_segments: List[Dict[str, Any]] = []
+        for segment in action_segments:
+            updated = dict(segment)
+            if updated.get("action") not in self.STEP_ACTIONS:
+                refined_segments.append(updated)
+                continue
+
+            motion = self._tracking_motion_for_segment(updated, frames_by_index)
+            if motion is None:
+                refined_segments.append(updated)
+                continue
+
+            updated["tracking_motion_dx_px"] = round(motion["dx_px"], 1)
+            updated["tracking_motion_threshold_px"] = round(motion["threshold_px"], 1)
+            updated["tracking_motion_corrected"] = False
+            if motion["action"] != updated["action"]:
+                updated["action"] = motion["action"]
+                updated["tracking_motion_corrected"] = True
+                corrections += 1
+
+            refined_segments.append(updated)
+
+        if corrections:
+            logger.info(
+                "Tracking-motion refinement corrected %d SF/SB segments.",
+                corrections,
+            )
+        return refined_segments
+
+    def _tracking_motion_for_segment(
+        self,
+        segment: Dict[str, Any],
+        frames_by_index: Dict[int, Dict[str, Any]],
+    ) -> Optional[Dict[str, float | str]]:
+        """Infer SF/SB from target displacement across the mapped video segment."""
+        start_frame = int(segment.get("video_start_frame", -1))
+        end_frame = int(segment.get("video_end_frame", -1))
+        if start_frame < 0 or end_frame < start_frame:
+            return None
+
+        start_track = self._target_track_for_frame(frames_by_index.get(start_frame))
+        end_track = self._target_track_for_frame(frames_by_index.get(end_frame))
+        if start_track is None or end_track is None:
+            return None
+
+        start_x = self._track_anchor_x(start_track)
+        end_x = self._track_anchor_x(end_track)
+        if start_x is None or end_x is None:
+            return None
+
+        threshold_px = self._track_motion_threshold_px(start_track, end_track)
+        dx_px = float(end_x - start_x)
+        signed_forward_motion = dx_px if self.target_side == "left" else -dx_px
+        if abs(signed_forward_motion) < threshold_px:
+            return None
+
+        return {
+            "dx_px": dx_px,
+            "threshold_px": threshold_px,
+            "action": "SF" if signed_forward_motion > 0 else "SB",
+        }
+
+    def _target_track_for_frame(
+        self,
+        frame_info: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Return the tracked target-side fencer from one frame payload."""
+        if not frame_info:
+            return None
+        for track in frame_info.get("tracks", []):
+            if track.get("side") == self.target_side:
+                return track
+        return None
+
+    @staticmethod
+    def _track_anchor_x(track: Dict[str, Any]) -> Optional[float]:
+        """Use front ankle when available, otherwise fall back to bbox center."""
+        skeleton = track.get("skeleton") or {}
+        front_ankle = skeleton.get("front_ankle")
+        if isinstance(front_ankle, (list, tuple)) and len(front_ankle) == 2:
+            return float(front_ankle[0])
+        center = track.get("center")
+        if isinstance(center, (list, tuple)) and len(center) == 2:
+            return float(center[0])
+        return None
+
+    def _track_motion_threshold_px(
+        self,
+        start_track: Dict[str, Any],
+        end_track: Dict[str, Any],
+    ) -> float:
+        """Scale the motion threshold to the observed target size when possible."""
+        heights = []
+        for track in (start_track, end_track):
+            bbox = track.get("bbox")
+            if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+                heights.append(abs(float(bbox[3]) - float(bbox[1])))
+        if heights:
+            return max(self.STEP_TRACKING_MOTION_MIN_PX, 0.05 * (sum(heights) / len(heights)))
+        return self.STEP_TRACKING_MOTION_MIN_PX
 
     def _load_model_checkpoint(self):
         """Load optional model weights and record why loading did or did not happen."""

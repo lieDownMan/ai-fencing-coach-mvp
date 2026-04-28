@@ -57,13 +57,46 @@ class VideoAnnotator:
             return max(tracks, key=lambda track: float(track.get("area", 0.0)))
         return None
 
+    @staticmethod
+    def _resolve_action_for_frame(
+        action_segments: List[Dict[str, Any]],
+        frame_idx: int,
+    ) -> tuple[str, float]:
+        """
+        Resolve the action label for one video frame.
+
+        Older code returned the first overlapping segment, which meant an early
+        lower-confidence label could mask a later, stronger one. We now score
+        all overlapping segments and keep the most credible candidate.
+        """
+        overlapping = [
+            seg
+            for seg in action_segments
+            if int(seg.get("video_start_frame", 0)) <= frame_idx <= int(seg.get("video_end_frame", -1))
+        ]
+        if not overlapping:
+            return "None", 0.0
+
+        best = max(
+            overlapping,
+            key=lambda seg: (
+                float(seg.get("confidence", 0.0)),
+                int(seg.get("video_start_frame", 0)),
+                -(
+                    int(seg.get("video_end_frame", 0))
+                    - int(seg.get("video_start_frame", 0))
+                ),
+            ),
+        )
+        return str(best.get("action", "None")), float(best.get("confidence", 0.0))
+
     def annotate_video(self, input_path: str, output_path: str, report: Dict[str, Any]) -> str:
         """
         Burn annotations into the video and save to output_path.
         """
         tracking = report.get("two_fencer_tracking", {})
         frames_meta = tracking.get("frames", [])
-        target_side = tracking.get("target_side")
+        target_side = tracking.get("target_side") or report.get("target_side")
         action_segments = report.get("action_segments", [])
         frames_by_index = self._frames_by_index(frames_meta)
         
@@ -92,14 +125,10 @@ class VideoAnnotator:
                 
             frame_info = frames_by_index.get(frame_idx)
             
-            # Find current action
-            current_action = "None"
-            current_conf = 0.0
-            for seg in action_segments:
-                if seg.get("video_start_frame", 0) <= frame_idx <= seg.get("video_end_frame", 0):
-                    current_action = seg["action"]
-                    current_conf = seg["confidence"]
-                    break
+            current_action, current_conf = self._resolve_action_for_frame(
+                action_segments,
+                frame_idx,
+            )
                     
             if frame_info:
                 # 1. Draw target bounding box and skeleton

@@ -30,6 +30,10 @@ WINDOW_SIZE = 28          # must match trained model input time-steps
 STRIDE = 10              # ~0.33 s at 30 fps (spec value)
 CONFIDENCE_THRESHOLD = 0.6
 ATTACKING_ACTIONS = {"R", "IS", "WW", "JS"}
+STEP_ACTIONS = {"SF", "SB"}
+LEFT_HIP_INDEX = 3
+RIGHT_HIP_INDEX = 4
+STEP_MOTION_THRESHOLD = 0.05
 
 
 class SlidingWindowInference:
@@ -59,11 +63,15 @@ class SlidingWindowInference:
         window_size: int = WINDOW_SIZE,
         stride: int = STRIDE,
         confidence_threshold: float = CONFIDENCE_THRESHOLD,
+        target_side: str = "left",
+        step_motion_threshold: float = STEP_MOTION_THRESHOLD,
     ):
         self.device = torch.device(device)
         self.window_size = window_size
         self.stride = stride
         self.confidence_threshold = confidence_threshold
+        self.target_side = target_side
+        self.step_motion_threshold = float(step_motion_threshold)
         self.class_names = list(CLASS_NAMES)
 
         # Build model
@@ -92,14 +100,24 @@ class SlidingWindowInference:
         Returns
         -------
         list[dict]
-            Merged action segments, each containing::
+            Non-overlapping action segments, each containing::
 
                 {"start_frame": int, "end_frame": int,
                  "action": str, "confidence": float}
         """
         raw_windows = self._classify_windows(skeleton_array)
-        merged = self._nms(raw_windows)
-        return merged
+        corrected_windows = self._apply_step_motion_consistency(
+            raw_windows,
+            skeleton_array,
+        )
+        resolved_segments = self._resolve_windows_to_segments(
+            corrected_windows,
+            total_frames=skeleton_array.shape[0],
+        )
+        return self._apply_segment_motion_consistency(
+            resolved_segments,
+            skeleton_array,
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -199,6 +217,174 @@ class SlidingWindowInference:
 
         # Remove Idle segments from final output
         return [seg for seg in merged if seg["action"] != "Idle"]
+
+    def _apply_step_motion_consistency(
+        self,
+        windows: List[Dict[str, Any]],
+        skeleton_array: np.ndarray,
+    ) -> List[Dict[str, Any]]:
+        """
+        Flip SF/SB windows when the predicted step direction contradicts motion.
+
+        FenceNet learns step classes from pose trajectories, but in practice the
+        current checkpoint can still confuse forward/backward steps, especially
+        after the handedness/front-limb fixes changed the input distribution.
+        We therefore add a lightweight kinematic sanity check from pelvis motion.
+        """
+        corrected: List[Dict[str, Any]] = []
+        for window in windows:
+            updated = dict(window)
+            action = updated.get("action")
+            if action not in STEP_ACTIONS:
+                corrected.append(updated)
+                continue
+
+            motion_dx = self._window_motion_dx(
+                skeleton_array,
+                start_frame=int(updated["start_frame"]),
+                end_frame=int(updated["end_frame"]),
+            )
+            updated["motion_dx"] = motion_dx
+
+            motion_action = self._step_action_from_motion(motion_dx)
+            updated["motion_corrected"] = bool(
+                motion_action is not None and motion_action != action
+            )
+            if motion_action is not None:
+                updated["action"] = motion_action
+
+            corrected.append(updated)
+        return corrected
+
+    def _window_motion_dx(
+        self,
+        skeleton_array: np.ndarray,
+        start_frame: int,
+        end_frame: int,
+    ) -> Optional[float]:
+        """Estimate signed horizontal body motion for one window."""
+        start = max(0, int(start_frame))
+        end = min(int(end_frame), int(skeleton_array.shape[0]))
+        if end - start < 2:
+            return None
+
+        window = skeleton_array[start:end]
+        pelvis_x = np.mean(
+            window[:, [LEFT_HIP_INDEX, RIGHT_HIP_INDEX], 0],
+            axis=1,
+        )
+        if not np.all(np.isfinite(pelvis_x)):
+            return None
+
+        edge = min(3, pelvis_x.shape[0])
+        start_x = float(np.mean(pelvis_x[:edge]))
+        end_x = float(np.mean(pelvis_x[-edge:]))
+        return end_x - start_x
+
+    def _step_action_from_motion(self, motion_dx: Optional[float]) -> Optional[str]:
+        """Map signed horizontal motion to SF/SB when the displacement is reliable."""
+        if motion_dx is None:
+            return None
+
+        signed_forward_motion = (
+            motion_dx if self.target_side == "left" else -motion_dx
+        )
+        if abs(signed_forward_motion) < self.step_motion_threshold:
+            return None
+        return "SF" if signed_forward_motion > 0 else "SB"
+
+    def _resolve_windows_to_segments(
+        self,
+        windows: List[Dict[str, Any]],
+        total_frames: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Convert overlapping window predictions into a single frame-aligned timeline.
+
+        Older code returned overlapping segments directly, which made the oldstyle
+        debug overlay pick stale labels (for example, an early SB window masking a
+        later forward action). Here we keep the highest-confidence label at each
+        frame, then collapse contiguous runs into non-overlapping segments.
+        """
+        if total_frames <= 0 or not windows:
+            return []
+
+        frame_actions: List[str] = ["Idle"] * total_frames
+        frame_confidences = np.full(total_frames, -np.inf, dtype=float)
+
+        for window in windows:
+            action = str(window.get("action", "Idle"))
+            if action == "Idle":
+                continue
+
+            start = max(0, int(window.get("start_frame", 0)))
+            end = min(total_frames, int(window.get("end_frame", total_frames)))
+            if end <= start:
+                continue
+
+            confidence = float(window.get("confidence", 0.0))
+            for frame_idx in range(start, end):
+                if confidence >= frame_confidences[frame_idx]:
+                    frame_confidences[frame_idx] = confidence
+                    frame_actions[frame_idx] = action
+
+        segments: List[Dict[str, Any]] = []
+        current_action = "Idle"
+        current_start = 0
+        current_confidence = 0.0
+
+        for frame_idx in range(total_frames + 1):
+            action = frame_actions[frame_idx] if frame_idx < total_frames else "Idle"
+            confidence = (
+                float(frame_confidences[frame_idx])
+                if frame_idx < total_frames and np.isfinite(frame_confidences[frame_idx])
+                else 0.0
+            )
+
+            if action == current_action:
+                current_confidence = max(current_confidence, confidence)
+                continue
+
+            if current_action != "Idle":
+                segments.append(
+                    {
+                        "start_frame": current_start,
+                        "end_frame": frame_idx,
+                        "action": current_action,
+                        "confidence": current_confidence,
+                    }
+                )
+
+            current_action = action
+            current_start = frame_idx
+            current_confidence = confidence if action != "Idle" else 0.0
+
+        return segments
+
+    def _apply_segment_motion_consistency(
+        self,
+        segments: List[Dict[str, Any]],
+        skeleton_array: np.ndarray,
+    ) -> List[Dict[str, Any]]:
+        """Re-check final SF/SB segments against their net horizontal motion."""
+        corrected: List[Dict[str, Any]] = []
+        for segment in segments:
+            updated = dict(segment)
+            action = updated.get("action")
+            if action not in STEP_ACTIONS:
+                corrected.append(updated)
+                continue
+
+            motion_dx = self._window_motion_dx(
+                skeleton_array,
+                start_frame=int(updated["start_frame"]),
+                end_frame=int(updated["end_frame"]),
+            )
+            motion_action = self._step_action_from_motion(motion_dx)
+            if motion_action is not None:
+                updated["action"] = motion_action
+            corrected.append(updated)
+        return corrected
 
     @staticmethod
     def _best_of_group(group: List[Dict[str, Any]]) -> Dict[str, Any]:

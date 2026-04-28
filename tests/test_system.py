@@ -386,6 +386,178 @@ class TestInferencePipelineHelpers:
         assert selected is not None
         assert selected["side"] == "right"
 
+    def test_video_annotator_prefers_best_overlapping_action_segment(self):
+        """Oldstyle debug view should not get stuck on the first overlapping segment."""
+        from src.inference.video_annotator import VideoAnnotator
+
+        action, confidence = VideoAnnotator._resolve_action_for_frame(
+            [
+                {
+                    "action": "SB",
+                    "confidence": 0.70,
+                    "video_start_frame": 0,
+                    "video_end_frame": 30,
+                },
+                {
+                    "action": "R",
+                    "confidence": 0.92,
+                    "video_start_frame": 10,
+                    "video_end_frame": 35,
+                },
+            ],
+            frame_idx=20,
+        )
+
+        assert action == "R"
+        assert confidence == pytest.approx(0.92)
+
+    def test_sliding_window_motion_correction_flips_step_direction(self, monkeypatch):
+        """Forward pelvis motion should flip a contradictory SB window to SF."""
+        from src.inference.sliding_window import SlidingWindowInference
+
+        inferencer = SlidingWindowInference(
+            device="cpu",
+            target_side="left",
+        )
+        skeleton_array = np.zeros((40, 9, 2), dtype=np.float32)
+        skeleton_array[:, 3, 0] = np.linspace(0.0, 0.6, 40, dtype=np.float32)
+        skeleton_array[:, 4, 0] = np.linspace(0.0, 0.6, 40, dtype=np.float32)
+
+        monkeypatch.setattr(
+            inferencer,
+            "_classify_windows",
+            lambda _: [
+                {
+                    "start_frame": 0,
+                    "end_frame": 28,
+                    "action": "SB",
+                    "confidence": 0.95,
+                    "class_idx": 5,
+                }
+            ],
+        )
+
+        segments = inferencer.run(skeleton_array)
+
+        assert segments == [
+            {
+                "start_frame": 0,
+                "end_frame": 28,
+                "action": "SF",
+                "confidence": pytest.approx(0.95),
+            }
+        ]
+
+    def test_sliding_window_run_returns_non_overlapping_segments(self, monkeypatch):
+        """Resolved action segments should form a single non-overlapping timeline."""
+        from src.inference.sliding_window import SlidingWindowInference
+
+        inferencer = SlidingWindowInference(device="cpu", target_side="left")
+        skeleton_array = np.zeros((48, 9, 2), dtype=np.float32)
+
+        monkeypatch.setattr(
+            inferencer,
+            "_classify_windows",
+            lambda _: [
+                {
+                    "start_frame": 0,
+                    "end_frame": 28,
+                    "action": "WW",
+                    "confidence": 0.60,
+                    "class_idx": 2,
+                },
+                {
+                    "start_frame": 10,
+                    "end_frame": 38,
+                    "action": "R",
+                    "confidence": 0.90,
+                    "class_idx": 0,
+                },
+                {
+                    "start_frame": 20,
+                    "end_frame": 48,
+                    "action": "WW",
+                    "confidence": 0.95,
+                    "class_idx": 2,
+                },
+            ],
+        )
+
+        segments = inferencer.run(skeleton_array)
+
+        assert segments == [
+            {
+                "start_frame": 0,
+                "end_frame": 10,
+                "action": "WW",
+                "confidence": pytest.approx(0.60),
+            },
+            {
+                "start_frame": 10,
+                "end_frame": 20,
+                "action": "R",
+                "confidence": pytest.approx(0.90),
+            },
+            {
+                "start_frame": 20,
+                "end_frame": 48,
+                "action": "WW",
+                "confidence": pytest.approx(0.95),
+            },
+        ]
+
+    def test_system_pipeline_refines_step_segments_with_tracking_motion(self):
+        """Final SF/SB labels should follow tracked target displacement in video space."""
+        from src.app_interface.system_pipeline import SystemPipeline
+
+        pipeline = SystemPipeline.__new__(SystemPipeline)
+        pipeline.target_side = "left"
+        pipeline.STEP_ACTIONS = {"SF", "SB"}
+        pipeline.STEP_TRACKING_MOTION_MIN_PX = 20.0
+
+        refined = pipeline._refine_step_segments_with_tracking(
+            [
+                {
+                    "action": "SB",
+                    "confidence": 0.95,
+                    "start_frame": 0,
+                    "end_frame": 28,
+                    "video_start_frame": 0,
+                    "video_end_frame": 10,
+                }
+            ],
+            {
+                "frames": [
+                    {
+                        "frame_index": 0,
+                        "tracks": [
+                            {
+                                "side": "left",
+                                "bbox": [0.0, 0.0, 50.0, 200.0],
+                                "center": [25.0, 100.0],
+                                "skeleton": {"front_ankle": [20.0, 200.0]},
+                            }
+                        ],
+                    },
+                    {
+                        "frame_index": 10,
+                        "tracks": [
+                            {
+                                "side": "left",
+                                "bbox": [60.0, 0.0, 110.0, 200.0],
+                                "center": [85.0, 100.0],
+                                "skeleton": {"front_ankle": [90.0, 200.0]},
+                            }
+                        ],
+                    },
+                ]
+            },
+        )
+
+        assert refined[0]["action"] == "SF"
+        assert refined[0]["tracking_motion_corrected"] is True
+        assert refined[0]["tracking_motion_dx_px"] == pytest.approx(70.0)
+
 
 class TestModels:
     """Test suite for model architectures."""
@@ -763,6 +935,9 @@ class TestAppInterface:
                 "schema_version": 1,
                 "strategy": "largest_two_candidates_sorted_by_center_x",
                 "identity_persistence": "side-based",
+                "target_side": "left",
+                "weapon_hand": "left",
+                "source_fps": 30.0,
                 "summary": {
                     "frames_analyzed": 42,
                     "frames_with_two_fencers": 40,
@@ -802,6 +977,9 @@ class TestAppInterface:
         tracking = report["two_fencer_tracking"]
         assert tracking["summary"]["frames_with_two_fencers"] == 40
         assert tracking["summary"]["frames_too_close"] == 4
+        assert tracking["target_side"] == "left"
+        assert tracking["weapon_hand"] == "left"
+        assert tracking["source_fps"] == pytest.approx(30.0)
         assert tracking["frames"][0]["tracks"][0]["track_id"] == "fencer_L"
 
 

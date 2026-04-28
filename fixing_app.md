@@ -27,8 +27,9 @@ The current `FenceNetV2` model accepts a fixed input shape of `(28, 18)` after p
     * `STRIDE` = 10 frames (~0.33 seconds, the step size for the sliding window)
 * **Smoothing Logic (Non-Maximum Suppression / NMS)**:
     1.  At each step, the model outputs a predicted label and a Confidence Score (via Softmax).
-    2.  If multiple consecutive overlapping windows predict the same attacking action (e.g., `WW`, `JS`, `R`), retain only the window with the highest Confidence Score to represent the actual occurrence of that action.
-    3.  If the Confidence Score is `< 0.6`, label the segment as `Idle` (ignore).
+    2.  If the Confidence Score is `< 0.6`, label the window as `Idle` (ignore).
+    3.  For `SF` / `SB`, apply a motion sanity check from the target fencer's horizontal displacement. If the predicted step direction contradicts the observed motion, flip the label before timeline generation.
+    4.  Resolve all overlapping windows into a single non-overlapping timeline by keeping the highest-confidence label at each frame, then collapse contiguous runs into final `action_segments`.
 * **Output Format**: `List[Dict]`, for example:
     ```json
     [
@@ -123,12 +124,13 @@ To prevent computational waste and hallucination during non-fencing (resting/wal
 * **Video Annotation Requirements (OpenCV `cv2.putText` & `cv2.rectangle`)**:
   To guarantee exact temporal synchronization, the predictions must be rendered directly onto the output video frames.
   The annotation layer must index tracking metadata by the original `frame_index`, because Gatekeeper skipping makes the tracking timeline sparse during `IDLE`.
+  The saved JSON report must preserve `target_side` and `weapon_hand`, otherwise the oldstyle single-target debug overlay cannot reliably re-select the same athlete offline.
   * **Bounding Box**: Draw a bounding box around the selected `track_id` (the target fencer).
   * **Skeleton Overlay**: Draw the YOLO pose connections for the target fencer to verify tracking quality.
   * **Status HUD (Heads-Up Display)**: In the top-left corner of the video, display:
     * `State`: `ACTIVE` (Green) or `IDLE` (Red) - from the Gatekeeper.
     * `Knee Angle`: Display current knee angle to verify the En Garde check.
-    * `Current Action`: The action predicted by FenceNet for the *current sliding window* (e.g., `Action: JS`, `Action: SF`).
+    * `Current Action`: The best action covering the current frame. If multiple segments overlap, prefer the strongest-confidence segment instead of the earliest one.
     * `Confidence`: `0.92` (Only display if `State` is `ACTIVE`).
 
 * **UI Layout Components**:
@@ -145,6 +147,8 @@ To prevent computational waste and hallucination during non-fencing (resting/wal
 - The converter must handle both `3_IS/` and `3_IR/` as the `IS` class.
 - The converter should canonicalize `front_*` joints from the clip's screen side before saving JSON; otherwise the model will learn the wrong weapon-hand mapping.
 - The Gradio validation UI should use the sparse-frame-safe annotation path; otherwise later video frames can appear unannotated even when the backend is still processing them.
+- The oldstyle single-target debug video should read the final non-overlapping `action_segments`, not the first overlapping window that happens to cover the current frame.
+- Final `SF` / `SB` segments should be rechecked against tracked target motion in pixel space before writing the report, so the offline debug video matches what the user visually sees.
 - `mock` pose mode is for smoke testing the pipeline structure and should not emulate Gatekeeper frame skipping.
 ---
 

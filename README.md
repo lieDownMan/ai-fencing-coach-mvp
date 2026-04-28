@@ -82,14 +82,17 @@ Implemented in the current code path:
 - two-fencer tracking for visualization
 - paper-aligned FenceNet / BiFenceNet architecture support
 - sliding-window footwork recognition
+- motion-aware SF/SB correction using tracked target displacement
 - annotated video output
 - local browser demo
 - analytical coaching fallback
 - profile storage and JSON report output
 - target re-locking when YOLO/ByteTrack changes track IDs mid-video
 - sparse-frame-safe annotation for gatekeeper-skipped frames
+- oldstyle single-target debug annotation that resolves overlapping action segments by confidence instead of blindly using the first match
 - front-limb canonicalization driven by the selected target side, so the pipeline uses the actual leading arm / leg instead of assuming right-handed poses
 - optional `weapon_hand` override (`auto`, `left`, `right`) for cases where screen-side inference is not enough
+- JSON reports preserve `target_side`, `weapon_hand`, and `source_fps`, so saved reports can regenerate the correct target-side debug video later
 
 Still planned:
 
