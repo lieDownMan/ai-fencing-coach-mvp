@@ -183,8 +183,9 @@ class FencerTracker:
         area = self._bbox_area(bbox) if area is None else float(area)
         confidence = float(detection.get("confidence", 0.0))
         source_rank = int(detection.get("source_rank", 0))
+        track_id = detection.get("track_id")
 
-        return {
+        result = {
             "skeleton": skeleton,
             "bbox": bbox,
             "center": center,
@@ -192,15 +193,18 @@ class FencerTracker:
             "confidence": confidence,
             "source_rank": source_rank,
         }
+        if track_id is not None:
+            result["track_id"] = track_id
+        return result
 
     def _build_track(
         self,
-        track_id: str,
+        fencer_label: str,
         side: str,
         detection: Dict[str, Any]
     ) -> Dict[str, Any]:
-        return {
-            "track_id": track_id,
+        result = {
+            "fencer_label": fencer_label,
             "side": side,
             "source_rank": detection["source_rank"],
             "bbox": detection["bbox"],
@@ -209,6 +213,9 @@ class FencerTracker:
             "confidence": detection["confidence"],
             "skeleton": self._json_skeleton(detection["skeleton"]),
         }
+        if "track_id" in detection:
+            result["track_id"] = detection["track_id"]
+        return result
 
     def _engagement_distance(
         self,

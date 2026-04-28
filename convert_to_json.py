@@ -22,7 +22,7 @@ from scipy.interpolate import interp1d
 # ================= 設定 =================
 
 FFD_DIR = "./FFD"                    # 來源資料夾
-OUTPUT_DIR = "./data/json_samples"   # 輸出 JSON 的資料夾
+OUTPUT_DIR = "./src/data/json_samples"   # 輸出 JSON 的資料夾
 
 # 資料夾名稱 → FencingDataset 的 label 對應
 FOLDER_TO_LABEL = {

@@ -21,6 +21,7 @@ def init_pipeline(target_side: str):
     global pipeline
     logger.info("Initializing pipeline...")
     pipeline = SystemPipeline(
+        pose_backend="ultralytics" ,
         use_bifencenet=False,
         model_checkpoint="weights/fencenet/best_model.pth", 
         target_side=target_side

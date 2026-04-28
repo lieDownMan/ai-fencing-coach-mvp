@@ -43,6 +43,10 @@ class VideoAnnotator:
         locked_track_id = tracking.get("locked_track_id", None)
         action_segments = report.get("action_segments", [])
         
+        # Create a dictionary to map actual frame indices to frame metadata,
+        # because the pipeline skips some frames during IDLE state.
+        frames_dict = {f.get("frame_index"): f for f in frames_meta}
+        
         cap = cv2.VideoCapture(input_path)
         if not cap.isOpened():
             raise ValueError(f"Cannot open video: {input_path}")
@@ -66,7 +70,7 @@ class VideoAnnotator:
             if not ret:
                 break
                 
-            frame_info = frames_meta[frame_idx] if frame_idx < len(frames_meta) else None
+            frame_info = frames_dict.get(frame_idx)
             
             # Find current action
             current_action = "None"
@@ -82,7 +86,7 @@ class VideoAnnotator:
                 target_det = None
                 if locked_track_id is not None:
                     # Look for the locked candidate
-                    for det in frame_info.get("candidates", []):
+                    for det in frame_info.get("tracks", []):
                         if det.get("track_id") == locked_track_id:
                             target_det = det
                             break
