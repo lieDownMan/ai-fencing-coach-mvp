@@ -16,6 +16,7 @@ from ..inference.sliding_window import SlidingWindowInference
 from ..inference.heuristics_engine import HeuristicsEngine
 from ..tracking import FencerTracker, PatternAnalyzer, ProfileManager
 from ..llm_agent import CoachEngine
+from ..fencing_skeleton import normalize_weapon_hand
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,8 @@ class SystemPipeline:
         pose_backend: str = "auto",
         pose_model_path: Optional[str] = None,
         llm_model_name: str = "llava-next",
-        target_side: str = "left"
+        target_side: str = "left",
+        weapon_hand: str = "auto",
     ):
         """
         Initialize System Pipeline.
@@ -52,6 +54,8 @@ class SystemPipeline:
             pose_backend: Pose estimator backend ("auto", "ultralytics", or "mock")
             pose_model_path: Optional pose model path
             llm_model_name: CoachEngine LLM model name
+            target_side: Which fencer to analyze based on screen side
+            weapon_hand: Weapon-hand override for the target fencer ("auto", "left", or "right")
         """
         self.device = device
         self.use_bifencenet = use_bifencenet
@@ -99,6 +103,7 @@ class SystemPipeline:
         self.model.eval()
 
         self.target_side = target_side
+        self.weapon_hand = normalize_weapon_hand(weapon_hand)
 
         # Phase 3b: Sliding Window Inference (wraps its own FenceNetV2 copy)
         self.sliding_window = SlidingWindowInference(
@@ -112,7 +117,10 @@ class SystemPipeline:
         self.heuristics_engine = HeuristicsEngine(target_side=self.target_side)
         
         # Phase 4: Pattern Tracking
-        self.fencer_tracker = FencerTracker()
+        self.fencer_tracker = FencerTracker(
+            target_side=self.target_side,
+            weapon_hand=self.weapon_hand,
+        )
         self.pattern_analyzer = PatternAnalyzer()
         self.profile_manager = ProfileManager(profiles_dir=profiles_dir)
         
@@ -258,10 +266,14 @@ class SystemPipeline:
             payload["active_to_video_map"] = list(range(len(skeletons)))
             payload["locked_track_id"] = None
             payload["target_side"] = self.target_side
+            payload["weapon_hand"] = self.weapon_hand
             payload["source_fps"] = 30.0
             return skeletons, payload
 
-        tracker = TargetTracker(target_side=self.target_side)
+        tracker = TargetTracker(
+            target_side=self.target_side,
+            weapon_hand=self.weapon_hand,
+        )
         
         skeletons = []
         tracking_frames = []
@@ -325,6 +337,7 @@ class SystemPipeline:
         payload["active_to_video_map"] = active_to_video_map
         payload["locked_track_id"] = tracker.locked_track_id
         payload["target_side"] = self.target_side
+        payload["weapon_hand"] = self.weapon_hand
         payload["source_fps"] = float(source_fps)
         return skeletons, payload
 

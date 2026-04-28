@@ -17,25 +17,30 @@ logger = logging.getLogger(__name__)
 # Preload pipeline placeholder
 pipeline = None
 
-def init_pipeline(target_side: str):
+def init_pipeline(target_side: str, weapon_hand: str):
     global pipeline
     logger.info("Initializing pipeline...")
     pipeline = SystemPipeline(
         use_bifencenet=False,
         model_checkpoint="weights/fencenet/best_model.pth", 
-        target_side=target_side
+        target_side=target_side,
+        weapon_hand=weapon_hand,
     )
     logger.info("Pipeline initialized.")
 
-def analyze_video(video_file, target_side, update_status):
+def analyze_video(video_file, target_side, weapon_hand, update_status):
     if video_file is None:
         return None, None, "Please upload a video file."
 
     # Update state via yield if stream/generator, but we just return text.
-    logger.info(f"Starting analysis for side {target_side}")
+    logger.info(
+        "Starting analysis for side %s with weapon hand %s",
+        target_side,
+        weapon_hand,
+    )
     
     # 1. Initialize Pipeline with correct target_side
-    init_pipeline(target_side)
+    init_pipeline(target_side, weapon_hand)
     
     # 2. Run Analysis (Modules 4 -> 5 -> 1 -> 2 -> 3)
     results = pipeline.process_video(video_path=video_file, fencer_id="player1")
@@ -85,6 +90,12 @@ with gr.Blocks(title="AI Fencing Coach Validation UI") as app:
                 value="right", 
                 label="Target Fencer Side"
             )
+            weapon_hand_radio = gr.Radio(
+                choices=["auto", "left", "right"],
+                value="auto",
+                label="Weapon Hand",
+                info="auto uses side-based inference; left/right forces the target fencer's weapon arm.",
+            )
             video_input = gr.Video(label="Upload Raw Fencing Video")
             analyze_btn = gr.Button("Run Analysis", variant="primary")
             status_out = gr.Textbox(label="Status / Feedback", interactive=False, lines=5)
@@ -96,7 +107,7 @@ with gr.Blocks(title="AI Fencing Coach Validation UI") as app:
     
     analyze_btn.click(
         fn=analyze_video,
-        inputs=[video_input, target_side_radio, status_out],
+        inputs=[video_input, target_side_radio, weapon_hand_radio, status_out],
         outputs=[video_output, action_table, status_out]
     )
 

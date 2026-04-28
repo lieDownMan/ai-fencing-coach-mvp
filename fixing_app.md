@@ -82,6 +82,7 @@ Since real fencing videos contain two fencers (and often a referee), the system 
   Use YOLOv8's built-in tracker (`model.track(source, persist=True, tracker="bytetrack.yaml")`) to assign consistent `track_id`s to all detected persons across frames.
 * **Target Selection Logic**:
   * The system must accept a parameter: `target_side` (either `"left"` or `"right"`).
+  * The system may also accept an optional `weapon_hand` override (`"auto"`, `"left"`, `"right"`) for the selected target fencer.
   * On the first valid tracked frame, evaluate the bounding box center X-coordinates of all detected persons.
   * If `target_side == "left"`, lock onto the `track_id` with the minimum X-coordinate.
   * If `target_side == "right"`, lock onto the `track_id` with the maximum X-coordinate (excluding obvious background persons/referees by checking bounding box size/aspect ratio if necessary).
@@ -90,7 +91,8 @@ Since real fencing videos contain two fencers (and often a referee), the system 
 * **Posture Engine Adaptation (Rule update)**:
   Pass the `target_side` to the pose / tracking path so it can canonicalize the target skeleton into `front_shoulder`, `front_elbow`, `front_wrist`, and `front_ankle`.
   * `target_side` means which athlete is on the left or right side of the screen.
-  * The system should use that screen-side cue to decide which anatomical arm / leg is actually leading in the current pose, rather than hard-coding the right arm as the weapon arm.
+  * If `weapon_hand == "auto"`, the system should use that screen-side cue to decide which anatomical arm / leg is actually leading in the current pose, rather than hard-coding the right arm as the weapon arm.
+  * If `weapon_hand == "left"` or `"right"`, force the target fencer's front arm / leg to that anatomical side.
   * Downstream geometry checks should trust the canonicalized `front_*` joints when determining the front leg and weapon hand.
 
 ### Module 5: Activity Gatekeeper & State Machine (Idle vs. Active)

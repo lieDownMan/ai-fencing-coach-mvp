@@ -89,6 +89,7 @@ Implemented in the current code path:
 - target re-locking when YOLO/ByteTrack changes track IDs mid-video
 - sparse-frame-safe annotation for gatekeeper-skipped frames
 - front-limb canonicalization driven by the selected target side, so the pipeline uses the actual leading arm / leg instead of assuming right-handed poses
+- optional `weapon_hand` override (`auto`, `left`, `right`) for cases where screen-side inference is not enough
 
 Still planned:
 

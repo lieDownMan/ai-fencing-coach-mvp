@@ -319,6 +319,8 @@ class FencingCoachApplication:
         pose_model: Optional[str] = None,
         profiles_dir: str = "data/fencer_profiles/",
         llm_model_name: str = "llava-next",
+        target_side: str = "left",
+        weapon_hand: str = "auto",
         ui_width: int = 1600,
         ui_height: int = 900,
         create_ui: bool = False
@@ -334,6 +336,8 @@ class FencingCoachApplication:
             pose_model: Optional pose model path
             profiles_dir: Directory for fencer profiles
             llm_model_name: CoachEngine LLM model name
+            target_side: Which screen-side fencer to analyze
+            weapon_hand: Weapon-hand override for the target fencer
             ui_width: UI window width
             ui_height: UI window height
             create_ui: Whether to instantiate the OpenCV UI immediately
@@ -355,7 +359,9 @@ class FencingCoachApplication:
             profiles_dir=profiles_dir,
             pose_backend=pose_backend,
             pose_model_path=pose_model,
-            llm_model_name=llm_model_name
+            llm_model_name=llm_model_name,
+            target_side=target_side,
+            weapon_hand=weapon_hand,
         )
 
         if create_ui:
@@ -599,6 +605,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Path to YOLO pose model weights"
     )
     parser.add_argument(
+        "--target-side",
+        type=str,
+        choices=["left", "right"],
+        help="Which fencer to analyze based on screen side"
+    )
+    parser.add_argument(
+        "--weapon-hand",
+        type=str,
+        choices=["auto", "left", "right"],
+        help="Weapon-hand override for the target fencer; auto infers from screen side"
+    )
+    parser.add_argument(
         "--report",
         type=str,
         help="Path to write a JSON report for a processed video"
@@ -670,6 +688,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     pose_model = args.pose_model or _config_value(
         config, "pose", "model", default=None
+    )
+    target_side = args.target_side or _config_value(
+        config, "tracking", "target_side", default="left"
+    )
+    weapon_hand = args.weapon_hand or _config_value(
+        config, "tracking", "weapon_hand", default="auto"
     )
     report_path = Path(args.report).expanduser() if args.report else None
     annotated_video_config = _config_value(
@@ -748,6 +772,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             pose_model=pose_model,
             profiles_dir=profiles_dir,
             llm_model_name=llm_model_name,
+            target_side=target_side,
+            weapon_hand=weapon_hand,
             ui_width=ui_width,
             ui_height=ui_height,
             create_ui=args.interactive or video_path is None

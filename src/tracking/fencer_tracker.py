@@ -11,7 +11,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 
-from ..fencing_skeleton import canonicalize_front_joints
+from ..fencing_skeleton import canonicalize_front_joints, normalize_weapon_hand
 
 
 class FencerTracker:
@@ -27,6 +27,14 @@ class FencerTracker:
         "too_close when front-ankle x-distance is less than 1.0 times "
         "average tracked fencer bbox height"
     )
+
+    def __init__(
+        self,
+        target_side: Optional[str] = None,
+        weapon_hand: str = "auto",
+    ):
+        self.target_side = target_side
+        self.weapon_hand = normalize_weapon_hand(weapon_hand)
 
     def build_frame(
         self,
@@ -57,9 +65,11 @@ class FencerTracker:
         tracks = []
         for (track_id, side), detection in zip(labels, selected):
             canonical_detection = dict(detection)
+            weapon_hand = self.weapon_hand if side == self.target_side else "auto"
             canonical_detection["skeleton"] = canonicalize_front_joints(
                 detection["skeleton"],
                 screen_side=side,
+                weapon_hand=weapon_hand,
             )
             tracks.append(self._build_track(track_id, side, canonical_detection))
         engagement_distance, distance_source = self._engagement_distance(tracks)

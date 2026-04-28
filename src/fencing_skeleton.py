@@ -8,6 +8,19 @@ import numpy as np
 
 
 _BILATERAL_CHAIN = ("shoulder", "elbow", "wrist", "hip", "knee", "ankle")
+SUPPORTED_WEAPON_HANDS = {"auto", "left", "right"}
+
+
+def normalize_weapon_hand(value: Optional[str]) -> str:
+    """Normalize a weapon-hand override to auto/left/right."""
+    if value is None:
+        return "auto"
+    normalized = str(value).strip().lower()
+    if normalized not in SUPPORTED_WEAPON_HANDS:
+        raise ValueError(
+            f"weapon_hand must be one of {sorted(SUPPORTED_WEAPON_HANDS)}, got '{value}'"
+        )
+    return normalized
 
 
 def _as_point(value: Any) -> Optional[Tuple[float, float]]:
@@ -104,13 +117,16 @@ def front_limb_keys(
     skeleton: Dict[str, Any],
     screen_side: Optional[str] = None,
     prefer_explicit_front: bool = False,
+    weapon_hand: Optional[str] = None,
 ) -> Dict[str, str]:
     """Return the anatomical joint names for the fencer's leading arm and leg."""
-    front_side = infer_front_side(
-        skeleton,
-        screen_side=screen_side,
-        prefer_explicit_front=prefer_explicit_front,
-    )
+    front_side = normalize_weapon_hand(weapon_hand)
+    if front_side == "auto":
+        front_side = infer_front_side(
+            skeleton,
+            screen_side=screen_side,
+            prefer_explicit_front=prefer_explicit_front,
+        )
     return {
         "side": front_side,
         "shoulder": f"{front_side}_shoulder",
@@ -125,6 +141,7 @@ def front_limb_keys(
 def canonicalize_front_joints(
     skeleton: Dict[str, Any],
     screen_side: Optional[str] = None,
+    weapon_hand: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Copy a skeleton and rewrite front_* joints to the actual leading side."""
     canonical = dict(skeleton)
@@ -132,6 +149,7 @@ def canonicalize_front_joints(
         canonical,
         screen_side=screen_side,
         prefer_explicit_front=False,
+        weapon_hand=weapon_hand,
     )
 
     for front_name, side_name in (

@@ -7,7 +7,7 @@ import numpy as np
 import logging
 from typing import Dict, List, Any, Optional, Tuple
 
-from ..fencing_skeleton import canonicalize_front_joints
+from ..fencing_skeleton import canonicalize_front_joints, normalize_weapon_hand
 
 logger = logging.getLogger(__name__)
 
@@ -16,12 +16,13 @@ class TargetTracker:
     Isolates the target fencer's skeleton stream using YOLOv8 ByteTrack.
     """
     
-    def __init__(self, target_side: str = "left"):
+    def __init__(self, target_side: str = "left", weapon_hand: str = "auto"):
         """
         Args:
             target_side: "left" or "right"
         """
         self.target_side = target_side
+        self.weapon_hand = normalize_weapon_hand(weapon_hand)
         self.locked_track_id: Optional[int] = None
         
         # Buffer for interpolation (max gap = 5)
@@ -83,6 +84,7 @@ class TargetTracker:
             target_skeleton = canonicalize_front_joints(
                 target_det["skeleton"],
                 screen_side=self.target_side,
+                weapon_hand=self.weapon_hand,
             )
             self.last_known_skeleton = target_skeleton
             center = target_det.get("center")
@@ -94,6 +96,7 @@ class TargetTracker:
                 canonicalize_front_joints(
                     opponent_det["skeleton"],
                     screen_side=opponent_side,
+                    weapon_hand="auto",
                 )
                 if opponent_det
                 else None
@@ -105,6 +108,7 @@ class TargetTracker:
             canonicalize_front_joints(
                 opponent_det["skeleton"],
                 screen_side=opponent_side,
+                weapon_hand="auto",
             )
             if opponent_det
             else None

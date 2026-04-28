@@ -286,6 +286,56 @@ class TestInferencePipelineHelpers:
         assert canonical["front_wrist"] == canonical["left_wrist"]
         assert canonical["front_ankle"] == canonical["left_ankle"]
 
+    def test_canonicalize_front_joints_respects_weapon_hand_override(self):
+        """Manual weapon-hand override should beat screen-side inference for the target fencer."""
+        from src.fencing_skeleton import canonicalize_front_joints
+
+        skeleton = {
+            "nose": (0.0, 0.0),
+            "left_shoulder": (8.0, 1.0),
+            "right_shoulder": (4.0, 1.0),
+            "left_elbow": (9.0, 2.0),
+            "right_elbow": (5.0, 2.0),
+            "left_wrist": (10.0, 3.0),
+            "right_wrist": (6.0, 3.0),
+            "left_hip": (7.5, 4.0),
+            "right_hip": (3.5, 4.0),
+            "left_knee": (8.5, 6.0),
+            "right_knee": (4.5, 6.0),
+            "left_ankle": (9.5, 8.0),
+            "right_ankle": (5.5, 8.0),
+            "front_shoulder": (8.0, 1.0),
+            "front_elbow": (9.0, 2.0),
+            "front_wrist": (10.0, 3.0),
+            "front_ankle": (9.5, 8.0),
+        }
+
+        canonical = canonicalize_front_joints(
+            skeleton,
+            screen_side="left",
+            weapon_hand="right",
+        )
+
+        assert canonical["front_shoulder"] == canonical["right_shoulder"]
+        assert canonical["front_elbow"] == canonical["right_elbow"]
+        assert canonical["front_wrist"] == canonical["right_wrist"]
+        assert canonical["front_ankle"] == canonical["right_ankle"]
+
+    def test_target_tracker_respects_weapon_hand_override(self):
+        """TargetTracker should force the target skeleton to the requested weapon hand."""
+        from src.inference.target_tracker import TargetTracker
+
+        tracker = TargetTracker(target_side="left", weapon_hand="right")
+        detections = [
+            self._detection(center_x=120.0, track_id=11, source_rank=0),
+            self._detection(center_x=420.0, track_id=22, source_rank=1),
+        ]
+
+        target_skeleton, _ = tracker.process_frame_detections(detections, frame_idx=0)
+
+        assert target_skeleton["front_ankle"] == target_skeleton["right_ankle"]
+        assert target_skeleton["front_wrist"] == target_skeleton["right_wrist"]
+
     def test_activity_gatekeeper_uses_canonical_front_leg(self):
         """Knee-angle gating should follow front_ankle, not a fixed leg for one screen side."""
         from src.inference.activity_gatekeeper import ActivityGatekeeper
@@ -1064,6 +1114,9 @@ class TestAppInterface:
                 "  device: cpu",
                 "pose:",
                 "  backend: mock",
+                "tracking:",
+                "  target_side: right",
+                "  weapon_hand: left",
                 "athlete:",
                 "  default_id: athlete_cfg",
                 "ui:",
@@ -1103,6 +1156,8 @@ class TestAppInterface:
         assert captured["app_kwargs"]["llm_model_name"] == "mistral"
         assert captured["app_kwargs"]["device"] == "cpu"
         assert captured["app_kwargs"]["pose_backend"] == "mock"
+        assert captured["app_kwargs"]["target_side"] == "right"
+        assert captured["app_kwargs"]["weapon_hand"] == "left"
         assert captured["app_kwargs"]["ui_width"] == 320
         assert captured["app_kwargs"]["ui_height"] == 240
         assert captured["process_kwargs"]["fencer_id"] == "athlete_cfg"
@@ -1169,6 +1224,10 @@ class TestAppInterface:
             "cpu",
             "--model-type",
             "bifencenet",
+            "--target-side",
+            "left",
+            "--weapon-hand",
+            "right",
         ])
 
         assert exit_code == 0
@@ -1177,6 +1236,8 @@ class TestAppInterface:
         assert captured["app_kwargs"]["pose_backend"] == "mock"
         assert captured["app_kwargs"]["llm_model_name"] == "mistral"
         assert captured["app_kwargs"]["device"] == "cpu"
+        assert captured["app_kwargs"]["target_side"] == "left"
+        assert captured["app_kwargs"]["weapon_hand"] == "right"
         assert captured["process_kwargs"]["fencer_id"] == "cli_fencer"
     
     def test_system_pipeline_initialization(self):
@@ -1187,6 +1248,7 @@ class TestAppInterface:
         assert pipeline is not None
         assert pipeline.device == "cpu"
         assert pipeline.model_input_channels == 18
+        assert pipeline.weapon_hand == "auto"
         assert hasattr(pipeline, 'process_video')
 
     def test_application_missing_video_returns_error_payload(self, tmp_path):
