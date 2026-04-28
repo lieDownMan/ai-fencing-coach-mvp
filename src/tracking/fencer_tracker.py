@@ -11,6 +11,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 
+from ..fencing_skeleton import canonicalize_front_joints
+
 
 class FencerTracker:
     """Assign side-based fencer tracks from per-frame pose detections."""
@@ -52,10 +54,14 @@ class FencerTracker:
         else:
             labels = [("fencer_1", "unknown")]
 
-        tracks = [
-            self._build_track(track_id, side, detection)
-            for (track_id, side), detection in zip(labels, selected)
-        ]
+        tracks = []
+        for (track_id, side), detection in zip(labels, selected):
+            canonical_detection = dict(detection)
+            canonical_detection["skeleton"] = canonicalize_front_joints(
+                detection["skeleton"],
+                screen_side=side,
+            )
+            tracks.append(self._build_track(track_id, side, canonical_detection))
         engagement_distance, distance_source = self._engagement_distance(tracks)
         distance_features = self._distance_features(tracks, engagement_distance)
 

@@ -26,8 +26,18 @@ python app.py --video path/to/bout.mp4 --fencer-id athlete_001 --device auto --p
 Train a baseline model:
 
 ```bash
-python train.py --dataset data/training/ffd_prepared.npz --output-dir weights/fencenet_ffd_run1 --model-type fencenet
+unzip FFD.zip
+python convert_to_json.py
+python train_fencenet.py --data_dir data/json_samples
 ```
+
+## FFD Dataset Note
+
+- Use the local `FFD.zip` bundle as the source of truth when preparing training data.
+- The lightweight `FFD/` directory in git is not a complete substitute for the local archive.
+- `convert_to_json.py` converts the extracted clips into the JSON format expected by `train_fencenet.py`.
+- The converter now accepts both `3_IS/` and `3_IR/` folder names as the `IS` class, because the local archive uses `3_IR/`.
+- The converter also canonicalizes `front_*` joints from the fencer's screen side, so retraining does not hard-code the right arm as the weapon arm.
 
 ## Documentation
 
@@ -76,6 +86,9 @@ Implemented in the current code path:
 - local browser demo
 - analytical coaching fallback
 - profile storage and JSON report output
+- target re-locking when YOLO/ByteTrack changes track IDs mid-video
+- sparse-frame-safe annotation for gatekeeper-skipped frames
+- front-limb canonicalization driven by the selected target side, so the pipeline uses the actual leading arm / leg instead of assuming right-handed poses
 
 Still planned:
 
@@ -90,10 +103,12 @@ Still planned:
 ai-fencing-coach-mvp/
 ├── README.md
 ├── app.py
-├── web_app.py
-├── train.py
+├── gradio_app.py
+├── convert_to_json.py
+├── train_fencenet.py
 ├── config.yaml
 ├── requirements.txt
+├── FFD/
 ├── docs/
 │   ├── README.md
 │   ├── dev/

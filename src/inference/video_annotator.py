@@ -34,14 +34,38 @@ class VideoAnnotator:
         ("right_knee", "right_ankle")
     ]
 
+    @staticmethod
+    def _frames_by_index(frames_meta: List[Dict[str, Any]]) -> Dict[int, Dict[str, Any]]:
+        """Map sparse tracking metadata to actual video frame indices."""
+        return {
+            int(frame.get("frame_index", index)): frame
+            for index, frame in enumerate(frames_meta or [])
+        }
+
+    @staticmethod
+    def _select_target_track(
+        frame_info: Dict[str, Any],
+        target_side: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        """Return the tracked fencer matching the requested side, or a safe fallback."""
+        tracks = frame_info.get("tracks", [])
+        if target_side:
+            for track in tracks:
+                if track.get("side") == target_side:
+                    return track
+        if tracks:
+            return max(tracks, key=lambda track: float(track.get("area", 0.0)))
+        return None
+
     def annotate_video(self, input_path: str, output_path: str, report: Dict[str, Any]) -> str:
         """
         Burn annotations into the video and save to output_path.
         """
         tracking = report.get("two_fencer_tracking", {})
         frames_meta = tracking.get("frames", [])
-        locked_track_id = tracking.get("locked_track_id", None)
+        target_side = tracking.get("target_side")
         action_segments = report.get("action_segments", [])
+        frames_by_index = self._frames_by_index(frames_meta)
         
         cap = cv2.VideoCapture(input_path)
         if not cap.isOpened():
@@ -66,7 +90,7 @@ class VideoAnnotator:
             if not ret:
                 break
                 
-            frame_info = frames_meta[frame_idx] if frame_idx < len(frames_meta) else None
+            frame_info = frames_by_index.get(frame_idx)
             
             # Find current action
             current_action = "None"
@@ -79,13 +103,10 @@ class VideoAnnotator:
                     
             if frame_info:
                 # 1. Draw target bounding box and skeleton
-                target_det = None
-                if locked_track_id is not None:
-                    # Look for the locked candidate
-                    for det in frame_info.get("candidates", []):
-                        if det.get("track_id") == locked_track_id:
-                            target_det = det
-                            break
+                target_det = self._select_target_track(
+                    frame_info=frame_info,
+                    target_side=target_side,
+                )
                             
                 if target_det:
                     # Bounding Box

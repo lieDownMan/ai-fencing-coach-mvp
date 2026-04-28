@@ -32,6 +32,8 @@ class TestPoseEstimation:
         assert skeleton is not None
         assert estimator.validate_skeleton(skeleton)
         assert skeleton["front_ankle"] == skeleton["right_ankle"]
+        assert "left_wrist" in skeleton
+        assert "right_wrist" in skeleton
         assert any(coord != 0.0 for point in skeleton.values() for coord in point)
 
     def test_pose_estimator_unavailable_backend_raises(self):
@@ -55,6 +57,7 @@ class TestPoseEstimation:
         tracking_frame = estimator.fencer_tracker.build_frame(0, detections)
 
         assert len(detections) == 2
+        assert [detection["track_id"] for detection in detections] == [1, 2]
         assert tracking_frame["tracked_fencer_count"] == 2
         assert [track["track_id"] for track in tracking_frame["tracks"]] == [
             "fencer_L",
@@ -186,6 +189,152 @@ class TestPreprocessing:
         assert "nose" not in SpatialNormalizer.MODEL_JOINT_NAMES
         assert array.shape == (1, 9, 2)
         assert array.shape[1] * array.shape[2] == 18
+
+
+class TestInferencePipelineHelpers:
+    """Regression tests for new inference/tracking helpers."""
+
+    @staticmethod
+    def _detection(center_x: float, track_id: int, source_rank: int = 0):
+        from src.pose_estimation import PoseEstimator
+        from src.tracking import FencerTracker
+
+        estimator = PoseEstimator(backend="mock")
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        skeleton = estimator._mock_skeleton(frame, center_x=center_x)
+        detection = FencerTracker().candidate_from_skeleton(
+            skeleton,
+            confidence=1.0,
+            source_rank=source_rank,
+        )
+        detection["track_id"] = track_id
+        return detection
+
+    def test_target_tracker_locks_on_first_available_frame(self):
+        """Tracker should lock even when the first valid detection is not frame 0."""
+        from src.inference.target_tracker import TargetTracker
+
+        tracker = TargetTracker(target_side="left")
+        detections = [
+            self._detection(center_x=120.0, track_id=11, source_rank=0),
+            self._detection(center_x=420.0, track_id=22, source_rank=1),
+        ]
+
+        target_skeleton, opponent_skeleton = tracker.process_frame_detections(
+            detections,
+            frame_idx=6,
+        )
+
+        assert tracker.locked_track_id == 11
+        assert target_skeleton == detections[0]["skeleton"]
+        assert opponent_skeleton["front_ankle"] == opponent_skeleton["left_ankle"]
+        assert opponent_skeleton["front_wrist"] == opponent_skeleton["left_wrist"]
+
+    def test_target_tracker_reacquires_when_track_ids_change(self):
+        """Tracker should relock when ByteTrack reassigns IDs mid-video."""
+        from src.inference.target_tracker import TargetTracker
+
+        tracker = TargetTracker(target_side="left")
+        first_frame = [
+            self._detection(center_x=120.0, track_id=11, source_rank=0),
+            self._detection(center_x=420.0, track_id=22, source_rank=1),
+        ]
+        tracker.process_frame_detections(first_frame, frame_idx=0)
+
+        relabeled_frame = [
+            self._detection(center_x=128.0, track_id=101, source_rank=0),
+            self._detection(center_x=430.0, track_id=202, source_rank=1),
+        ]
+        target_skeleton, opponent_skeleton = tracker.process_frame_detections(
+            relabeled_frame,
+            frame_idx=1,
+        )
+
+        assert tracker.locked_track_id == 101
+        assert target_skeleton == relabeled_frame[0]["skeleton"]
+        assert opponent_skeleton["front_ankle"] == opponent_skeleton["left_ankle"]
+        assert opponent_skeleton["front_wrist"] == opponent_skeleton["left_wrist"]
+
+    def test_canonicalize_front_joints_uses_screen_side(self):
+        """Front limb should follow the fencer's screen side, not a hard-coded right arm."""
+        from src.fencing_skeleton import canonicalize_front_joints
+
+        skeleton = {
+            "nose": (0.0, 0.0),
+            "left_shoulder": (8.0, 1.0),
+            "right_shoulder": (4.0, 1.0),
+            "left_elbow": (9.0, 2.0),
+            "right_elbow": (5.0, 2.0),
+            "left_wrist": (10.0, 3.0),
+            "right_wrist": (6.0, 3.0),
+            "left_hip": (7.5, 4.0),
+            "right_hip": (3.5, 4.0),
+            "left_knee": (8.5, 6.0),
+            "right_knee": (4.5, 6.0),
+            "left_ankle": (9.5, 8.0),
+            "right_ankle": (5.5, 8.0),
+            "front_shoulder": (4.0, 1.0),
+            "front_elbow": (5.0, 2.0),
+            "front_wrist": (6.0, 3.0),
+            "front_ankle": (5.5, 8.0),
+        }
+
+        canonical = canonicalize_front_joints(skeleton, screen_side="left")
+
+        assert canonical["front_shoulder"] == canonical["left_shoulder"]
+        assert canonical["front_elbow"] == canonical["left_elbow"]
+        assert canonical["front_wrist"] == canonical["left_wrist"]
+        assert canonical["front_ankle"] == canonical["left_ankle"]
+
+    def test_activity_gatekeeper_uses_canonical_front_leg(self):
+        """Knee-angle gating should follow front_ankle, not a fixed leg for one screen side."""
+        from src.inference.activity_gatekeeper import ActivityGatekeeper
+
+        skeleton = {
+            "front_wrist": (0.0, 0.0),
+            "left_shoulder": (0.0, 0.0),
+            "right_shoulder": (10.0, 0.0),
+            "left_hip": (0.0, 0.0),
+            "left_knee": (0.0, 1.0),
+            "left_ankle": (1.0, 1.0),
+            "right_hip": (3.0, 0.0),
+            "right_knee": (3.0, 1.0),
+            "right_ankle": (3.0, 2.0),
+            "front_ankle": (1.0, 1.0),
+        }
+
+        angle = ActivityGatekeeper()._get_knee_angle(skeleton, target_side="left")
+
+        assert angle == pytest.approx(90.0)
+
+    def test_video_annotator_uses_actual_frame_indices_for_sparse_metadata(self):
+        """Sparse tracking metadata should map back to the correct video frames."""
+        from src.inference.video_annotator import VideoAnnotator
+
+        frames_by_index = VideoAnnotator._frames_by_index([
+            {"frame_index": 0, "tracks": []},
+            {"frame_index": 6, "tracks": []},
+            {"frame_index": 12, "tracks": []},
+        ])
+
+        assert sorted(frames_by_index) == [0, 6, 12]
+        assert frames_by_index[6]["frame_index"] == 6
+
+    def test_video_annotator_selects_target_from_tracks_by_side(self):
+        """The gradio annotator should select from 'tracks', not a missing 'candidates' key."""
+        from src.inference.video_annotator import VideoAnnotator
+
+        frame_info = {
+            "tracks": [
+                {"side": "left", "area": 100.0, "skeleton": {"nose": [0, 0]}},
+                {"side": "right", "area": 80.0, "skeleton": {"nose": [1, 1]}},
+            ]
+        }
+
+        selected = VideoAnnotator._select_target_track(frame_info, target_side="right")
+
+        assert selected is not None
+        assert selected["side"] == "right"
 
 
 class TestModels:
@@ -1547,7 +1696,9 @@ class TestIntegration:
             fencer_id="sample_video_smoke"
         )
 
-        expected_windows = ((frame_count - 28) // 14) + 1
+        window_size = int(results.get("window_size", 28))
+        window_stride = int(results.get("window_stride", 14))
+        expected_windows = ((frame_count - window_size) // window_stride) + 1
         assert results["ok"] is True
         assert results["frames_processed"] == frame_count
         assert len(results["classifications"]) == expected_windows

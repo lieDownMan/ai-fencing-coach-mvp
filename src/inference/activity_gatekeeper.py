@@ -51,9 +51,9 @@ class ActivityGatekeeper:
     def _get_knee_angle(self, skeleton: Dict[str, Any], target_side: str) -> Optional[float]:
         """Calculate knee angle for the target side."""
         # Use calc_angle from heuristics_engine later, or calculate here
-        from .heuristics_engine import calc_angle, FRONT_LIMBS, _get_joint
-        
-        limbs = FRONT_LIMBS.get(target_side, FRONT_LIMBS["left"])
+        from .heuristics_engine import calc_angle, _get_joint, resolve_front_limbs
+
+        limbs = resolve_front_limbs(skeleton, target_side)
         hip_key = limbs["hip"]
         knee_key = limbs["knee"]
         ankle_key = limbs["ankle"]

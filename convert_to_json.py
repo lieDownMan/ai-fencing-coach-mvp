@@ -19,6 +19,8 @@ import numpy as np
 from ultralytics import YOLO
 from scipy.interpolate import interp1d
 
+from src.fencing_skeleton import canonicalize_front_joints
+
 # ================= 設定 =================
 
 FFD_DIR = "./FFD"                    # 來源資料夾
@@ -30,19 +32,22 @@ FOLDER_TO_LABEL = {
     "1_SB":   "SB",
     "2_R":    "R",
     "3_IS":   "IS",   
+    "3_IR":   "IS",   # observed in the local FFD.zip bundle
     "4_WW":   "WW",
     "5_JS":   "JS",
 }
 FENCER_ID_DEFAULT = "fencer_01"
 
 # YOLOv8 (COCO 格式) 關節索引 → FencingDataset 期望的命名對應
-# 假設選手的「前手」(持劍手) 是右手
+# 先保留解剖左右側關節，再依畫面左右位置 canonicalize 成 front_*。
 YOLO_JOINT_MAP = {
     "nose":             0,
-    "front_wrist":      10,  # right_wrist
-    "front_elbow":      8,   # right_elbow
-    "front_shoulder":   6,   # right_shoulder
-    "front_ankle":      16,  # right_ankle
+    "left_shoulder":    5,
+    "right_shoulder":   6,
+    "left_elbow":       7,
+    "right_elbow":      8,
+    "left_wrist":       9,
+    "right_wrist":      10,
     "left_hip":         11,
     "right_hip":        12,
     "left_knee":        13,
@@ -163,6 +168,12 @@ def extract_keypoints_from_video(video_path):
             for joint_name, yolo_idx in YOLO_JOINT_MAP.items():
                 kx, ky = keypoints[yolo_idx]
                 frame_dict[joint_name] = [round(float(kx), 6), round(float(ky), 6)]
+            frame_dict["front_shoulder"] = list(frame_dict["right_shoulder"])
+            frame_dict["front_elbow"] = list(frame_dict["right_elbow"])
+            frame_dict["front_wrist"] = list(frame_dict["right_wrist"])
+            frame_dict["front_ankle"] = list(frame_dict["right_ankle"])
+            screen_side = "left" if float(np.mean(keypoints[:, 0])) < 0.5 else "right"
+            frame_dict = canonicalize_front_joints(frame_dict, screen_side=screen_side)
             all_frames.append(frame_dict)
         else:
             # 偵測失敗 → 用上一幀填補，或補零
@@ -170,6 +181,10 @@ def extract_keypoints_from_video(video_path):
                 all_frames.append(all_frames[-1].copy())
             else:
                 zero_frame = {name: [0.0, 0.0] for name in YOLO_JOINT_MAP.keys()}
+                zero_frame["front_shoulder"] = [0.0, 0.0]
+                zero_frame["front_elbow"] = [0.0, 0.0]
+                zero_frame["front_wrist"] = [0.0, 0.0]
+                zero_frame["front_ankle"] = [0.0, 0.0]
                 all_frames.append(zero_frame)
 
     cap.release()

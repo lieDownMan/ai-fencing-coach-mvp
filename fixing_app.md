@@ -19,11 +19,11 @@ The system receives a raw, continuous video and outputs a JSON report containing
 ## 2. Module Specifications
 
 ### Module 1: Sliding Window Inference
-The current `FenceNetV2` model only accepts a fixed input shape of `(30, 24)`. This module must slide across the timeline to crop segments and filter out noise.
+The current `FenceNetV2` model accepts a fixed input shape of `(28, 18)` after pose preprocessing.
 
-* **Input**: Normalized skeleton matrix of shape `(T, 24)` where `T` is the total number of frames in the video.
+* **Input**: Normalized skeleton matrix of shape `(T, 9, 2)` where `T` is the total number of frames in the video.
 * **Parameters**:
-    * `WINDOW_SIZE` = 30 frames (~1 second)
+    * `WINDOW_SIZE` = 28 frames
     * `STRIDE` = 10 frames (~0.33 seconds, the step size for the sliding window)
 * **Smoothing Logic (Non-Maximum Suppression / NMS)**:
     1.  At each step, the model outputs a predicted label and a Confidence Score (via Softmax).
@@ -82,15 +82,16 @@ Since real fencing videos contain two fencers (and often a referee), the system 
   Use YOLOv8's built-in tracker (`model.track(source, persist=True, tracker="bytetrack.yaml")`) to assign consistent `track_id`s to all detected persons across frames.
 * **Target Selection Logic**:
   * The system must accept a parameter: `target_side` (either `"left"` or `"right"`).
-  * At `Frame 0`, evaluate the bounding box center X-coordinates of all detected persons.
+  * On the first valid tracked frame, evaluate the bounding box center X-coordinates of all detected persons.
   * If `target_side == "left"`, lock onto the `track_id` with the minimum X-coordinate.
   * If `target_side == "right"`, lock onto the `track_id` with the maximum X-coordinate (excluding obvious background persons/referees by checking bounding box size/aspect ratio if necessary).
 * **Data Filtering**:
-  For the rest of the video, ONLY append the skeletal data of the locked `track_id` to the time-series array. If the `track_id` is temporarily lost due to occlusion, pad with the last known coordinates or use linear interpolation for small gaps (<= 5 frames).
+  For the rest of the video, ONLY append the skeletal data of the locked `track_id` to the time-series array. If the `track_id` is temporarily lost due to occlusion, pad with the last known coordinates for small gaps (<= 5 frames). If YOLO/ByteTrack reassigns the ID, the tracker should relock to the nearest plausible candidate instead of freezing permanently on the stale ID.
 * **Posture Engine Adaptation (Rule update)**:
-  Pass the `target_side` to Module 2 (Geometric Evaluator) so it knows which side is the "front" limb. 
-  * If `"left"`, the fencer faces right -> Front leg is Right Leg (Index 14, 16), Front arm is Right Arm (Index 8, 10).
-  * If `"right"`, the fencer faces left -> Front leg is Left Leg (Index 13, 15), Front arm is Left Arm (Index 7, 9).
+  Pass the `target_side` to the pose / tracking path so it can canonicalize the target skeleton into `front_shoulder`, `front_elbow`, `front_wrist`, and `front_ankle`.
+  * `target_side` means which athlete is on the left or right side of the screen.
+  * The system should use that screen-side cue to decide which anatomical arm / leg is actually leading in the current pose, rather than hard-coding the right arm as the weapon arm.
+  * Downstream geometry checks should trust the canonicalized `front_*` joints when determining the front leg and weapon hand.
 
 ### Module 5: Activity Gatekeeper & State Machine (Idle vs. Active)
 To prevent computational waste and hallucination during non-fencing (resting/walking) periods in a continuous camera feed, implement a lightweight geometric gatekeeper *before* the Sliding Window.
@@ -98,7 +99,7 @@ To prevent computational waste and hallucination during non-fencing (resting/wal
 * **State Machine Definition**:
   * System starts in `State: IDLE`.
   * If `IDLE`: Only run YOLO extraction at 5 FPS (skip frames) to save compute. Do NOT feed data to FenceNet.
-  * If `ACTIVE`: Run YOLO at full FPS (30 FPS) and feed data to the Sliding Window (Module 1).
+  * If `ACTIVE`: Run YOLO at full source-video FPS and feed data to the Sliding Window (Module 1).
 * **Transition Logic (Heuristic-based)**:
   * **To ACTIVE**: Calculate the Knee Angle of the target fencer. If `Knee_Angle < 155°` (indicating the fencer has dropped into the "En Garde" stance) and the bounding box is moving, switch to `ACTIVE`. Require this condition to hold for at least 15 consecutive frames (0.5s) to prevent false triggers.
   * **To IDLE**: If the fencer stands up (`Knee_Angle > 165°`) or turns their back to the camera (shoulder width approaches 0 due to 2D projection), OR if the distance between the two fencers exceeds 60% of the frame width, switch to `IDLE` after a 2-second cooldown.
@@ -119,6 +120,7 @@ To prevent computational waste and hallucination during non-fencing (resting/wal
 
 * **Video Annotation Requirements (OpenCV `cv2.putText` & `cv2.rectangle`)**:
   To guarantee exact temporal synchronization, the predictions must be rendered directly onto the output video frames.
+  The annotation layer must index tracking metadata by the original `frame_index`, because Gatekeeper skipping makes the tracking timeline sparse during `IDLE`.
   * **Bounding Box**: Draw a bounding box around the selected `track_id` (the target fencer).
   * **Skeleton Overlay**: Draw the YOLO pose connections for the target fencer to verify tracking quality.
   * **Status HUD (Heads-Up Display)**: In the top-left corner of the video, display:
@@ -131,7 +133,17 @@ To prevent computational waste and hallucination during non-fencing (resting/wal
   * **Input Section**: `File Uploader` and `Radio Buttons` (Target Fencer: Left/Right).
   * **Action Button**: `Run Analysis`.
   * **Output Section 1 (Visual)**: A `Video Player` component playing the annotated `.mp4`.
-  * **Output Section 2 (Data)**: A `Dataframe/Table` showing the parsed action timeline (e.g., Start Time, End Time, Action Label) for easy cross-referencing.
+* **Output Section 2 (Data)**: A `Dataframe/Table` showing the parsed action timeline (e.g., Start Time, End Time, Action Label) for easy cross-referencing.
+
+---
+
+## 2.1 Current Implementation Notes
+
+- The local `FFD.zip` archive is the authoritative source for the training clips used by `convert_to_json.py`.
+- The converter must handle both `3_IS/` and `3_IR/` as the `IS` class.
+- The converter should canonicalize `front_*` joints from the clip's screen side before saving JSON; otherwise the model will learn the wrong weapon-hand mapping.
+- The Gradio validation UI should use the sparse-frame-safe annotation path; otherwise later video frames can appear unannotated even when the backend is still processing them.
+- `mock` pose mode is for smoke testing the pipeline structure and should not emulate Gatekeeper frame skipping.
 ---
 
 ## 3. Agent Action Items
@@ -148,4 +160,3 @@ Please execute the development in the following phases and submit the correspond
     * Build a Dispatcher that routes the data to the appropriate Rule Checker based on the input `action` string.
 * **Phase 3: `coach_pipeline.py`**
     * Wrap the end-to-end flow: `Video -> YOLO -> FenceNet (Sliding) -> Heuristics -> JSON Report`.
-

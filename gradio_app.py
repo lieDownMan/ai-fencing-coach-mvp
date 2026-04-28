@@ -55,10 +55,13 @@ def analyze_video(video_file, target_side, update_status):
     annotator.annotate_video(video_file, output_video_path, results)
     
     # 4. Create Timeline Table (Module 6)
+    source_fps = float(
+        results.get("two_fencer_tracking", {}).get("source_fps") or 30.0
+    )
     action_data = []
     for seg in results.get("action_segments", []):
-        start_time = seg.get("video_start_frame", 0) / 30.0  # assuming 30fps
-        end_time = seg.get("video_end_frame", 0) / 30.0
+        start_time = seg.get("video_start_frame", 0) / source_fps
+        end_time = seg.get("video_end_frame", 0) / source_fps
         action_data.append([
             f"{start_time:.1f}s - {end_time:.1f}s",
             seg["action"],

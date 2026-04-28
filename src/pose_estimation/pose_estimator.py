@@ -8,6 +8,7 @@ import numpy as np
 from typing import Dict, List, Tuple, Optional, Any
 import logging
 
+from ..fencing_skeleton import canonicalize_front_joints
 from ..tracking import FencerTracker
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,22 @@ class PoseEstimator:
         11: "left_hip", 12: "right_hip",
         13: "left_knee", 14: "right_knee",
         15: "left_ankle", 16: "right_ankle",
+    }
+
+    ANATOMICAL_JOINTS = {
+        "nose": 0,
+        "left_shoulder": 5,
+        "right_shoulder": 6,
+        "left_elbow": 7,
+        "right_elbow": 8,
+        "left_wrist": 9,
+        "right_wrist": 10,
+        "left_hip": 11,
+        "right_hip": 12,
+        "left_knee": 13,
+        "right_knee": 14,
+        "left_ankle": 15,
+        "right_ankle": 16,
     }
     
     # Mapping for fencing-specific joints (right-handed fencer assumed)
@@ -77,6 +94,8 @@ class PoseEstimator:
         self.backend = backend
         self.model = self._load_model()
         self.fencer_tracker = FencerTracker()
+        self._tracking_fallback_warned = False
+        self._tracking_runtime_available = True
         
     def _load_model(self):
         """Load pose estimation model if a real backend is available."""
@@ -140,15 +159,46 @@ class PoseEstimator:
                 "YOLO pose model, or use backend='mock' for tests."
             )
 
-        if persist_track:
-            results = self.model.track(frame, verbose=False, persist=True, tracker="bytetrack.yaml")
+        if persist_track and self._tracking_runtime_available:
+            try:
+                results = self.model.track(
+                    frame,
+                    verbose=False,
+                    persist=True,
+                    tracker="bytetrack.yaml",
+                )
+            except ModuleNotFoundError as exc:
+                if "lap" not in str(exc):
+                    raise
+                self._tracking_runtime_available = False
+                if not self._tracking_fallback_warned:
+                    logger.warning(
+                        "Ultralytics tracking dependency 'lap' is missing; "
+                        "falling back to per-frame pose detection without ByteTrack IDs."
+                    )
+                    self._tracking_fallback_warned = True
+                results = self.model(frame, verbose=False)
+            except Exception as exc:
+                self._tracking_runtime_available = False
+                if not self._tracking_fallback_warned:
+                    logger.warning(
+                        "Ultralytics track() failed (%s); falling back to per-frame pose detection.",
+                        exc,
+                    )
+                    self._tracking_fallback_warned = True
+                results = self.model(frame, verbose=False)
         else:
             results = self.model(frame, verbose=False)
             
         if not results:
             return []
 
-        return self._extract_fencer_detections_from_ultralytics_result(results[0])
+        detections = self._extract_fencer_detections_from_ultralytics_result(results[0])
+        if persist_track and detections and not any(
+            detection.get("track_id") is not None for detection in detections
+        ):
+            detections = self._assign_fallback_track_ids(detections)
+        return detections
 
     def extract_frame_skeleton(
         self,
@@ -164,7 +214,10 @@ class PoseEstimator:
         detections = self.extract_frame_fencers(frame)
         if not detections:
             return None
-        return detections[0]["skeleton"]
+        selected = detections[0]
+        center_x = float((selected.get("center") or [frame.shape[1] * 0.5])[0])
+        screen_side = "left" if center_x < (frame.shape[1] * 0.5) else "right"
+        return canonicalize_front_joints(selected["skeleton"], screen_side=screen_side)
 
     def extract_video_fencer_tracks(self, video_path: str) -> Dict[str, Any]:
         """
@@ -190,7 +243,15 @@ class PoseEstimator:
 
                 detections = self.extract_frame_fencers(frame)
                 if detections:
-                    skeleton = detections[0]["skeleton"]
+                    skeleton = canonicalize_front_joints(
+                        detections[0]["skeleton"],
+                        screen_side=(
+                            "left"
+                            if float((detections[0].get("center") or [frame.shape[1] * 0.5])[0])
+                            < (frame.shape[1] * 0.5)
+                            else "right"
+                        ),
+                    )
                     if self.validate_skeleton(skeleton):
                         skeletons.append(skeleton)
                 tracking_frames.append(
@@ -379,7 +440,7 @@ class PoseEstimator:
 
         required_indices = [
             keypoint_idx
-            for keypoint_idx in self.REQUIRED_JOINTS.values()
+            for keypoint_idx in set(self.REQUIRED_JOINTS.values()) | set(self.ANATOMICAL_JOINTS.values())
             if keypoint_idx < keypoint_confidences.shape[0]
         ]
         values = keypoint_confidences[required_indices]
@@ -403,7 +464,7 @@ class PoseEstimator:
         """Build the required skeleton dictionary from COCO keypoints."""
         skeleton = {}
 
-        for joint_name, keypoint_idx in self.REQUIRED_JOINTS.items():
+        for joint_name, keypoint_idx in self.ANATOMICAL_JOINTS.items():
             if keypoint_idx >= keypoints.shape[0]:
                 return None
             if (
@@ -419,6 +480,11 @@ class PoseEstimator:
 
             skeleton[joint_name] = (float(x_coord), float(y_coord))
 
+        skeleton["front_shoulder"] = skeleton["right_shoulder"]
+        skeleton["front_elbow"] = skeleton["right_elbow"]
+        skeleton["front_wrist"] = skeleton["right_wrist"]
+        skeleton["front_ankle"] = skeleton["right_ankle"]
+
         return skeleton if self.validate_skeleton(skeleton) else None
 
     def _mock_fencer_detections(self, frame: np.ndarray) -> List[Dict[str, Any]]:
@@ -426,18 +492,37 @@ class PoseEstimator:
         height, width = frame.shape[:2]
         left_skeleton = self._mock_skeleton(frame, center_x=width * 0.36)
         right_skeleton = self._mock_skeleton(frame, center_x=width * 0.64)
-        return [
-            self.fencer_tracker.candidate_from_skeleton(
-                left_skeleton,
-                confidence=1.0,
-                source_rank=0
-            ),
-            self.fencer_tracker.candidate_from_skeleton(
-                right_skeleton,
-                confidence=1.0,
-                source_rank=1
-            ),
-        ]
+        left_candidate = self.fencer_tracker.candidate_from_skeleton(
+            left_skeleton,
+            confidence=1.0,
+            source_rank=0
+        )
+        right_candidate = self.fencer_tracker.candidate_from_skeleton(
+            right_skeleton,
+            confidence=1.0,
+            source_rank=1
+        )
+        left_candidate["track_id"] = 1
+        right_candidate["track_id"] = 2
+        return [left_candidate, right_candidate]
+
+    @staticmethod
+    def _assign_fallback_track_ids(
+        detections: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Assign deterministic left-to-right track IDs when ByteTrack is unavailable.
+
+        This is not true identity tracking, but it keeps the downstream target
+        tracker and visualizer usable in restricted environments.
+        """
+        ordered = sorted(
+            detections,
+            key=lambda detection: float((detection.get("center") or [0.0])[0]),
+        )
+        for index, detection in enumerate(ordered, start=1):
+            detection["track_id"] = index
+        return ordered
 
     def _mock_skeleton(
         self,
@@ -456,9 +541,12 @@ class PoseEstimator:
 
         skeleton = {
             "nose": (center_x, head_y),
-            "front_shoulder": (center_x + width * 0.06, shoulder_y),
-            "front_elbow": (center_x + width * 0.13, height * 0.45),
-            "front_wrist": (center_x + width * 0.20, height * 0.48),
+            "left_shoulder": (center_x - width * 0.06, shoulder_y),
+            "right_shoulder": (center_x + width * 0.06, shoulder_y),
+            "left_elbow": (center_x - width * 0.13, height * 0.45),
+            "right_elbow": (center_x + width * 0.13, height * 0.45),
+            "left_wrist": (center_x - width * 0.20, height * 0.48),
+            "right_wrist": (center_x + width * 0.20, height * 0.48),
             "left_hip": (center_x - width * 0.05, hip_y),
             "right_hip": (center_x + width * 0.05, hip_y),
             "left_knee": (center_x - width * 0.12, knee_y),
@@ -466,6 +554,9 @@ class PoseEstimator:
             "left_ankle": (center_x - width * 0.18, ankle_y),
             "right_ankle": (center_x + width * 0.18, ankle_y),
         }
+        skeleton["front_shoulder"] = skeleton["right_shoulder"]
+        skeleton["front_elbow"] = skeleton["right_elbow"]
+        skeleton["front_wrist"] = skeleton["right_wrist"]
         skeleton["front_ankle"] = skeleton["right_ankle"]
         return skeleton
 

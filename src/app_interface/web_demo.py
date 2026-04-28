@@ -426,6 +426,8 @@ def _render_result(result: Optional[WebProcessResult]) -> str:
       <p><strong>Posture coaching:</strong> {escape(posture_feedback)}</p>
       <p><strong>General feedback:</strong> {escape(str(report.get('feedback', '')))}</p>
       <p><strong>Top actions:</strong> {escape(_format_actions(action_frequencies))}</p>
+      <p><strong>Two-fencer coverage:</strong> {escape(_percent(summary.get('two_fencer_coverage')))}</p>
+      <p><strong>Too-close ratio:</strong> {escape(_percent(summary.get('too_close_ratio')))}</p>
       <p><strong>Pose backend:</strong> {escape(str(runtime.get('pose_backend', 'unknown')))}</p>
       <p><strong>Model weights:</strong> {escape(str(runtime.get('model_weights', 'unknown')))}</p>
     </section>
@@ -528,4 +530,3 @@ def _css() -> str:
     .error { border-color: #ff5c5c; }
     @media (max-width: 800px) { .grid, .cards { grid-template-columns: 1fr; } main { padding: 16px; } }
     """
-

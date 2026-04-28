@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from ..fencing_skeleton import front_limb_keys
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -37,6 +39,26 @@ FRONT_LIMBS = {
         "wrist": "front_wrist",
     },
 }
+
+
+def resolve_front_limbs(
+    skeleton: Optional[Dict[str, Any]],
+    target_side: str = "left",
+) -> Dict[str, str]:
+    """Resolve front hip/knee/ankle keys from a canonicalized skeleton when possible."""
+    if skeleton:
+        keys = front_limb_keys(
+            skeleton,
+            screen_side=target_side,
+            prefer_explicit_front=True,
+        )
+        return {
+            "hip": keys["hip"],
+            "knee": keys["knee"],
+            "ankle": keys["ankle"],
+            "wrist": "front_wrist",
+        }
+    return FRONT_LIMBS.get(target_side, FRONT_LIMBS["left"])
 
 # Actions that trigger each rule
 LUNGE_ACTIONS = {"R", "IS", "WW", "JS"}
@@ -130,7 +152,8 @@ def check_lunge_overextension(
     if not skeletons:
         return None
 
-    limbs = FRONT_LIMBS.get(target_side, FRONT_LIMBS["left"])
+    reference_skeleton = next((skel for skel in skeletons if skel), None)
+    limbs = resolve_front_limbs(reference_skeleton, target_side)
     hip_key = limbs["hip"]
     knee_key = limbs["knee"]
     ankle_key = limbs["ankle"]
@@ -190,7 +213,7 @@ def check_guard_dropped(
 
     Returns an error dict or None.
     """
-    limbs = FRONT_LIMBS.get(target_side, FRONT_LIMBS["left"])
+    limbs = resolve_front_limbs(next((skel for skel in skeletons if skel), None), target_side)
     wrist_key = limbs["wrist"]
 
     worst_frame = None

@@ -218,7 +218,15 @@ class SlidingWindowInference:
             logger.warning("Model weights not found: %s — using random weights.", path)
             return
 
-        checkpoint = torch.load(str(path), map_location=self.device, weights_only=True)
+        try:
+            checkpoint = torch.load(str(path), map_location=self.device, weights_only=True)
+        except Exception as exc:
+            logger.warning(
+                "Could not read model weights from %s: %s — using random weights.",
+                path,
+                exc,
+            )
+            return
 
         # Support both plain state_dict and wrapped checkpoint formats
         if isinstance(checkpoint, dict):
@@ -235,7 +243,15 @@ class SlidingWindowInference:
             logger.warning("Checkpoint is not a dict — using random weights.")
             return
 
-        self.model.load_state_dict(state_dict)
+        try:
+            self.model.load_state_dict(state_dict)
+        except Exception as exc:
+            logger.warning(
+                "Could not load model weights from %s: %s — using random weights.",
+                path,
+                exc,
+            )
+            return
         logger.info("Loaded FenceNetV2 weights from %s", path)
 
     @staticmethod
