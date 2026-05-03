@@ -60,6 +60,8 @@ class SlidingWindowInference:
         stride: int = STRIDE,
         confidence_threshold: float = CONFIDENCE_THRESHOLD,
     ):
+        if device == "auto":
+            device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = torch.device(device)
         self.window_size = window_size
         self.stride = stride
@@ -241,3 +243,107 @@ class SlidingWindowInference:
     @staticmethod
     def _looks_like_state_dict(d: dict) -> bool:
         return bool(d) and all(hasattr(v, "shape") for v in d.values())
+
+import cv2
+from typing import Dict, Any, List
+import numpy as np
+
+from .activity_gatekeeper import ActivityGatekeeper
+from .heuristics_engine import HeuristicsEngine
+from .target_tracker import TargetTracker
+from src.pose_estimation import PoseEstimator
+from src.preprocessing import SpatialNormalizer
+
+class FullVideoPipeline:
+    def __init__(self, target_side: str = "left", training_mode: str = "Free Bouting", model_checkpoint: str = "weights/fencenet/best_model.pth"):
+        self.target_side = target_side
+        self.training_mode = training_mode
+        self.pose_estimator = PoseEstimator(backend="ultralytics")
+        self.target_tracker = TargetTracker(target_side=target_side)
+        self.gatekeeper = ActivityGatekeeper(fps=30)
+        self.sliding_window = SlidingWindowInference(model_path=model_checkpoint, device="auto")
+        self.heuristics = HeuristicsEngine(target_side=target_side, training_mode=training_mode)
+        self.normalizer = SpatialNormalizer()
+        
+    def process_video(self, video_path: str) -> Dict[str, Any]:
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        
+        frames_meta = []
+        raw_skeletons = []
+        normalized_skeletons = []
+        active_frames_indices = []
+        
+        frame_idx = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret: break
+            
+            if self.gatekeeper.should_extract_pose():
+                detections = self.pose_estimator.extract_frame_fencers(frame, persist_track=True)
+                target_skel, opp_skel = self.target_tracker.process_frame_detections(detections, frame_idx)
+                
+                is_active = self.gatekeeper.update(target_skel, opp_skel, width, self.target_side)
+                
+                frames_meta.append({
+                    "frame_index": frame_idx,
+                    "tracks": detections,
+                    "gatekeeper_state": self.gatekeeper.state,
+                    "knee_angle": self.gatekeeper._get_knee_angle(target_skel, self.target_side) if target_skel else 180.0
+                })
+                
+                if target_skel:
+                    raw_skeletons.append(target_skel)
+                    if is_active:
+                        try:
+                            if self.normalizer.reference_nose is None:
+                                self.normalizer.fit([target_skel])
+                            norm_dict = self.normalizer.normalize_skeleton(target_skel)
+                            norm_arr = np.array([norm_dict[j] for j in self.normalizer.MODEL_JOINT_NAMES])
+                        except Exception as e:
+                            logger.warning(f"Normalization failed: {e}")
+                            norm_arr = np.zeros((9, 2))
+                        normalized_skeletons.append(norm_arr)
+                        active_frames_indices.append(frame_idx)
+                    else:
+                        normalized_skeletons.append(np.zeros((9, 2))) 
+                        active_frames_indices.append(frame_idx)
+                else:
+                    raw_skeletons.append({})
+            
+            frame_idx += 1
+            
+        cap.release()
+        
+        if len(normalized_skeletons) > 0:
+            skel_array = np.array(normalized_skeletons)
+            action_segments_raw = self.sliding_window.run(skel_array)
+            
+            action_segments = []
+            for seg in action_segments_raw:
+                s_idx = min(seg["start_frame"], len(active_frames_indices)-1)
+                e_idx = min(seg["end_frame"], len(active_frames_indices)-1)
+                seg["video_start_frame"] = active_frames_indices[s_idx]
+                seg["video_end_frame"] = active_frames_indices[e_idx]
+                action_segments.append(seg)
+        else:
+            action_segments = []
+            
+        posture_errors = self.heuristics.evaluate(action_segments, raw_skeletons)
+        
+        for err in posture_errors:
+            s_idx = min(err["start_frame"], len(active_frames_indices)-1)
+            e_idx = min(err["end_frame"], len(active_frames_indices)-1)
+            err["start_frame"] = active_frames_indices[s_idx]
+            err["end_frame"] = active_frames_indices[e_idx]
+            
+        return {
+            "training_mode": self.training_mode,
+            "two_fencer_tracking": {
+                "frames": frames_meta,
+                "locked_track_id": self.target_tracker.locked_track_id
+            },
+            "action_segments": action_segments,
+            "posture_errors": posture_errors
+        }

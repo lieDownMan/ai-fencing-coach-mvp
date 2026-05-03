@@ -1,56 +1,35 @@
-"""
-Video Annotator
-Spec reference: fixing_app.md § Module 6
-
-Provides video burn-in for bounding boxes, skeleton, and HUD.
-"""
-
 import cv2
-import numpy as np
 import logging
-from typing import Dict, Any, List, Optional
-import os
+from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
 class VideoAnnotator:
-    # Colors (BGR)
-    COLOR_BBOX = (0, 255, 0)
+    COLOR_BBOX_GREEN = (0, 255, 0)
+    COLOR_BBOX_RED = (0, 0, 255)
     COLOR_SKEL = (0, 255, 255)
     COLOR_HUD_BG = (50, 50, 50)
     COLOR_TEXT = (255, 255, 255)
     
-    # Body connections
     CONNECTIONS = [
-        ("nose", "front_shoulder"),
-        ("front_shoulder", "front_elbow"),
-        ("front_elbow", "front_wrist"),
-        ("front_shoulder", "left_hip"),
-        ("front_shoulder", "right_hip"),
-        ("left_hip", "right_hip"),
-        ("left_hip", "left_knee"),
-        ("left_knee", "left_ankle"),
-        ("right_hip", "right_knee"),
-        ("right_knee", "right_ankle")
+        ("nose", "front_shoulder"), ("front_shoulder", "front_elbow"),
+        ("front_elbow", "front_wrist"), ("front_shoulder", "left_hip"),
+        ("front_shoulder", "right_hip"), ("left_hip", "right_hip"),
+        ("left_hip", "left_knee"), ("left_knee", "left_ankle"),
+        ("right_hip", "right_knee"), ("right_knee", "right_ankle")
     ]
 
     def annotate_video(self, input_path: str, output_path: str, report: Dict[str, Any]) -> str:
-        """
-        Burn annotations into the video and save to output_path.
-        """
         tracking = report.get("two_fencer_tracking", {})
         frames_meta = tracking.get("frames", [])
         locked_track_id = tracking.get("locked_track_id", None)
         action_segments = report.get("action_segments", [])
+        posture_errors = report.get("posture_errors", [])
+        training_mode = report.get("training_mode", "Free Bouting")
         
-        # Create a dictionary to map actual frame indices to frame metadata,
-        # because the pipeline skips some frames during IDLE state.
         frames_dict = {f.get("frame_index"): f for f in frames_meta}
         
         cap = cv2.VideoCapture(input_path)
-        if not cap.isOpened():
-            raise ValueError(f"Cannot open video: {input_path}")
-            
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
@@ -58,84 +37,71 @@ class VideoAnnotator:
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
         
-        if not out.isOpened():
-            cap.release()
-            raise ValueError(f"Cannot open VideoWriter for {output_path}")
-
         frame_idx = 0
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        
         while True:
             ret, frame = cap.read()
-            if not ret:
-                break
+            if not ret: break
                 
             frame_info = frames_dict.get(frame_idx)
-            
-            # Find current action
             current_action = "None"
-            current_conf = 0.0
+            current_alert = ""
+            
             for seg in action_segments:
                 if seg.get("video_start_frame", 0) <= frame_idx <= seg.get("video_end_frame", 0):
                     current_action = seg["action"]
-                    current_conf = seg["confidence"]
+                    break
+                    
+            for err in posture_errors:
+                if err.get("start_frame", 0) <= frame_idx <= err.get("end_frame", 0):
+                    current_alert = err.get("error", "")
                     break
                     
             if frame_info:
-                # 1. Draw target bounding box and skeleton
                 target_det = None
                 if locked_track_id is not None:
-                    # Look for the locked candidate
                     for det in frame_info.get("tracks", []):
                         if det.get("track_id") == locked_track_id:
                             target_det = det
                             break
                             
                 if target_det:
-                    # Bounding Box
                     bbox = target_det.get("bbox")
                     if bbox and len(bbox) == 4:
                         x1, y1, x2, y2 = [int(v) for v in bbox]
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), self.COLOR_BBOX, 2)
+                        color = self.COLOR_BBOX_RED if current_alert else self.COLOR_BBOX_GREEN
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 4)
                         
-                    # Skeleton
                     skel = target_det.get("skeleton")
                     if skel:
-                        # Draw joints
                         for pt in skel.values():
                             cv2.circle(frame, (int(pt[0]), int(pt[1])), 4, self.COLOR_SKEL, -1)
-                        # Draw lines
                         for joint1, joint2 in self.CONNECTIONS:
                             if joint1 in skel and joint2 in skel:
                                 pt1 = (int(skel[joint1][0]), int(skel[joint1][1]))
                                 pt2 = (int(skel[joint2][0]), int(skel[joint2][1]))
                                 cv2.line(frame, pt1, pt2, self.COLOR_SKEL, 2)
                 
-                # 2. Draw HUD
                 state = frame_info.get("gatekeeper_state", "UNKNOWN")
-                knee_angle = frame_info.get("knee_angle", 180.0)
                 
                 hud_text = [
+                    f"Mode: {training_mode}",
                     f"State: {state}",
-                    f"Action: {current_action} ({current_conf:.2f})",
-                    f"Knee Angle: {knee_angle:.1f}"
+                    f"Action: {current_action}"
                 ]
+                if current_alert:
+                    hud_text.append(f"Alert: {current_alert}")
                 
-                # Draw semi-transparent background
                 overlay = frame.copy()
-                cv2.rectangle(overlay, (10, 10), (350, 120), self.COLOR_HUD_BG, -1)
+                cv2.rectangle(overlay, (10, 10), (600, 150 if current_alert else 120), self.COLOR_HUD_BG, -1)
                 cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
                 
-                # Draw text
                 y_offset = 40
                 for text in hud_text:
-                    if "State: ACTIVE" in text:
-                        color = (0, 255, 0)
-                    elif "State: IDLE" in text:
-                        color = (0, 0, 255)
-                    else:
-                        color = self.COLOR_TEXT
-                        
+                    color = self.COLOR_TEXT
+                    if text.startswith("Alert:"): color = (0, 0, 255) # Red
+                    elif "State: ACTIVE" in text: color = (0, 255, 0) # Green
+                    elif "State: IDLE" in text: color = (0, 0, 255) # Red
+                    
                     cv2.putText(frame, text, (20, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
                     y_offset += 35
                     
@@ -144,5 +110,4 @@ class VideoAnnotator:
             
         cap.release()
         out.release()
-        logger.info(f"Saved annotated video to {output_path}")
         return output_path

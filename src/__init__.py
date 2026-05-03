@@ -3,8 +3,6 @@ from src.pose_estimation import PoseEstimator
 from src.preprocessing import SpatialNormalizer, TemporalSampler
 from src.models import FenceNet, BiFenceNet, TCNBlock
 from src.tracking import FencerTracker, PatternAnalyzer, ProfileManager
-from src.llm_agent import CoachEngine, PromptTemplates, ModelLoader
-from src.app_interface import SystemPipeline, FencingCoachUI
 from src.training import (
     ACTION_CLASSES,
     PreparedDataset,
@@ -29,11 +27,6 @@ __all__ = [
     "FencerTracker",
     "PatternAnalyzer",
     "ProfileManager",
-    "CoachEngine",
-    "PromptTemplates",
-    "ModelLoader",
-    "SystemPipeline",
-    "FencingCoachUI",
     "ACTION_CLASSES",
     "PreparedDataset",
     "TrainingConfig",
