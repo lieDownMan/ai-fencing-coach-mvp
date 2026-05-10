@@ -1,10 +1,29 @@
 import cv2
+import json
 import logging
+from pathlib import Path
 from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
+_PLAYBOOK_PATH = Path(__file__).resolve().parent.parent.parent / "coach_playbook.json"
+
+def _load_playbook() -> dict:
+    if _PLAYBOOK_PATH.exists():
+        with open(_PLAYBOOK_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
 class VideoAnnotator:
+    _playbook = _load_playbook()
+
+    @classmethod
+    def _resolve_error(cls, error_key: str) -> str:
+        """Resolve an error_key to its human-readable error_name."""
+        entry = cls._playbook.get(error_key)
+        if entry:
+            return entry.get("error_name", error_key)
+        return error_key
     COLOR_BBOX_GREEN = (0, 255, 0)
     COLOR_BBOX_RED = (0, 0, 255)
     COLOR_SKEL = (0, 255, 255)
@@ -53,7 +72,8 @@ class VideoAnnotator:
                     
             for err in posture_errors:
                 if err.get("start_frame", 0) <= frame_idx <= err.get("end_frame", 0):
-                    current_alert = err.get("error", "")
+                    raw_key = err.get("error_key", err.get("error", ""))
+                    current_alert = self._resolve_error(raw_key) if raw_key else ""
                     break
                     
             if frame_info:

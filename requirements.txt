@@ -8,7 +8,7 @@ torchaudio>=2.0.0
 # Computer Vision
 opencv-python>=4.8.0
 ultralytics>=8.0.0
-numpy>=1.24.0,<2.0  # NumPy 2.0 has breaking changes incompatible with PyTorch modules
+numpy>=1.24.0  # Python 3.14 requires numpy>=2.1; PyTorch 2.11+ is compatible
 
 # Deep Learning & NLP
 transformers>=4.30.0
@@ -25,6 +25,9 @@ gradio>=4.0.0
 # LLM / Gemini
 google-genai>=1.0.0
 python-dotenv>=1.0.0
+
+# Real-time voice coaching (offline TTS)
+pyttsx3>=2.90
 
 # Utilities
 pyyaml>=6.0.0

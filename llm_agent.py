@@ -1,8 +1,18 @@
+import json
 import os
+from pathlib import Path
 from typing import Dict, Any, List
 from dotenv import load_dotenv
 
 load_dotenv()  # reads .env into os.environ
+
+# Load playbook for error_key → error_name resolution
+_PLAYBOOK_PATH = Path(__file__).resolve().parent / "coach_playbook.json"
+try:
+    with open(_PLAYBOOK_PATH, "r", encoding="utf-8") as _f:
+        _PLAYBOOK = json.load(_f)
+except FileNotFoundError:
+    _PLAYBOOK = {}
 
 try:
     from google import genai
@@ -27,10 +37,12 @@ class LLMAgent:
             
         total_actions = len(action_segments)
         
-        # Aggregate errors
+        # Aggregate errors — resolve error_key to human-readable name
         error_counts = {}
         for err in posture_errors:
-            name = err.get("error", "Unknown error")
+            raw_key = err.get("error_key", err.get("error", "Unknown error"))
+            entry = _PLAYBOOK.get(raw_key)
+            name = entry.get("error_name", raw_key) if entry else raw_key
             error_counts[name] = error_counts.get(name, 0) + 1
             
         errors_str = ", ".join([f"{count} {name}" for name, count in error_counts.items()])

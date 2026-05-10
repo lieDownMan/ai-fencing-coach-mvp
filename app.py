@@ -1,14 +1,32 @@
 import gradio as gr
+import json
 import os
 import pandas as pd
-from src.inference.sliding_window import FullVideoPipeline
-from src.inference.video_annotator import VideoAnnotator
+from pathlib import Path
+from inference.sliding_window import FullVideoPipeline
+from inference.video_annotator import VideoAnnotator
 from database import Database
 from llm_agent import LLMAgent
+from realtime_voice_coach import RealtimeVoiceCoach
 import sqlite3
+
+# Load playbook for error_key → error_name resolution in UI
+_PLAYBOOK_PATH = Path(__file__).resolve().parent / "coach_playbook.json"
+with open(_PLAYBOOK_PATH, "r", encoding="utf-8") as _f:
+    _PLAYBOOK = json.load(_f)
+
+def _resolve_error_name(error_key: str) -> str:
+    entry = _PLAYBOOK.get(error_key)
+    if entry:
+        return entry.get("error_name", error_key)
+    return error_key
 
 db = Database()
 llm = LLMAgent()
+try:
+    voice_coach = RealtimeVoiceCoach()
+except Exception:
+    voice_coach = None
 
 # Create default user if none exists
 if not db.get_users():
@@ -68,7 +86,11 @@ def analyze_video(video_file, target_side, training_mode, user_str):
         warning = ""
         for err in results.get("posture_errors", []):
             if err.get("start_frame", 0) >= seg.get("video_start_frame", 0) and err.get("start_frame", 0) <= seg.get("video_end_frame", 0):
-                warning = err.get("error", "")
+                error_key = err.get("error_key", err.get("error", ""))
+                warning = _resolve_error_name(error_key)
+                # Fire real-time voice cue (non-blocking)
+                if voice_coach and error_key:
+                    voice_coach.speak_async(error_key)
                 break
                 
         action_data.append([
@@ -99,7 +121,7 @@ with gr.Blocks(title="AI Fencing Coach") as app:
                         
                     target_side = gr.Radio(["left", "right"], value="left", label="Target Fencer")
                     training_mode = gr.Radio(["Footwork", "Target Practice", "Free Bouting"], value="Footwork", label="Training Mode")
-                    video_input = gr.Video(label="Upload Video")
+                    video_input = gr.Video(label="Upload or Record Video", sources=["upload", "webcam"])
                     analyze_btn = gr.Button("Run Analysis", variant="primary")
                     
                 with gr.Column(scale=2):
@@ -117,4 +139,4 @@ with gr.Blocks(title="AI Fencing Coach") as app:
             app.load(update_user_dropdown, [], [user_dropdown])
 
 if __name__ == "__main__":
-    app.launch(server_name="0.0.0.0", server_port=7860)
+    app.launch(server_name="0.0.0.0", server_port=7860, share = True)

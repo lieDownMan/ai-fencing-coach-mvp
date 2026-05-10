@@ -18,8 +18,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from ..models.fencenet_v2 import FenceNetV2
-from ..data.fencing_dataset import CLASS_NAMES, NUM_CHANNELS
+from src.models.fencenet_v2 import FenceNetV2
+from src.data.fencing_dataset import CLASS_NAMES, NUM_CHANNELS
 
 logger = logging.getLogger(__name__)
 
