@@ -1,5 +1,11 @@
 # MVP Specification and Research Workflow
 
+Note:
+
+- This file is the product and research spec.
+- For the current runnable state of the codebase, use [CURRENT_STATUS.md](CURRENT_STATUS.md).
+- For actual commands, use [QUICKSTART.md](QUICKSTART.md).
+
 This is the canonical workflow and positioning spec for the AI Fencing Coach MVP. It consolidates the useful parts of the previous README, quickstart, detailed structure, and generated project summary.
 
 ## 1. Product Positioning
@@ -196,7 +202,7 @@ Recent debug milestones:
 - JSON report output can be written explicitly with `--report` or through `output.save_reports` and `output.reports_dir` in config.
 - Two-fencer candidate tracking now records `fencer_L`/`fencer_R` side labels, per-frame centers/bounding boxes/keypoints, coverage, average front-ankle x-distance, and prototype `too_close` distance cues for reports and CLI summaries.
 - Annotated video output can write a processed MP4 with fencer overlays, dual left/right HUD panels, per-fencer height-relative distance status, speed/movement cues, current global action label, optional `--annotated-max-width` downscaling plus H.264 transcoding, and a red `TOO CLOSE` banner when the distance heuristic triggers.
-- Local browser demo output is available through `python web_app.py`; it reuses the same pipeline/report/annotator code and writes generated assets under `web_outputs/`.
+- Live browser streaming is now available through `python web_realtime_app.py`, while `app.py` remains the main clip-analysis UI.
 
 Current local sample-video smoke:
 
@@ -237,7 +243,7 @@ These items move beyond the current prototype toward a useful deployed or study-
 - Upgrade side-based `fencer_L`/`fencer_R` candidate tracking into robust identity persistence across exchanges, crossings, and occlusions.
 - Replace the prototype `too_close` ratio with coach-validated engagement-distance thresholds, then add limb/reach calibration, stance-width, recovery, and timing feedback grounded in fencing coaching concepts.
 - Train or fine-tune action-recognition models on fencing-specific labeled data and evaluate them against held-out real bouts.
-- Extend the local browser demo with video upload, progress/status updates, and coach-facing review UI that links feedback to specific moments in the video rather than only giving aggregate summaries.
+- Improve the current browser and local realtime entrypoints with clearer progress/status handling and coach-facing review controls that link feedback to specific moments.
 - Add a real LLM backend or carefully designed prompt/API layer with coach-reviewed fallback templates and guardrails.
 - Study feedback trust and usefulness with beginner/intermediate fencers and at least one coach before making strong HCI claims.
 - Compare against realistic alternatives such as coach review, self-review video, and generic sports-analysis tools.
@@ -248,4 +254,4 @@ These items move beyond the current prototype toward a useful deployed or study-
 - Keep this file as the canonical workflow/spec.
 - Keep [../../README.md](../../README.md) as the repository entry point, [../README.md](../README.md) as the docs index, and [README.md](README.md) as the full development overview.
 - Keep [QUICKSTART.md](QUICKSTART.md) as commands only.
-- Treat [detailedstructure.md](detailedstructure.md) and [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md) as historical pointers unless the team decides to delete them later.
+- Keep runtime-truth and handoff details in [CURRENT_STATUS.md](CURRENT_STATUS.md) instead of reviving deleted historical pointer docs.
