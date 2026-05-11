@@ -36,7 +36,7 @@ Use this when you want:
 ### 2. Local Live Webcam Coaching
 
 ```bash
-python realtime_app.py --source 0 --mode "Free Bouting"
+python realtime_app.py --source 0 --mode "Free Bouting" --target-side left
 ```
 
 Use this when you want:
@@ -46,6 +46,14 @@ Use this when you want:
 - immediate spoken coaching cues through `pyttsx3`
 
 This is the best choice for a **local laptop demo**.
+
+Useful live flags:
+
+```bash
+python realtime_app.py --source 0 --target-side right
+python realtime_app.py --source 0 --pose-model yolov8n-pose.pt
+python realtime_app.py --source 0 --no-voice
+```
 
 ### 3. Browser Live Webcam Streaming
 
@@ -73,6 +81,11 @@ GEMINI_API_KEY=your_key_here
 ```
 
 Put that in a local `.env` file in the repo root before starting `app.py`.
+
+For real pose inference, keep `yolov8n-pose.pt` in the repo root or let
+Ultralytics download it on first run. Persistent webcam target IDs use the
+optional `lap` package listed in `requirements.txt`; the live app falls back to
+non-persistent pose detections if `lap` is missing.
 
 ## Current Architecture
 
@@ -102,5 +115,6 @@ Important runtime files:
 
 - The active inference package is now top-level `inference/`, not `src/inference/`.
 - Voice cues do not require Gemini. They use offline `pyttsx3`.
+- Gradio public share links are off by default for local runs. Set `GRADIO_SHARE=1` only when you need a public tunnel.
 - The docs were cleaned to match the current code, but older branch history may still mention removed flows such as `web_app.py` or old CLI-only usage.
 - For the most accurate current state, trust [docs/dev/CURRENT_STATUS.md](docs/dev/CURRENT_STATUS.md) over older historical notes.

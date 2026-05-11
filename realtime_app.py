@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from collections import deque
 import logging
+import os
 
 from inference.sliding_window import SlidingWindowInference
 from inference.activity_gatekeeper import ActivityGatekeeper
@@ -15,22 +16,32 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("LiveCoach")
 
 class LiveVideoPipeline:
-    def __init__(self, target_side="left", training_mode="Free Bouting"):
+    def __init__(
+        self,
+        target_side="left",
+        training_mode="Free Bouting",
+        pose_model=None,
+        pose_backend="ultralytics",
+        voice_enabled=True,
+    ):
         self.target_side = target_side
         self.training_mode = training_mode
-        self.pose_estimator = PoseEstimator(backend="ultralytics")
+        self.pose_estimator = PoseEstimator(model_path=pose_model, backend=pose_backend)
         self.target_tracker = TargetTracker(target_side=target_side)
         self.gatekeeper = ActivityGatekeeper(fps=30)
         self.sliding_window = SlidingWindowInference(model_path="weights/fencenet/best_model.pth", device="auto")
         self.heuristics = HeuristicsEngine(target_side=target_side, training_mode=training_mode)
         self.normalizer = SpatialNormalizer()
         
-        try:
-            self.voice_coach = RealtimeVoiceCoach()
-            logger.info("Voice Coach initialized.")
-        except Exception as e:
-            logger.error(f"Voice Coach failed to initialize: {e}")
-            self.voice_coach = None
+        self.voice_coach = None
+        if voice_enabled:
+            try:
+                self.voice_coach = RealtimeVoiceCoach()
+                logger.info("Voice Coach initialized.")
+            except Exception as e:
+                logger.error(f"Voice Coach failed to initialize: {e}")
+        else:
+            logger.info("Voice Coach disabled.")
 
         self.window_size = self.sliding_window.window_size
         self.stride = self.sliding_window.stride
@@ -124,6 +135,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", default="0", help="Camera source index (0) or video path")
     parser.add_argument("--mode", default="Free Bouting", choices=["Footwork", "Target Practice", "Free Bouting"])
+    parser.add_argument("--target-side", default="left", choices=["left", "right"], help="Which fencer to coach in the camera frame")
+    parser.add_argument("--pose-model", default=None, help="Path/name for YOLO pose weights (default: yolov8n-pose.pt)")
+    parser.add_argument("--pose-backend", default="ultralytics", choices=["ultralytics", "mock"], help="Use mock for smoke checks without pose inference")
+    parser.add_argument("--no-voice", action="store_true", help="Disable offline spoken cues")
     args = parser.parse_args()
 
     # Determine if source is integer (webcam) or string (file)
@@ -132,15 +147,24 @@ if __name__ == "__main__":
     except ValueError:
         source = args.source
 
-    cap = cv2.VideoCapture(source)
+    if isinstance(source, int) and os.name == "nt":
+        cap = cv2.VideoCapture(source, cv2.CAP_DSHOW)
+    else:
+        cap = cv2.VideoCapture(source)
     if not cap.isOpened():
         print(f"Error: Cannot open video source {source}")
         exit()
         
-    pipeline = LiveVideoPipeline(training_mode=args.mode)
+    pipeline = LiveVideoPipeline(
+        target_side=args.target_side,
+        training_mode=args.mode,
+        pose_model=args.pose_model,
+        pose_backend=args.pose_backend,
+        voice_enabled=not args.no_voice,
+    )
     print("=======================================")
     print(" Live AI Fencing Coach Started!")
-    print(f" Source: {source} | Mode: {args.mode}")
+    print(f" Source: {source} | Mode: {args.mode} | Target: {args.target_side}")
     print(" Press 'q' to quit.")
     print("=======================================")
     

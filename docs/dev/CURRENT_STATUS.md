@@ -160,6 +160,13 @@ Before this handoff, we:
 3. confirmed that the docs were behind the code
 4. confirmed that local laptop usage is the right choice for webcam + voice
 5. started cleaning the docs to match the current codebase
+6. verified the local webcam can open and read frames
+7. downloaded `yolov8n-pose.pt` for local YOLO pose inference
+8. installed/listed `lap` for Ultralytics ByteTrack
+9. made live target locking wait for the first usable detection
+10. made the live pose path fall back cleanly if ByteTrack dependencies are missing
+11. verified the local vision-only FFD folder at `FFD/FFD`
+12. updated FFD preparation to auto-detect per-class video folders
 
 The immediate handoff goal is not a new feature. It is to make local usage and next-step debugging much easier.
 
@@ -194,13 +201,15 @@ may still be biased toward the right side in some contexts.
 
 This matters if the next agent wants robust local demos with left-handed fencers.
 
-### C. Target lock is still simple
+### C. Target lock is still simple, but no longer frame-0-only
 
-`TargetTracker` still locks onto a track at frame 0 and then follows that ID.
+`TargetTracker` now locks onto the first usable detection and follows the
+ByteTrack ID when one exists. If persistent IDs are unavailable, it falls back
+to a source-rank lock so fresh installs and mock smoke tests still run.
 
 Risk:
 
-- wrong target at frame 0
+- wrong target at first valid detection
 - difficult recovery after tracking drift or ID changes
 
 ### D. Old tests are likely stale
@@ -224,6 +233,23 @@ The code currently uses a preview model name:
 
 If local usage shows model-name or availability errors, the next agent should consider switching to a current stable Gemini model listed in official docs.
 
+### F. Local FFD is vision-only
+
+The local `FFD/FFD` folder contains per-class video clips, not Kinect
+`*_Body.mat` files.
+
+Current checked counts:
+
+- `SF`: 24
+- `SB`: 23
+- `R`: 20
+- `IS`: 19, from folder `3_IR`
+- `WW`: 23
+- `JS`: 21
+
+The raw `.mov` recordings and `6_Idle` clips are ignored by the current
+training prep because the model head is six-class.
+
 ## 7. Local Usage Recommendation
 
 For a local laptop setup:
@@ -232,7 +258,7 @@ For a local laptop setup:
 
 Use:
 
-- `python realtime_app.py --source 0 --mode "Free Bouting"`
+- `python realtime_app.py --source 0 --mode "Free Bouting" --target-side left`
 
 if the goal is:
 
@@ -271,11 +297,15 @@ Likely requirements:
 - Python venv
 - `pip install -r requirements.txt`
 - local YOLO pose weights such as `yolov8n-pose.pt`
+- `lap` for Ultralytics ByteTrack persistent IDs
 - optional `.env` file with `GEMINI_API_KEY`
 
 For local voice coaching:
 
 - `pyttsx3` must install and work on the local OS audio stack
+
+If `lap` is missing, `realtime_app.py` falls back to plain pose detections
+without persistent track IDs instead of crashing.
 
 ## 9. Suggested Next Tasks for the New Agent
 

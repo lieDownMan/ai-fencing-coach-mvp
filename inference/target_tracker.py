@@ -3,7 +3,6 @@ Target Isolation & Tracking
 Spec reference: fixing_app.md § Module 4
 """
 
-import numpy as np
 import logging
 from typing import Dict, List, Any, Optional, Tuple
 
@@ -21,6 +20,7 @@ class TargetTracker:
         """
         self.target_side = target_side
         self.locked_track_id: Optional[int] = None
+        self.locked_fallback_rank: Optional[int] = None
         
         # Buffer for interpolation (max gap = 5)
         self.last_known_skeleton: Optional[Dict[str, Tuple[float, float]]] = None
@@ -40,38 +40,73 @@ class TargetTracker:
         Process trackers for one frame and return target and opponent skeletons.
         
         Args:
-            detections: List of parsed candidate dicts from PoseEstimator, 
-                        which MUST include "track_id" from model.track().
+            detections: List of parsed candidate dicts from PoseEstimator.
+                        ByteTrack ``track_id`` is preferred when available;
+                        ``source_rank`` is used as a smoke-test fallback.
             frame_idx: Current frame number.
             
         Returns:
             Tuple of (target_skeleton_dict, opponent_skeleton_dict)
         """
-        # Filter detections that have track_id
-        valid_detections = [d for d in detections if d.get("track_id") is not None]
+        # Prefer ByteTrack IDs when available, but keep a source-rank fallback
+        # so mock/non-tracked smoke runs can still exercise the live pipeline.
+        valid_detections = [
+            d for d in detections
+            if d.get("skeleton") is not None and d.get("bbox") is not None
+        ]
         
         if not valid_detections:
             return self._handle_missing_target(), None
             
-        # Frame 0 logic: lock onto track_id based on target_side
-        if self.locked_track_id is None and frame_idx == 0:
+        # Lock onto the first usable detection based on target_side. In a live
+        # webcam run, frame 0 often has no track yet while the camera/model warm up.
+        if self.locked_track_id is None and self.locked_fallback_rank is None:
             if self.target_side == "left":
-                # Lock track_id with minimum X
                 target = min(valid_detections, key=lambda d: self._get_bbox_center_x(d["bbox"]))
             else:
-                # Lock track_id with maximum X (could filter out refs if needed)
                 target = max(valid_detections, key=lambda d: self._get_bbox_center_x(d["bbox"]))
-                
-            self.locked_track_id = target["track_id"]
-            logger.info(f"Frame 0: Locked onto track_id {self.locked_track_id} as {self.target_side} fencer.")
+
+            if target.get("track_id") is not None:
+                self.locked_track_id = target["track_id"]
+                logger.info(
+                    "Frame %s: locked onto track_id %s as %s fencer.",
+                    frame_idx,
+                    self.locked_track_id,
+                    self.target_side,
+                )
+            else:
+                self.locked_fallback_rank = int(target.get("source_rank", 0))
+                logger.info(
+                    "Frame %s: locked onto source_rank %s as %s fencer.",
+                    frame_idx,
+                    self.locked_fallback_rank,
+                    self.target_side,
+                )
         
         # Find the target and opponent
         target_det = None
         opponent_det = None
         
         for det in valid_detections:
-            if det["track_id"] == self.locked_track_id:
+            is_locked_track = (
+                self.locked_track_id is not None
+                and det.get("track_id") == self.locked_track_id
+            )
+            is_locked_fallback = (
+                self.locked_track_id is None
+                and self.locked_fallback_rank is not None
+                and int(det.get("source_rank", -1)) == self.locked_fallback_rank
+            )
+
+            if is_locked_track or is_locked_fallback:
                 target_det = det
+                if is_locked_fallback and det.get("track_id") is not None:
+                    self.locked_track_id = det["track_id"]
+                    self.locked_fallback_rank = None
+                    logger.info(
+                        "Promoted fallback target lock to track_id %s.",
+                        self.locked_track_id,
+                    )
             else:
                 # Naive opponent association: taking largest remaining or just any
                 # In 2-person bout, the other is usually the opponent
