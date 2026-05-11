@@ -1,6 +1,6 @@
 # Quick Start
 
-This file is intentionally short. For product scope and workflow, read [mvpspec.md](mvpspec.md).
+This file is intentionally short. For the current runtime reality, read [CURRENT_STATUS.md](CURRENT_STATUS.md). For product scope and research framing, read [mvpspec.md](mvpspec.md).
 
 ## Setup
 
@@ -10,82 +10,75 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Run Interactive Mode
+Optional Gemini setup:
 
 ```bash
-python app.py --interactive
+printf 'GEMINI_API_KEY=your_key_here\n' > .env
 ```
 
-## Process A Video
+## Clip Analysis UI
 
 ```bash
-python app.py --video path/to/bout.mp4 --fencer-id athlete_001 --device auto --pose-backend mock
+python app.py
 ```
 
-Use the local ignored sample video if it is present:
+Open:
+
+- `http://127.0.0.1:7860`
+
+Use this when you want:
+
+- upload or record a clip
+- save session history
+- generate annotated output
+- optionally generate a Gemini summary
+
+## Local Live Webcam Coaching
 
 ```bash
-python app.py --video video/fencing_match.mp4 --fencer-id athlete_001 --device cpu --pose-backend mock
+python realtime_app.py --source 0 --mode "Free Bouting"
 ```
 
-With an athlete name:
+Other modes:
 
 ```bash
-python app.py --video path/to/bout.mp4 --fencer-id athlete_001 --fencer-name "John Smith" --pose-backend mock
+python realtime_app.py --source 0 --mode "Footwork"
+python realtime_app.py --source 0 --mode "Target Practice"
 ```
 
-Use CUDA if available:
+Use a local video file instead of a webcam:
 
 ```bash
-python app.py --video path/to/bout.mp4 --fencer-id athlete_001 --device cuda --pose-backend mock
+python realtime_app.py --source path/to/video.mp4 --mode "Free Bouting"
 ```
 
-Use BiFenceNet:
+This is the best option for:
+
+- local laptop webcam
+- local audio playback
+- direct real-time spoken cues
+
+## Browser Live Webcam Streaming
 
 ```bash
-python app.py --video path/to/bout.mp4 --fencer-id athlete_001 --use-bifencenet --pose-backend mock
+python web_realtime_app.py
 ```
 
-Load a model checkpoint:
+Open:
 
-```bash
-python app.py --video path/to/bout.mp4 --fencer-id athlete_001 --model weights/fencenet/model_best.pth --pose-backend mock
-```
+- `http://127.0.0.1:7861`
 
-Use a real YOLO pose backend when `ultralytics` and the pose model are installed:
+Use this when you want:
 
-```bash
-python app.py --video path/to/bout.mp4 --fencer-id athlete_001 --pose-backend ultralytics --pose-model yolov8n-pose.pt
-```
+- browser webcam capture
+- streaming analyzed frames
+- a web-based live demo
 
-Write a JSON report for review or downstream analysis:
+## Notes About Local vs Workstation Usage
 
-```bash
-python app.py --video path/to/bout.mp4 --fencer-id athlete_001 --pose-backend mock --report reports/bout_report.json
-```
-
-Write an annotated review video with dual fencer HUDs, current global action, speed/movement cues, and a too-close distance cue:
-
-```bash
-python app.py --video video/fencing_match.mp4 --fencer-id athlete_001 --device cpu --pose-backend mock --left-height-cm 170 --right-height-cm 185 --annotated-max-width 1280 --annotated-video video/fencing_match_processed.mp4
-```
-
-The height flags are optional. Limb length and reach calibration are future work, not current CLI inputs.
-
-
-## Browser Demo
-
-```bash
-python web_app.py
-```
-
-Open `http://127.0.0.1:7860`, keep `ultralytics` selected for real CV boxes, and click **Process Video**. The browser demo writes generated MP4s/reports under `web_outputs/`.
-
-If port `7860` is already in use, run `python web_app.py --port 7861` and open `http://127.0.0.1:7861` instead.
-
-`Annotated max width` only downscales and H.264-transcodes the exported annotated MP4 for browser playback. It does not change pose detection, tracking, or inference.
-
-If `output.save_reports: true` is enabled in `config.yaml`, the CLI writes an auto-named report under `output.reports_dir` unless `--no-report` is passed.
+- For local webcam plus local voice, prefer `realtime_app.py`.
+- For workstation compute plus browser webcam, use `web_realtime_app.py`.
+- Voice coaching uses `pyttsx3`, so audio comes out on the machine running the backend.
 
 ## Prepare Training Data
 
@@ -110,29 +103,24 @@ python scripts/prepare_labeled_clips.py --labels-csv labels/my_clips.csv --outpu
 Train a model:
 
 ```bash
-python train.py --dataset data/training/ffd_prepared.npz --output-dir weights/fencenet_ffd_run1 --model-type fencenet
-```
-
-## Help
-
-```bash
-python app.py --help
+python -m src.training.train_fencenet --dataset data/training/ffd_prepared.npz --output-dir weights/fencenet_ffd_run1
 ```
 
 ## Outputs To Check
 
-- `data/fencer_profiles/` for athlete profile JSON files.
-- `reports/` for JSON video reports when enabled by config or `--report`.
-- `video/fencing_match_processed.mp4` or your `--annotated-video` path for annotated video output.
-- `web_outputs/` for browser demo MP4s, reports, and temporary profiles.
-- CLI summary output for frames processed and post-bout feedback.
-- The OpenCV preview window for interactive visual debugging.
+- `annotated_output.mp4` from `app.py`
+- the OpenCV live window from `realtime_app.py`
+- the browser stream from `web_realtime_app.py`
+- `fencing_coach.db` for persisted users and sessions
+- `reports/` for saved debug JSON or prior artifacts
+- `web_outputs/` for browser-generated files when applicable
 
 ## If Something Fails
 
 - `ModuleNotFoundError: cv2`: install dependencies with `pip install -r requirements.txt`.
-- `Ultralytics is not installed`: use `--pose-backend mock` or install dependencies before using `--pose-backend ultralytics`.
-- CUDA unavailable: use `--device cpu` or install CUDA-compatible PyTorch.
-- `Video file not found`: verify the file path. The CLI exits with status `1`.
-- Low-quality or repeated action labels: provide trained model weights. Randomly initialized weights are only useful for pipeline smoke tests.
-- Low FPS: use CPU/GPU settings appropriate to the machine and reduce video resolution if needed.
+- `Ultralytics is not installed`: install dependencies and ensure YOLO pose weights are available.
+- `google-genai module not installed`: reinstall requirements or check your venv.
+- `GEMINI_API_KEY not set`: create `.env` in the repo root and restart `app.py`.
+- `pyttsx3` voice does not play: verify local OS audio support and package installation.
+- webcam unavailable in `realtime_app.py`: confirm the camera is attached to the same machine.
+- browser webcam works but no audio: remember `pyttsx3` speaks on the backend machine, not the browser client.

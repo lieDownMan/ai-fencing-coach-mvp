@@ -12,22 +12,20 @@ If you arrived here from GitHub, you may also want the repository landing page:
 ## Start Here
 
 - [Development Overview](dev/README.md)
+- [Current Status and Handoff](dev/CURRENT_STATUS.md)
 - [Research Index](research/README.md)
 
 ## Development Docs
 
 - [Project Overview](dev/README.md)
+- [Current Status and Handoff](dev/CURRENT_STATUS.md)
+- [Next Agent Prompt](dev/NEXT_AGENT_PROMPT.md)
 - [MVP Spec](dev/mvpspec.md)
 - [Quickstart](dev/QUICKSTART.md)
 - [Training Guide](dev/TRAINING.md)
 - [Checkpoints Guide](dev/CHECKPOINTS.md)
 - [Contributing](dev/CONTRIBUTING.md)
 - [Chinese Overview](dev/README_zh.md)
-
-Historical / compatibility docs:
-
-- [Detailed Structure Pointer](dev/detailedstructure.md)
-- [Project Summary Pointer](dev/PROJECT_SUMMARY.md)
 
 ## Research Docs
 

@@ -5,6 +5,7 @@
 - [../../README.md](../../README.md)：GitHub 專案入口頁。
 - [../README.md](../README.md)：文件總索引。
 - [README.md](README.md)：完整開發文件總覽。
+- [CURRENT_STATUS.md](CURRENT_STATUS.md)：目前可執行狀態與交接摘要。
 - [mvpspec.md](mvpspec.md)：MVP 範圍、系統工作流程與 HCI 研究定位。
 - [QUICKSTART.md](QUICKSTART.md)：最小安裝與執行命令。
 - [CONTRIBUTING.md](CONTRIBUTING.md)：開發與貢獻規範。
@@ -15,20 +16,26 @@
 
 目前應把它定位為「教練輔助工具」，不是正式裁判系統，也不是完整得分系統。研究價值應該來自使用者經驗：選手或教練是否能因為系統回饋而更快理解問題、調整練習或進行賽後檢討。
 
+## 目前主要入口
+
+- `app.py`：Gradio 片段分析 UI，適合上傳或錄製短片後做完整分析。
+- `realtime_app.py`：本機 OpenCV 即時模式，適合筆電 webcam + 本機語音回饋。
+- `web_realtime_app.py`：瀏覽器 webcam 串流模式，適合網頁即時顯示。
+
 ## 核心工作流程
 
 ```text
 影片輸入
   -> 姿態估計
-     -> 目前程式：每個 frame 選出一個可用骨架
-     -> 研究目標：雙人追蹤與左右選手指派
-  -> 骨架正規化為 10 個關節 / 20 個 channel
+     -> 目前程式：雙人候選 + 單一 target 骨架進分類器
+     -> 研究目標：更穩定的身份追蹤與左右持劍手處理
+  -> 骨架正規化為 9 個關節 / 18 個 channel
   -> FenceNet/BiFenceNet 六類步法辨識
-  -> 模式分析與選手檔案更新
+  -> heuristics 判斷與 coaching cue
   -> 教練回饋
-     -> 目前程式：沒有載入真實 LLM 時使用分析式 fallback
-     -> 研究目標：在合適情境中加入真實 LLM 教練文字生成
-  -> CLI 摘要或 OpenCV 儀表板
+     -> 目前程式：可選 Gemini session summary，另有本機 pyttsx3 即時語音 cue
+     -> 研究目標：更穩定的左手選手支援與更完整的即時 coaching
+  -> Gradio、OpenCV 視窗或瀏覽器串流
 ```
 
 ## 目前實作狀態
@@ -44,19 +51,19 @@
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-python app.py --interactive
+python app.py
 ```
 
-處理影片：
+啟動本機即時 webcam 模式：
 
 ```bash
-python app.py --video path/to/bout.mp4 --fencer-id athlete_001 --device auto --pose-backend mock
+python realtime_app.py --source 0 --mode "Free Bouting"
 ```
 
-若本機有範例影片：
+啟動瀏覽器 webcam 串流模式：
 
 ```bash
-python app.py --video video/fencing_match.mp4 --fencer-id athlete_001 --device cpu --pose-backend mock
+python web_realtime_app.py
 ```
 
 ## 下一步研究問題
