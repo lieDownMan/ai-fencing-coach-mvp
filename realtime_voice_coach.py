@@ -21,6 +21,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import platform
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -49,16 +51,39 @@ def _init_tts_engine():
     try:
         import pyttsx3
     except ImportError:
-        logger.error(
-            "pyttsx3 is not installed. Run: pip install pyttsx3"
+        logger.warning(
+            "pyttsx3 is not installed. Will use macOS 'say' fallback if available."
         )
         return None
 
-    engine = pyttsx3.init()
-    # Slightly slower rate for clarity during physical activity
-    engine.setProperty("rate", 160)
-    engine.setProperty("volume", 1.0)
-    return engine
+    try:
+        engine = pyttsx3.init()
+        # Slightly slower rate for clarity during physical activity
+        engine.setProperty("rate", 160)
+        engine.setProperty("volume", 1.0)
+        return engine
+    except Exception as e:
+        logger.warning("pyttsx3 init failed: %s. Will use macOS 'say' fallback.", e)
+        return None
+
+
+def _macos_say(text: str) -> bool:
+    """Speak text using macOS built-in 'say' command (supports Chinese).
+    
+    This call BLOCKS until the speech finishes, so cues don't overlap.
+    """
+    if platform.system() != "Darwin":
+        return False
+    try:
+        # Use Mei-Jia voice for Chinese; blocking call so cues play sequentially
+        subprocess.run(
+            ["say", "-v", "Mei-Jia", text],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    except FileNotFoundError:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -211,11 +236,21 @@ class RealtimeVoiceCoach:
             self._worker_thread.start()
 
     def _worker_loop(self) -> None:
-        """Background loop: pulls (error_key, cue) from the queue and speaks."""
-        engine = _init_tts_engine()
-        if engine is None:
-            logger.error("Voice worker: pyttsx3 init failed. Worker exiting.")
-            return
+        """Background loop: pulls (error_key, cue) from the queue and speaks.
+        
+        NOTE: We always use macOS 'say' command instead of pyttsx3 because
+        pyttsx3 uses NSSpeechSynthesizer which conflicts with OpenCV's
+        main-thread GUI event loop, causing silent process crashes.
+        """
+        if platform.system() != "Darwin":
+            # Try pyttsx3 only on non-macOS (Linux/Windows)
+            engine = _init_tts_engine()
+            if engine is None:
+                logger.error("Voice worker: no TTS backend available. Worker exiting.")
+                return
+        else:
+            engine = None
+            logger.info("Voice worker: using macOS 'say' command for TTS (pyttsx3 skipped to avoid GUI conflict).")
 
         while not self._shutdown_event.is_set():
             try:
@@ -224,15 +259,21 @@ class RealtimeVoiceCoach:
                 continue
             logger.info("Voice worker speaking: [%s] → %s", error_key, cue)
             try:
-                engine.say(cue)
-                engine.runAndWait()
+                if engine is not None:
+                    engine.say(cue)
+                    engine.runAndWait()
+                else:
+                    _macos_say(cue)
+                # Brief pause between consecutive cues for clarity
+                time.sleep(0.5)
             except Exception as e:
                 logger.error("TTS error for [%s]: %s", error_key, e)
 
-        try:
-            engine.stop()
-        except Exception:
-            pass
+        if engine is not None:
+            try:
+                engine.stop()
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------

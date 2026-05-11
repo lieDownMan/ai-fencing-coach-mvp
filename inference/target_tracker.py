@@ -53,8 +53,8 @@ class TargetTracker:
         if not valid_detections:
             return self._handle_missing_target(), None
             
-        # Frame 0 logic: lock onto track_id based on target_side
-        if self.locked_track_id is None and frame_idx == 0:
+        # Lock onto first valid detection based on target_side
+        if self.locked_track_id is None:
             if self.target_side == "left":
                 # Lock track_id with minimum X
                 target = min(valid_detections, key=lambda d: self._get_bbox_center_x(d["bbox"]))
