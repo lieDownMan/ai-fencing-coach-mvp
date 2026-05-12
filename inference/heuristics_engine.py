@@ -156,9 +156,10 @@ class HeuristicsEngine:
         if is_offensive:
             self._try_append(triggered, self._check_lingering_in_pocket(skeletons))
 
-        # --- Stance too high (en-garde check, all modes, neutral) ---
+        # --- Stance too high + Bounce (en-garde check, all modes, neutral) ---
         if self.training_mode != "Footwork" and action in ["SF", "SB"]:
             self._try_append(triggered, self._check_stance_too_high(skeletons))
+            self._try_append(triggered, self._check_bounce(skeletons))
 
         # --- Over-parrying (defensive context: SB all modes, or SF/SB in Free Bouting) ---
         if action == "SB" or (self.training_mode == "Free Bouting" and action in ["SF", "SB"]):

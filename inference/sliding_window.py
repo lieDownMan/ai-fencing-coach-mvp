@@ -342,6 +342,9 @@ class FullVideoPipeline:
         active_frames_indices = []
         
         frame_idx = 0
+        frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 480
+        frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 640
+        
         while True:
             ret, frame = cap.read()
             if not ret: break
@@ -365,11 +368,15 @@ class FullVideoPipeline:
                 
                 if target_skel:
                     raw_skeletons.append(target_skel)
+                    
+                    # Convert pixel coords → xyn (0~1) to match training data format
+                    xyn_skel = {k: (v[0] / frame_w, v[1] / frame_h) for k, v in target_skel.items()}
+                    
                     if is_active:
                         try:
                             if self.normalizer.reference_nose is None:
-                                self.normalizer.fit([target_skel])
-                            norm_dict = self.normalizer.normalize_skeleton(target_skel)
+                                self.normalizer.fit([xyn_skel])
+                            norm_dict = self.normalizer.normalize_skeleton(xyn_skel)
                             norm_arr = np.array([norm_dict[j] for j in self.normalizer.MODEL_JOINT_NAMES])
                         except Exception as e:
                             logger.warning(f"Normalization failed: {e}")

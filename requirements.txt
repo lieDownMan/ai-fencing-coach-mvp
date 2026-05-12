@@ -8,8 +8,9 @@ torchaudio>=2.0.0
 # Computer Vision
 opencv-python>=4.8.0
 ultralytics>=8.0.0
+
 lap>=0.5.12  # Optional for Ultralytics ByteTrack persistent IDs; runtime falls back without it
-numpy>=1.24.0  # Python 3.14 requires numpy>=2.1; PyTorch 2.11+ is compatible
+numpy>=1.24.0,<2.0.0  # Constraint added to prevent pip backtracking on numpy 2.0
 
 # Deep Learning & NLP
 transformers>=4.30.0

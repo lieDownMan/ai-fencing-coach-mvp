@@ -133,8 +133,9 @@ class ActivityGatekeeper:
         too_far = self._check_fencer_distance(target_skeleton, opponent_skeleton, frame_width)
         
         # En Garde condition
-        # M5 asked for 155, but 2D projection varies wildly; we use 170.0 for easier trigger
-        en_garde = knee_angle < 170.0
+        # 2D webcam projection often shows larger angles than reality;
+        # use 175° to make the trigger more forgiving for solo practice
+        en_garde = knee_angle < 175.0
 
         # Stop condition
         stop_condition = (knee_angle > 180.0) or is_turned_back or too_far
