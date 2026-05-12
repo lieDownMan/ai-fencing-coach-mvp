@@ -254,21 +254,87 @@ from .target_tracker import TargetTracker
 from src.pose_estimation import PoseEstimator
 from src.preprocessing import SpatialNormalizer
 
+def scale_pose_detections(
+    detections: List[Dict[str, Any]],
+    scale_x: float,
+    scale_y: float,
+) -> List[Dict[str, Any]]:
+    """Scale pose detection geometry back to the original frame size."""
+    if abs(scale_x - 1.0) < 1e-6 and abs(scale_y - 1.0) < 1e-6:
+        return detections
+
+    scaled = []
+    for detection in detections:
+        item = dict(detection)
+        if "bbox" in item and item["bbox"] is not None:
+            x1, y1, x2, y2 = item["bbox"]
+            item["bbox"] = [
+                float(x1) * scale_x,
+                float(y1) * scale_y,
+                float(x2) * scale_x,
+                float(y2) * scale_y,
+            ]
+        if "center" in item and item["center"] is not None:
+            cx, cy = item["center"]
+            item["center"] = [float(cx) * scale_x, float(cy) * scale_y]
+        if "area" in item:
+            item["area"] = float(item["area"]) * scale_x * scale_y
+        if "skeleton" in item and item["skeleton"] is not None:
+            item["skeleton"] = {
+                joint: (float(point[0]) * scale_x, float(point[1]) * scale_y)
+                for joint, point in item["skeleton"].items()
+            }
+        scaled.append(item)
+    return scaled
+
 class FullVideoPipeline:
-    def __init__(self, target_side: str = "left", training_mode: str = "Free Bouting", model_checkpoint: str = "weights/fencenet/best_model.pth"):
+    def __init__(
+        self,
+        target_side: str = "left",
+        training_mode: str = "Free Bouting",
+        model_checkpoint: str = "weights/fencenet/best_model.pth",
+        max_pose_width: int | None = 960,
+        pose_every_n_frames: int = 1,
+    ):
         self.target_side = target_side
         self.training_mode = training_mode
+        self.max_pose_width = max_pose_width
+        self.pose_every_n_frames = max(1, int(pose_every_n_frames))
         self.pose_estimator = PoseEstimator(backend="ultralytics")
         self.target_tracker = TargetTracker(target_side=target_side)
         self.gatekeeper = ActivityGatekeeper(fps=30)
         self.sliding_window = SlidingWindowInference(model_path=model_checkpoint, device="auto")
         self.heuristics = HeuristicsEngine(target_side=target_side, training_mode=training_mode)
         self.normalizer = SpatialNormalizer()
+
+    def _pose_frame(self, frame: np.ndarray) -> tuple[np.ndarray, float, float]:
+        height, width = frame.shape[:2]
+        if not self.max_pose_width or width <= self.max_pose_width:
+            return frame, 1.0, 1.0
+
+        scale = float(self.max_pose_width) / float(width)
+        resized = cv2.resize(
+            frame,
+            (int(width * scale), int(height * scale)),
+            interpolation=cv2.INTER_AREA,
+        )
+        return resized, float(width) / resized.shape[1], float(height) / resized.shape[0]
         
-    def process_video(self, video_path: str) -> Dict[str, Any]:
+    def process_video(self, video_path: str, progress_callback=None) -> Dict[str, Any]:
         cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise ValueError(f"Cannot open video: {video_path}")
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        effective_pose_every_n_frames = self.pose_every_n_frames
+        if (
+            total_frames
+            and total_frames // effective_pose_every_n_frames < self.sliding_window.window_size
+        ):
+            effective_pose_every_n_frames = 1
+        if progress_callback:
+            progress_callback(0.05, "Reading video")
         
         frames_meta = []
         raw_skeletons = []
@@ -283,8 +349,12 @@ class FullVideoPipeline:
             ret, frame = cap.read()
             if not ret: break
             
-            if self.gatekeeper.should_extract_pose():
-                detections = self.pose_estimator.extract_frame_fencers(frame, persist_track=True)
+            should_extract = self.gatekeeper.should_extract_pose()
+            should_extract = should_extract and (frame_idx % effective_pose_every_n_frames == 0)
+            if should_extract:
+                pose_frame, scale_x, scale_y = self._pose_frame(frame)
+                detections = self.pose_estimator.extract_frame_fencers(pose_frame, persist_track=True)
+                detections = scale_pose_detections(detections, scale_x, scale_y)
                 target_skel, opp_skel = self.target_tracker.process_frame_detections(detections, frame_idx)
                 
                 is_active = self.gatekeeper.update(target_skel, opp_skel, width, self.target_side)
@@ -318,10 +388,16 @@ class FullVideoPipeline:
                         active_frames_indices.append(frame_idx)
                 else:
                     raw_skeletons.append({})
+
+            if progress_callback and total_frames and frame_idx % 30 == 0:
+                fraction = min(0.82, 0.05 + 0.75 * (frame_idx / total_frames))
+                progress_callback(fraction, f"Extracting pose ({frame_idx}/{total_frames})")
             
             frame_idx += 1
             
         cap.release()
+        if progress_callback:
+            progress_callback(0.84, "Classifying actions")
         
         if len(normalized_skeletons) > 0:
             skel_array = np.array(normalized_skeletons)
@@ -337,6 +413,8 @@ class FullVideoPipeline:
         else:
             action_segments = []
             
+        if progress_callback:
+            progress_callback(0.88, "Checking posture")
         posture_errors = self.heuristics.evaluate(action_segments, raw_skeletons)
         
         for err in posture_errors:

@@ -79,16 +79,20 @@ class Database:
             # Create a lookup for errors
             error_map = {}
             for err in posture_errors:
+                warning = err.get("error_key", err.get("error", ""))
+                if not warning:
+                    continue
                 # Naive matching by segment_index if available, or just frame
                 if "segment_index" in err:
-                    error_map[err["segment_index"]] = err["error"]
+                    error_map[err["segment_index"]] = warning
                 else:
-                    error_map[err["start_frame"]] = err["error"]
+                    error_map[err.get("start_frame")] = warning
                     
             for idx, seg in enumerate(action_segments):
-                warning = error_map.get(idx) or error_map.get(seg["start_frame"])
+                start_frame = seg.get("video_start_frame", seg.get("start_frame", 0))
+                warning = error_map.get(idx) or error_map.get(start_frame) or error_map.get(seg.get("start_frame"))
                 c.execute('INSERT INTO ActionLogs (session_id, start_frame, action_label, heuristic_warning) VALUES (?, ?, ?, ?)',
-                          (session_id, seg["video_start_frame"], seg["action"], warning))
+                          (session_id, start_frame, seg["action"], warning))
                           
     def get_sessions(self) -> List[Dict[str, Any]]:
         with sqlite3.connect(self.db_path) as conn:

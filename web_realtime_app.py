@@ -1,38 +1,52 @@
-import gradio as gr
+import os
+import socket
+
 import cv2
-import numpy as np
+import gradio as gr
 from realtime_app import LiveVideoPipeline
 
-# 初始化我們剛剛寫好的即時 Pipeline
+
 pipeline = LiveVideoPipeline()
+
 
 def process_webcam_frame(frame):
     if frame is None:
         return None
-        
-    # Gradio 傳入的是 RGB 格式，轉成 BGR 讓 OpenCV 處理
+
     frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-    
-    # 進行即時骨架擷取、Sliding Window 推理與 Heuristics 判斷
     out_frame_bgr = pipeline.process_frame(frame_bgr)
-    
-    # 再轉回 RGB 讓網頁顯示
-    out_frame_rgb = cv2.cvtColor(out_frame_bgr, cv2.COLOR_BGR2RGB)
-    
-    return out_frame_rgb
+    return cv2.cvtColor(out_frame_bgr, cv2.COLOR_BGR2RGB)
+
 
 with gr.Blocks(title="Live Fencing Coach") as demo:
-    gr.Markdown("# 🤺 AI Fencing Coach - Live Streaming")
-    gr.Markdown("這個頁面會直接存取你的筆電鏡頭，並傳送到工作站進行即時分析。")
-    
+    gr.Markdown("# AI Fencing Coach - Live Streaming")
+    gr.Markdown("Use the browser webcam to stream frames through the live coaching pipeline.")
+
     with gr.Row():
-        # 設定為 streaming=True，瀏覽器會不斷把鏡頭畫面送到後端
         input_video = gr.Image(sources=["webcam"], streaming=True, label="Live Webcam")
         output_video = gr.Image(label="Live Analysis Output")
-        
-    # 將輸入串流綁定到處理函數，並輸出到 output_video
+
     input_video.stream(fn=process_webcam_frame, inputs=[input_video], outputs=[output_video])
 
+
+def _pick_gradio_port(default_port: int) -> int:
+    env_port = os.getenv("GRADIO_SERVER_PORT")
+    if env_port:
+        return int(env_port)
+
+    for port in range(default_port, default_port + 20):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.2)
+            if sock.connect_ex(("127.0.0.1", port)) != 0:
+                return port
+    return default_port
+
+
 if __name__ == "__main__":
-    # 使用 share=True 確保可以透過 HTTPS 繞過瀏覽器安全性限制
-    demo.launch(server_name="0.0.0.0", server_port=7861, share=True)
+    port = _pick_gradio_port(7861)
+    print(f"Launching Live Fencing Coach at http://127.0.0.1:{port}")
+    demo.launch(
+        server_name="0.0.0.0",
+        server_port=port,
+        share=os.getenv("GRADIO_SHARE", "0") == "1",
+    )
