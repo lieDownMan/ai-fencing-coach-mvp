@@ -22,8 +22,8 @@ pandas>=2.0.0
 scipy>=1.10.0
 gradio>=4.0.0
 
-# LLM / Gemini
-google-genai>=1.0.0
+# LLM / Gemini (use google-generativeai instead of google-genai to avoid websockets conflict with gradio)
+google-generativeai>=0.8.0
 python-dotenv>=1.0.0
 
 # Real-time voice coaching (offline TTS)

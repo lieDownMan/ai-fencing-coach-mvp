@@ -15,7 +15,7 @@ except FileNotFoundError:
     _PLAYBOOK = {}
 
 try:
-    from google import genai
+    import google.generativeai as genai
     HAS_GENAI = True
 except ImportError:
     HAS_GENAI = False
@@ -24,12 +24,12 @@ class LLMAgent:
     def __init__(self, api_key: str = None):
         key = api_key or os.environ.get("GEMINI_API_KEY")
         if HAS_GENAI and key:
-            self.client = genai.Client(api_key=key)
-            self.model_name = 'gemini-3.1-flash-lite-preview'
+            genai.configure(api_key=key)
+            self.model = genai.GenerativeModel('gemini-1.5-flash')
             self.enabled = True
         else:
             self.enabled = False
-            self.disabled_reason = "GEMINI_API_KEY not set" if HAS_GENAI else "google-genai module not installed"
+            self.disabled_reason = "GEMINI_API_KEY not set" if HAS_GENAI else "google-generativeai module not installed"
             
     def generate_summary(self, user: Dict[str, Any], training_mode: str, action_segments: List[Dict], posture_errors: List[Dict]) -> str:
         if not self.enabled:
@@ -76,10 +76,8 @@ Based on the stats above, write a highly specific technical summary addressing t
 5. Constraint: Strictly under 100 words. Do NOT list timecodes. Please reply in Traditional Chinese.
 """
         try:
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=prompt,
-            )
+            response = self.model.generate_content(prompt)
             return response.text.strip()
         except Exception as e:
             return f"Error generating summary: {str(e)}"
+

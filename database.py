@@ -81,9 +81,9 @@ class Database:
             for err in posture_errors:
                 # Naive matching by segment_index if available, or just frame
                 if "segment_index" in err:
-                    error_map[err["segment_index"]] = err["error"]
+                    error_map[err["segment_index"]] = err.get("error_key", err.get("error", "unknown"))
                 else:
-                    error_map[err["start_frame"]] = err["error"]
+                    error_map[err["start_frame"]] = err.get("error_key", err.get("error", "unknown"))
                     
             for idx, seg in enumerate(action_segments):
                 warning = error_map.get(idx) or error_map.get(seg["start_frame"])
