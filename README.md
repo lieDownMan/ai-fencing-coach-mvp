@@ -6,7 +6,7 @@ This repository is an AI-assisted fencing coaching prototype focused on:
 - live local webcam coaching
 - browser webcam streaming
 - rule-based biomechanics feedback
-- optional Gemini session summaries
+- playbook-based session summaries, optionally polished by Gemini
 
 The project is a coaching aid, not a referee replacement.
 
@@ -31,7 +31,7 @@ Use this when you want:
 - annotated output video
 - action table
 - session history
-- optional Gemini summary
+- playbook-based summary, with optional Gemini wording
 
 ### 2. Local Live Webcam Coaching
 
@@ -81,6 +81,10 @@ GEMINI_API_KEY=your_key_here
 ```
 
 Put that in a local `.env` file in the repo root before starting `app.py`.
+Without `GEMINI_API_KEY`, `app.py` still produces a deterministic
+`coach_playbook.json` summary that lists each detected problem and frequency.
+When Gemini is configured, the Analysis UI shows a `Use Gemini Summary`
+checkbox so each clip can still use either Gemini or the playbook-only summary.
 
 For real pose inference, keep `yolov8n-pose.pt` in the repo root or let
 Ultralytics download it on first run. Persistent webcam target IDs use the
@@ -97,7 +101,7 @@ camera or video
   -> target tracking + activity gatekeeper
   -> sliding-window FenceNet inference
   -> heuristics engine
-  -> video overlay / action table / voice cue / optional LLM summary
+  -> video overlay / action table / voice cue / playbook or Gemini summary
 ```
 
 Important runtime files:
@@ -115,6 +119,7 @@ Important runtime files:
 
 - The active inference package is now top-level `inference/`, not `src/inference/`.
 - Voice cues do not require Gemini. They use offline `pyttsx3`.
+- Final clip summaries do not require Gemini. Without an API key, `llm_agent.py` uses `coach_playbook.json`; with an API key, Gemini receives the same playbook details in its prompt.
 - Gradio public share links are off by default for local runs. Set `GRADIO_SHARE=1` only when you need a public tunnel.
 - The docs were cleaned to match the current code, but older branch history may still mention removed flows such as `web_app.py` or old CLI-only usage.
 - For the most accurate current state, trust [docs/dev/CURRENT_STATUS.md](docs/dev/CURRENT_STATUS.md) over older historical notes.

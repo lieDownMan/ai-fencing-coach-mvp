@@ -42,7 +42,7 @@ Use this for:
 - save user/session history
 - generate annotated video
 - generate action table
-- optionally generate a Gemini summary
+- generate a playbook summary, optionally polished by Gemini
 
 Key characteristics:
 
@@ -138,7 +138,12 @@ It uses:
 - `GEMINI_API_KEY`
 - model string currently set to `gemini-3.1-flash-lite-preview`
 
-If the key is missing, the summary is disabled.
+If the key is missing, `llm_agent.py` still writes a deterministic
+`coach_playbook.json` summary that lists each detected problem and frequency.
+If the key is present, Gemini receives the same playbook names, diagnoses,
+short cues, and frequencies as part of its prompt.
+The clip Analysis UI exposes this as a `Use Gemini Summary` checkbox so a user
+can choose Gemini or the playbook-only summary per run.
 
 ### Persistence
 

@@ -21,6 +21,12 @@ Optional Gemini setup:
 printf 'GEMINI_API_KEY=your_key_here\n' > .env
 ```
 
+If Gemini is not configured, clip analysis still produces a deterministic
+`coach_playbook.json` summary listing every detected problem and how often it
+appeared. If Gemini is configured, those same playbook details are included in
+the LLM prompt. In the Analysis UI, use the `Use Gemini Summary` checkbox to
+choose Gemini or the playbook-only summary for each run.
+
 ## Clip Analysis UI
 
 ```bash
@@ -36,7 +42,13 @@ Use this when you want:
 - upload or record a clip
 - save session history
 - generate annotated output
-- optionally generate a Gemini summary
+- generate a playbook summary, optionally polished by Gemini
+
+Use the `Processing` selector in the UI:
+
+- `Balanced`: downscaled pose inference with good output quality
+- `Fast`: lower pose resolution and smaller annotated output for quicker checks
+- `Full Quality`: original-size pose inference and output
 
 ## Local Live Webcam Coaching
 
