@@ -38,7 +38,13 @@ class VideoAnnotator:
         ("right_hip", "right_knee"), ("right_knee", "right_ankle")
     ]
 
-    def annotate_video(self, input_path: str, output_path: str, report: Dict[str, Any]) -> str:
+    def annotate_video(
+        self,
+        input_path: str,
+        output_path: str,
+        report: Dict[str, Any],
+        max_width: int | None = None,
+    ) -> str:
         tracking = report.get("two_fencer_tracking", {})
         frames_meta = tracking.get("frames", [])
         locked_track_id = tracking.get("locked_track_id", None)
@@ -52,9 +58,21 @@ class VideoAnnotator:
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        if width <= 0 or height <= 0:
+            cap.release()
+            raise ValueError(f"Cannot read video dimensions: {input_path}")
+
+        output_width = width
+        output_height = height
+        if max_width and width > max_width:
+            output_width = int(max_width)
+            output_height = int(round(height * (output_width / width)))
         
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        out = cv2.VideoWriter(output_path, fourcc, fps, (output_width, output_height))
+        if not out.isOpened():
+            cap.release()
+            raise ValueError(f"Cannot open video writer: {output_path}")
         
         frame_idx = 0
         while True:
@@ -125,6 +143,8 @@ class VideoAnnotator:
                     cv2.putText(frame, text, (20, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
                     y_offset += 35
                     
+            if (output_width, output_height) != (width, height):
+                frame = cv2.resize(frame, (output_width, output_height), interpolation=cv2.INTER_AREA)
             out.write(frame)
             frame_idx += 1
             

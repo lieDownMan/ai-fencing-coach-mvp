@@ -4,6 +4,7 @@ Uses YOLO-Pose or similar model to detect skeletal keypoints.
 """
 
 import cv2
+import importlib.util
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Any
 import logging
@@ -77,6 +78,7 @@ class PoseEstimator:
         self.backend = backend
         self.model = self._load_model()
         self.fencer_tracker = FencerTracker()
+        self._warned_tracking_unavailable = False
         
     def _load_model(self):
         """Load pose estimation model if a real backend is available."""
@@ -140,9 +142,15 @@ class PoseEstimator:
                 "YOLO pose model, or use backend='mock' for tests."
             )
 
-        if persist_track:
+        if persist_track and importlib.util.find_spec("lap") is not None:
             results = self.model.track(frame, verbose=False, persist=True, tracker="bytetrack.yaml")
         else:
+            if persist_track and not self._warned_tracking_unavailable:
+                logger.warning(
+                    "ByteTrack dependency 'lap' is not installed; falling back to "
+                    "pose detection without persistent track IDs."
+                )
+                self._warned_tracking_unavailable = True
             results = self.model(frame, verbose=False)
             
         if not results:
