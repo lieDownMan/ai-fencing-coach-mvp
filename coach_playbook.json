@@ -1,6 +1,6 @@
 {
     "lunge_overextension": {
-        "error_name": "弓步過度前傾",
+        "error_name": "長刺過度前傾",
         "diagnosis": "重心衝太快，前腳發力不夠，容易傷膝蓋且無法快速收步。",
         "short_cue": "注意前腳不要壓膝蓋，長刺打到90度就好",
         "practice": "長刺（lunge）重複練習"
@@ -52,5 +52,29 @@
         "diagnosis": "手臂沒有完全伸直會讓你平白損失攻擊距離，導致原本能擊中的攻擊落空。",
         "short_cue": "刺的時候手伸直！",
         "practice": "重複長刺（lunge）練習"
+    },
+    "wide_step": {
+        "error_name": "步伐太大",
+        "diagnosis": "雙腳間距過大影響移動和動作發動",
+        "short_cue": "腳打太開",
+        "practice": ""
+    },
+    "narrow_step": {
+        "error_name": "步伐太小",
+        "diagnosis": "雙腳間距過小會影響移動和動作發動",
+        "short_cue": "腳打太窄",
+        "practice": ""
+    },
+    "center_of_mass_in_front": {
+        "error_name": "重心向前移動",
+        "diagnosis": "姿勢不標準，會無法有正確迅速確實的發力過程",
+        "short_cue": "重心太靠前",
+        "practice": "提供身體應有基準給選手參考"
+    },
+    "center_of_mass_leaning_backward": {
+        "error_name": "重心向後傾斜",
+        "diagnosis": "姿勢不標準，會無法有正確迅速確實的發力過程",
+        "short_cue": "重心太靠後",
+        "practice": "提供身體應有基準給選手參考"
     }
 }
