@@ -16,8 +16,8 @@ except FileNotFoundError:
     _PLAYBOOK = {}
 
 try:
-    from google import genai
-
+    # Use google-generativeai (legacy SDK) to avoid websockets conflict with gradio on Python 3.9
+    import google.generativeai as genai
     HAS_GENAI = True
 except ImportError:
     HAS_GENAI = False
@@ -27,15 +27,15 @@ class LLMAgent:
     def __init__(self, api_key: str = None):
         key = api_key or os.environ.get("GEMINI_API_KEY")
         if HAS_GENAI and key:
-            self.client = genai.Client(api_key=key)
-            self.model_name = "gemini-3.1-flash-lite-preview"
+            genai.configure(api_key=key)
+            self.model = genai.GenerativeModel('gemini-1.5-flash')
             self.enabled = True
         else:
             self.enabled = False
             self.disabled_reason = (
                 "GEMINI_API_KEY not set"
                 if HAS_GENAI
-                else "google-genai module not installed"
+                else "google-generativeai module not installed"
             )
 
     @staticmethod
@@ -167,10 +167,7 @@ Based on the stats and coach playbook context above, write a highly specific tec
 6. Constraint: Strictly under 160 words. Do NOT list timecodes. Please reply in Traditional Chinese.
 """
         try:
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=prompt,
-            )
+            response = self.model.generate_content(prompt)
             return response.text.strip()
         except Exception as e:
             fallback = self._generate_rule_based_summary(
