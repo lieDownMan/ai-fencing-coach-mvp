@@ -2,56 +2,55 @@
     "lunge_overextension": {
         "error_name": "弓步過度前傾",
         "diagnosis": "重心衝太快，前腳發力不夠，容易傷膝蓋且無法快速收步。",
-        "short_cue": "注意前腳不要壓膝蓋，長刺打到90度就好"
+        "short_cue": "注意前腳不要壓膝蓋，長刺打到90度就好",
+        "practice": "長刺（lunge）重複練習"
     },
     "guard_dropped": {
         "error_name": "持劍手掉落",
         "diagnosis": "攻擊或防守時手放太低，劍尖沒有威脅對手，且有效部位完全暴露給對手。",
-        "short_cue": "手抬起來，劍尖指著對手"
+        "short_cue": "手抬起來，劍尖指著對手",
+        "practice": ""
     },
     "bounce_excessive": {
         "error_name": "步伐上下浮動",
         "diagnosis": "在走腳步的時候大腿肌力或是控制力不足導致身體重心不穩，影響攻擊刺點",
-        "short_cue": "重心壓低蹲好，不要上下移動!"
+        "short_cue": "重心壓低蹲好，不要上下移動!",
+        "practice": "連續前進、後退以穩定腳步"
     },
     "foot_before_hand": {
         "error_name": "手腳順序錯誤",
         "diagnosis": "腳先動了，劍尖還沒出去，這樣會先把自己的身體送出去給對方打，容易被得分。",
-        "short_cue": "手要先伸"
+        "short_cue": "手要先伸",
+        "practice": "長刺（lunge）前進長刺（step lunge）重複練習"
     },
     "over_parrying": {
         "error_name": "防守動作太大且太頻繁",
         "diagnosis": "撥擋（Parry）的動作超過身體輪廓太多，導致防守後露出太多有效部位。對手很容易做一個簡單的轉移刺（Disengage）擊中你，且動作太大會導致回防速度變慢。",
-        "short_cue": "防守小一點，不要亂撈劍，用手指頭控制劍尖不要用整個手腕"
+        "short_cue": "防守小一點，不要亂撈劍，用手指頭控制劍尖不要用整個手腕",
+        "practice": "重複防守（Parry）練習"
     },
     "stance_too_high": {
         "error_name": "預備姿勢沒蹲好",
         "diagnosis": "重心太高會導致啟動速度變慢，無法瞬間爆發，也容易在快速移動中失去平衡。",
-        "short_cue": "重心壓低，蹲好！"
+        "short_cue": "重心壓低，蹲好！",
+        "practice": "預備姿勢（en guard）練習"
     },
     "wide_disengage": {
         "error_name": "換側動作太大",
         "diagnosis": "繞劍幅度過大會浪費攻擊時間，不僅容易被對手直接反擊，也容易讓自己的劍尖偏離有效部位。",
-        "short_cue": "換側小一點！用手指頭控制劍尖，不要動到整支手臂和手肘！"
+        "short_cue": "換側小一點！用手指頭控制劍尖，不要動到整支手臂和手肘！",
+        "practice": "重複換側練習"
     },
     "pumping_the_arm": {
         "error_name": "進攻前縮一拍",
         "diagnosis": "攻擊前把手往回縮，這個「預備動作」會讓對手很好做反攻（counter attack）",
-        "short_cue": "進攻不要縮一拍才刺！手直接往前伸。"
-    },
-    "lingering_in_pocket": {
-        "error_name": "打完沒退乾淨",
-        "diagnosis": "攻擊如果沒亮燈，停在原地就等於是活靶。沒有迅速拉開距離，對手原地隨便一伸就得分了。",
-        "short_cue": "打完要立刻退乾淨！"
-    },
-    "monotonous_pressure": {
-        "error_name": "壓迫節奏太單調",
-        "diagnosis": "節奏太固定，對手閉著眼睛都能算準你下一步什麼時候踩下來，極容易被抓反擊 (Stop hit) 或直接被搶攻。",
-        "short_cue": "壓迫的節奏要有變化！加一點停頓、半步或假動作。"
+        "short_cue": "進攻不要縮一拍才刺！手直接往前伸。",
+        "practice": "重複長刺（lunge）練習"
     },
     "incomplete_arm_extension": {
         "error_name": "刺的時候手沒有伸直",
         "diagnosis": "手臂沒有完全伸直會讓你平白損失攻擊距離，導致原本能擊中的攻擊落空。",
-        "short_cue": "刺的時候手伸直！"
+        "short_cue": "刺的時候手伸直！",
+        "practice": "重複長刺（lunge）練習"
     }
 }

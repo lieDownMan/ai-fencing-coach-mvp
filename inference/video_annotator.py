@@ -2,11 +2,11 @@ import cv2
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
-_PLAYBOOK_PATH = Path(__file__).resolve().parent.parent.parent / "coach_playbook.json"
+_PLAYBOOK_PATH = Path(__file__).resolve().parent.parent / "coach_playbook.json"
 
 def _load_playbook() -> dict:
     if _PLAYBOOK_PATH.exists():
@@ -43,7 +43,7 @@ class VideoAnnotator:
         input_path: str,
         output_path: str,
         report: Dict[str, Any],
-        max_width: int | None = None,
+        max_width: Optional[int] = None,
     ) -> str:
         tracking = report.get("two_fencer_tracking", {})
         frames_meta = tracking.get("frames", [])
@@ -68,7 +68,7 @@ class VideoAnnotator:
             output_width = int(max_width)
             output_height = int(round(height * (output_width / width)))
         
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        fourcc = cv2.VideoWriter_fourcc(*'avc1')  # H.264 — macOS QuickTime/browser compatible
         out = cv2.VideoWriter(output_path, fourcc, fps, (output_width, output_height))
         if not out.isOpened():
             cap.release()

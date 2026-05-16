@@ -9,10 +9,10 @@ the appropriate representation.
 Detectable keys (via skeleton geometry):
     bounce_excessive, lunge_overextension, guard_dropped,
     foot_before_hand, stance_too_high, incomplete_arm_extension,
-    pumping_the_arm, lingering_in_pocket, over_parrying
+    pumping_the_arm, over_parrying
 
 Keys reserved for future detection (require sword-tip / multi-segment):
-    wide_disengage, monotonous_pressure
+    wide_disengage
 """
 
 from __future__ import annotations
@@ -152,9 +152,6 @@ class HeuristicsEngine:
         if self.training_mode in ["Target Practice", "Free Bouting"] and is_offensive:
             self._try_append(triggered, self._check_pumping_the_arm(skeletons))
 
-        # --- Lingering in pocket (all modes, after offensive action) ---
-        if is_offensive:
-            self._try_append(triggered, self._check_lingering_in_pocket(skeletons))
 
         # --- Stance too high + Bounce (en-garde check, all modes, neutral) ---
         if self.training_mode != "Footwork" and action in ["SF", "SB"]:
@@ -410,46 +407,6 @@ class HeuristicsEngine:
         # If wrist retreated > 8px opposite to attack direction early on
         if min_retract < -8.0:
             return {"error_key": "pumping_the_arm"}
-        return None
-
-    # ------------------------------------------------------------------
-    # Rule 8: lingering_in_pocket — 打完沒退乾淨
-    # Trigger: All modes, after offensive actions (R/JS/WW/IS)
-    # Logic:  In the last quarter of an action window, if pelvis
-    #         horizontal displacement is negligible, the fencer is
-    #         lingering instead of recovering distance.
-    # ------------------------------------------------------------------
-
-    def _check_lingering_in_pocket(
-        self, skeletons: List[Dict[str, Any]]
-    ) -> Optional[Dict[str, Any]]:
-        if len(skeletons) < 8:
-            return None
-
-        # Find pelvis position at peak extension and at end of window
-        pelvis_xs: List[float] = []
-        for skel in skeletons:
-            pc = _pelvis_center(skel)
-            if pc is not None:
-                pelvis_xs.append(float(pc[0]))
-
-        if len(pelvis_xs) < 8:
-            return None
-
-        # Peak extension = frame with max pelvis displacement from start
-        ref_x = pelvis_xs[0]
-        peak_idx = int(np.argmax([abs(x - ref_x) for x in pelvis_xs]))
-
-        # We only care about the recovery phase (after peak)
-        recovery_phase = pelvis_xs[peak_idx:]
-        if len(recovery_phase) < 4:
-            return None
-
-        # If pelvis barely moves during recovery (< 5px total),
-        # the fencer is lingering
-        recovery_range = max(recovery_phase) - min(recovery_phase)
-        if recovery_range < 5.0:
-            return {"error_key": "lingering_in_pocket"}
         return None
 
     # ------------------------------------------------------------------
