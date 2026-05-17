@@ -9,10 +9,11 @@ the appropriate representation.
 Detectable keys (via skeleton geometry):
     bounce_excessive, lunge_overextension, guard_dropped,
     foot_before_hand, stance_too_high, incomplete_arm_extension,
-    pumping_the_arm, lingering_in_pocket, over_parrying
+    pumping_the_arm, over_parrying, wide_step, narrow_step,
+    center_of_mass_in_front, center_of_mass_leaning_backward
 
 Keys reserved for future detection (require sword-tip / multi-segment):
-    wide_disengage, monotonous_pressure
+    wide_disengage
 """
 
 from __future__ import annotations
@@ -138,6 +139,8 @@ class HeuristicsEngine:
         if self.training_mode == "Footwork" and action in ["SF", "SB"]:
             self._try_append(triggered, self._check_bounce(skeletons))
             self._try_append(triggered, self._check_stance_too_high(skeletons))
+            self._try_append(triggered, self._check_step_width(skeletons))
+            self._try_append(triggered, self._check_center_of_mass(skeletons))
 
         # --- Offensive lunge rules (Mode B, R/JS/WW/IS) ---
         if self.training_mode == "Target Practice" and is_offensive:
@@ -152,14 +155,13 @@ class HeuristicsEngine:
         if self.training_mode in ["Target Practice", "Free Bouting"] and is_offensive:
             self._try_append(triggered, self._check_pumping_the_arm(skeletons))
 
-        # --- Lingering in pocket (all modes, after offensive action) ---
-        if is_offensive:
-            self._try_append(triggered, self._check_lingering_in_pocket(skeletons))
 
         # --- Stance too high + Bounce (en-garde check, all modes, neutral) ---
         if self.training_mode != "Footwork" and action in ["SF", "SB"]:
             self._try_append(triggered, self._check_stance_too_high(skeletons))
             self._try_append(triggered, self._check_bounce(skeletons))
+            self._try_append(triggered, self._check_step_width(skeletons))
+            self._try_append(triggered, self._check_center_of_mass(skeletons))
 
         # --- Over-parrying (defensive context: SB all modes, or SF/SB in Free Bouting) ---
         if action == "SB" or (self.training_mode == "Free Bouting" and action in ["SF", "SB"]):
@@ -413,46 +415,6 @@ class HeuristicsEngine:
         return None
 
     # ------------------------------------------------------------------
-    # Rule 8: lingering_in_pocket — 打完沒退乾淨
-    # Trigger: All modes, after offensive actions (R/JS/WW/IS)
-    # Logic:  In the last quarter of an action window, if pelvis
-    #         horizontal displacement is negligible, the fencer is
-    #         lingering instead of recovering distance.
-    # ------------------------------------------------------------------
-
-    def _check_lingering_in_pocket(
-        self, skeletons: List[Dict[str, Any]]
-    ) -> Optional[Dict[str, Any]]:
-        if len(skeletons) < 8:
-            return None
-
-        # Find pelvis position at peak extension and at end of window
-        pelvis_xs: List[float] = []
-        for skel in skeletons:
-            pc = _pelvis_center(skel)
-            if pc is not None:
-                pelvis_xs.append(float(pc[0]))
-
-        if len(pelvis_xs) < 8:
-            return None
-
-        # Peak extension = frame with max pelvis displacement from start
-        ref_x = pelvis_xs[0]
-        peak_idx = int(np.argmax([abs(x - ref_x) for x in pelvis_xs]))
-
-        # We only care about the recovery phase (after peak)
-        recovery_phase = pelvis_xs[peak_idx:]
-        if len(recovery_phase) < 4:
-            return None
-
-        # If pelvis barely moves during recovery (< 5px total),
-        # the fencer is lingering
-        recovery_range = max(recovery_phase) - min(recovery_phase)
-        if recovery_range < 5.0:
-            return {"error_key": "lingering_in_pocket"}
-        return None
-
-    # ------------------------------------------------------------------
     # Rule 9: over_parrying — 防守動作太大且太頻繁
     # Trigger: SB in all modes; SF/SB in Free Bouting
     # Logic:  Measure the horizontal sweep range of front_wrist across
@@ -503,4 +465,84 @@ class HeuristicsEngine:
         # Wrist sweeps more than 2× shoulder width ⇒ over-parrying
         if sweep_range > 2.0 * shoulder_width:
             return {"error_key": "over_parrying"}
+        return None
+
+    # ------------------------------------------------------------------
+    # Rule 10: wide_step / narrow_step — 步伐太大/太小
+    # Trigger: SF/SB in all modes
+    # Logic: Measure the distance between front and back ankles compared
+    #        to the shoulder width. If ratio > 3.0, wide. If < 1.0, narrow.
+    # ------------------------------------------------------------------
+
+    def _check_step_width(
+        self, skeletons: List[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        limbs = FRONT_LIMBS[self.target_side]
+        
+        for skel in skeletons:
+            front_ankle = _get_joint(skel, limbs["ankle"])
+            back_ankle_name = "left_ankle" if self.target_side == "right" else "right_ankle"
+            back_ankle = _get_joint(skel, back_ankle_name)
+            
+            front_shoulder = _get_joint(skel, limbs["shoulder"])
+            pelvis = _pelvis_center(skel)
+            
+            if front_ankle is None or back_ankle is None or front_shoulder is None or pelvis is None:
+                continue
+                
+            # Proxy for shoulder width: distance from front shoulder to pelvis center * 2
+            shoulder_width = abs(front_shoulder[0] - pelvis[0]) * 2.0
+            if shoulder_width < 10.0:
+                continue
+                
+            step_width = abs(front_ankle[0] - back_ankle[0])
+            ratio = step_width / shoulder_width
+            
+            if ratio > 3.0:
+                return {"error_key": "wide_step"}
+            elif ratio < 1.0:
+                return {"error_key": "narrow_step"}
+        return None
+
+    # ------------------------------------------------------------------
+    # Rule 11: center_of_mass_in_front / center_of_mass_leaning_backward
+    # Trigger: SF/SB in all modes
+    # Logic: Determine the pelvis x-position relative to the front and 
+    #        back ankles. If ratio > 0.65 or < 0.35, the CoM is skewed.
+    # ------------------------------------------------------------------
+
+    def _check_center_of_mass(
+        self, skeletons: List[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        limbs = FRONT_LIMBS[self.target_side]
+        
+        for skel in skeletons:
+            front_ankle = _get_joint(skel, limbs["ankle"])
+            back_ankle_name = "left_ankle" if self.target_side == "right" else "right_ankle"
+            back_ankle = _get_joint(skel, back_ankle_name)
+            pelvis = _pelvis_center(skel)
+            
+            if front_ankle is None or back_ankle is None or pelvis is None:
+                continue
+                
+            front_x = float(front_ankle[0])
+            back_x = float(back_ankle[0])
+            pelvis_x = float(pelvis[0])
+            
+            base_width = abs(front_x - back_x)
+            if base_width < 10.0:
+                continue
+                
+            # 0.0 means pelvis is directly over back ankle
+            # 1.0 means pelvis is directly over front ankle
+            if front_x > back_x:
+                ratio = (pelvis_x - back_x) / base_width
+            else:
+                ratio = (back_x - pelvis_x) / base_width
+                
+            if ratio > 0.65:
+                return {"error_key": "center_of_mass_in_front"}
+            elif ratio < 0.35:
+                return {"error_key": "center_of_mass_leaning_backward"}
+                
         return None

@@ -38,7 +38,7 @@ from inference.sliding_window import FullVideoPipeline
 from inference.video_annotator import VideoAnnotator
 from database import Database
 from llm_agent import LLMAgent
-from realtime_voice_coach import RealtimeVoiceCoach
+from src.realtime.realtime_voice_coach import RealtimeVoiceCoach
 import sqlite3
 
 # Load playbook for error_key → error_name resolution in UI
@@ -210,6 +210,24 @@ def analyze_video(
         results,
         max_width=profile["annotated_max_width"],
     )
+
+    # Convert to web-friendly format using ffmpeg if available
+    # OpenCV's mp4 writer often creates files that browsers can't play
+    import subprocess
+    progress(0.93, desc="Optimizing video for web browser")
+    tmp_video = out_video.replace(".mp4", "_tmp.mp4")
+    try:
+        # Try to run ffmpeg
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", out_video, "-vcodec", "libx264", "-acodec", "aac", tmp_video],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        os.replace(tmp_video, out_video)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        # Fallback to the original file if ffmpeg fails or is not installed
+        pass
 
     session_id = db.create_session(user_id, training_mode, out_video)
     db.save_action_logs(session_id, results["action_segments"], results["posture_errors"])

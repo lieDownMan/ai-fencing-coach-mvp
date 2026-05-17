@@ -12,7 +12,7 @@ from inference.heuristics_engine import HeuristicsEngine
 from inference.target_tracker import TargetTracker
 from src.pose_estimation import PoseEstimator
 from src.preprocessing import SpatialNormalizer
-from realtime_voice_coach import RealtimeVoiceCoach
+from src.realtime.realtime_voice_coach import RealtimeVoiceCoach
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("LiveCoach")
@@ -171,7 +171,7 @@ class LiveVideoPipeline:
             xyn[joint_name] = (coords[0] / frame_w, coords[1] / frame_h)
         return xyn
 
-    def process_frame(self, frame):
+    def process_frame(self, frame, draw_hud: bool = True):
         height, width = frame.shape[:2]
         
         # 1. Pose Estimation & Tracking
@@ -272,17 +272,23 @@ class LiveVideoPipeline:
                         self.warning_frames_left = 90  # Show warnings for ~3 seconds
             self.last_inference_idx = self.frame_idx
             
-        # Draw HUD text using PIL (supports Chinese characters)
-        frame = _put_text_pil(frame, f"State: {self.gatekeeper.state}", (20, 10), color=(0, 255, 0), font=_FONT_SMALL)
-        frame = _put_text_pil(frame, f"Action: {self.current_action}", (20, 50), color=(0, 165, 255), font=_FONT)
-        
-        if self.warning_frames_left > 0:
-            y_offset = 105
-            for warn_text in self.current_warnings:
-                frame = _put_text_pil(frame, f"⚠ {warn_text}", (20, y_offset), color=(0, 0, 255), font=_FONT_WARNING)
-                y_offset += 60  # spacing between lines
-            self.warning_frames_left -= 1
             
+        if draw_hud:
+            # Draw HUD text using PIL (supports Chinese characters)
+            frame = _put_text_pil(frame, f"State: {self.gatekeeper.state}", (20, 10), color=(0, 255, 0), font=_FONT_SMALL)
+            frame = _put_text_pil(frame, f"Action: {self.current_action}", (20, 50), color=(0, 165, 255), font=_FONT)
+            
+            if self.warning_frames_left > 0:
+                y_offset = 105
+                for warn_text in self.current_warnings:
+                    frame = _put_text_pil(frame, f"⚠ {warn_text}", (20, y_offset), color=(0, 0, 255), font=_FONT_WARNING)
+                    y_offset += 60  # spacing between lines
+                self.warning_frames_left -= 1
+        else:
+            # Still decrement the warning timer if HUD is disabled so web UI can sync
+            if self.warning_frames_left > 0:
+                self.warning_frames_left -= 1
+                
         self.frame_idx += 1
         return frame
 
