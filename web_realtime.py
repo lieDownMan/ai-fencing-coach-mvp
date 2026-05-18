@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from pydantic import BaseModel
 
 from inference.heuristic_debug import HEURISTIC_KEYS, compute_heuristic_metric, format_metrics, format_value
+from inference.heuristics_engine import FRONT_LIMBS, _get_joint, _pelvis_center
 from src.realtime.feedback_scheduler import DEFAULT_ERROR_WEIGHTS, normalize_error_keys
 from src.realtime.realtime_app import LiveVideoPipeline
 
@@ -593,6 +594,30 @@ def generate_frames():
         
         # AI Processing (Tell pipeline NOT to draw HUD text on the frame)
         out_frame = pipeline.process_frame(frame, draw_hud=False)
+        
+        # Draw shoulder and step width directly on the frame
+        if len(pipeline.raw_skeletons) > 0:
+            latest_skel = pipeline.raw_skeletons[-1]
+            if latest_skel:
+                limbs = FRONT_LIMBS.get(TARGET_SIDE)
+                if limbs:
+                    front_ankle = _get_joint(latest_skel, limbs["ankle"])
+                    back_ankle_name = "left_ankle" if TARGET_SIDE == "left" else "right_ankle"
+                    back_ankle = _get_joint(latest_skel, back_ankle_name)
+                    front_shoulder = _get_joint(latest_skel, limbs["shoulder"])
+                    pelvis = _pelvis_center(latest_skel)
+                    
+                    if front_ankle is not None and back_ankle is not None and front_shoulder is not None and pelvis is not None:
+                        # Using 2.5 as you specified in heuristics_engine.py
+                        shoulder_width = abs(float(front_shoulder[0] - pelvis[0])) * 2.5
+                        step_width = abs(float(front_ankle[0] - back_ankle[0]))
+                        ratio = step_width / shoulder_width if shoulder_width > 0 else 0.0
+                        
+                        text = f"Shoulder W: {shoulder_width:.1f} | Step W: {step_width:.1f} | Ratio: {ratio:.2f}"
+                        cv2.putText(out_frame, text, (20, out_frame.shape[0] - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+                        
+                        text2 = f"Front Ankle: {front_ankle[0]:.1f} | Back Ankle: {back_ankle[0]:.1f}"
+                        cv2.putText(out_frame, text2, (20, out_frame.shape[0] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
         
         # Encode as JPEG
         ret, buffer = cv2.imencode('.jpg', out_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])

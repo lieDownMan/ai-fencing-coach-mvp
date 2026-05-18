@@ -453,13 +453,13 @@ def _metric_step_width(
     limbs = FRONT_LIMBS[target_side]
     for skel in skeletons:
         front_ankle = _get_joint(skel, limbs["ankle"])
-        back_ankle_name = "left_ankle" if target_side == "right" else "right_ankle"
+        back_ankle_name = "left_ankle" if target_side == "left" else "right_ankle"
         back_ankle = _get_joint(skel, back_ankle_name)
         front_shoulder = _get_joint(skel, limbs["shoulder"])
         pelvis = _pelvis_center(skel)
         if front_ankle is None or back_ankle is None or front_shoulder is None or pelvis is None:
             continue
-        shoulder_width = abs(float(front_shoulder[0] - pelvis[0])) * 2.0
+        shoulder_width = abs(float(front_shoulder[0] - pelvis[0])) * 2.5
         if shoulder_width < 10.0:
             continue
         step_width = abs(float(front_ankle[0] - back_ankle[0]))
@@ -488,7 +488,7 @@ def _metric_center_of_mass(
     limbs = FRONT_LIMBS[target_side]
     for skel in skeletons:
         front_ankle = _get_joint(skel, limbs["ankle"])
-        back_ankle_name = "left_ankle" if target_side == "right" else "right_ankle"
+        back_ankle_name = "left_ankle" if target_side == "left" else "right_ankle"
         back_ankle = _get_joint(skel, back_ankle_name)
         pelvis = _pelvis_center(skel)
         if front_ankle is None or back_ankle is None or pelvis is None:

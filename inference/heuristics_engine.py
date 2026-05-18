@@ -197,7 +197,7 @@ class HeuristicsEngine:
             return None
 
         delta_y = max(pelvis_ys) - min(pelvis_ys)
-        if delta_y > 0.1 * bbox_height:
+        if delta_y > 0.25 * bbox_height:
             return {"error_key": "bounce_excessive"}
         return None
 
@@ -326,7 +326,7 @@ class HeuristicsEngine:
         avg_angle = float(np.mean(angles))
         # A proper en-garde has front knee ~120-140°.  > 160° means
         # the fencer is basically standing upright.
-        if avg_angle > 160.0:
+        if avg_angle > 170.0:
             return {"error_key": "stance_too_high"}
         return None
 
@@ -435,17 +435,17 @@ class HeuristicsEngine:
         
         for skel in skeletons:
             front_ankle = _get_joint(skel, limbs["ankle"])
-            back_ankle_name = "left_ankle" if self.target_side == "right" else "right_ankle"
+            back_ankle_name = "left_ankle" if self.target_side == "left" else "right_ankle"
             back_ankle = _get_joint(skel, back_ankle_name)
             
             front_shoulder = _get_joint(skel, limbs["shoulder"])
             pelvis = _pelvis_center(skel)
-            
             if front_ankle is None or back_ankle is None or front_shoulder is None or pelvis is None:
                 continue
                 
-            # Proxy for shoulder width: distance from front shoulder to pelvis center * 2
-            shoulder_width = abs(front_shoulder[0] - pelvis[0]) * 1.3
+            # Proxy for shoulder width: distance from front shoulder to pelvis center * 1.3
+            shoulder_width = abs(front_shoulder[0] - pelvis[0]) * 2.5
+            
             if shoulder_width < 10.0:
                 continue
                 
@@ -472,7 +472,7 @@ class HeuristicsEngine:
         
         for skel in skeletons:
             front_ankle = _get_joint(skel, limbs["ankle"])
-            back_ankle_name = "left_ankle" if self.target_side == "right" else "right_ankle"
+            back_ankle_name = "left_ankle" if self.target_side == "left" else "right_ankle"
             back_ankle = _get_joint(skel, back_ankle_name)
             pelvis = _pelvis_center(skel)
             
@@ -500,5 +500,3 @@ class HeuristicsEngine:
                 return {"error_key": "center_of_mass_leaning_backward"}
                 
         return None
-
-    
