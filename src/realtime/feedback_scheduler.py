@@ -19,18 +19,17 @@ _DEFAULT_PLAYBOOK_PATH = _REPO_ROOT / "coach_playbook.json"
 
 
 DEFAULT_ERROR_WEIGHTS: Dict[str, float] = {
-    "foot_before_hand": 10.0,
+    "foot_before_hand": 5.0,
     "lunge_overextension": 9.5,
-    "incomplete_arm_extension": 8.0,
-    "guard_dropped": 7.5,
-    "stance_too_high": 7.0,
+    "incomplete_arm_extension": 9.0,
+    "guard_dropped": 9.7,
+    "stance_too_high": 10.0,
     "bounce_excessive": 6.5,
     "center_of_mass_in_front": 6.0,
     "center_of_mass_leaning_backward": 6.0,
-    "pumping_the_arm": 5.5,
     "over_parrying": 5.0,
     "wide_step": 4.0,
-    "narrow_step": 4.0,
+    "narrow_step": 9.0,
     "wide_disengage": 4.0,
 }
 

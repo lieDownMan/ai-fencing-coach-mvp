@@ -103,13 +103,6 @@ HEURISTIC_NOTES = {
         "threshold": "arm_angle < 155 deg",
         "joints": "front_shoulder, front_elbow, front_wrist",
     },
-    "pumping_the_arm": {
-        "title": "pumping_the_arm",
-        "values": "overall wrist travel direction, minimum early wrist retraction",
-        "primary": "early_min_retract",
-        "threshold": "early_wrist_retraction < -8 px",
-        "joints": "front_wrist",
-    },
     "over_parrying": {
         "title": "over_parrying",
         "values": "front wrist horizontal sweep, shoulder-width body reference, ratio",

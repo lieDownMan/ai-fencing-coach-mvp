@@ -1,6 +1,7 @@
 import json
 import os
 import cv2
+import numpy as np
 import uvicorn
 from html import escape
 from pathlib import Path
@@ -556,7 +557,8 @@ def generate_frames():
         if not cap.isOpened():
             print(f"Error: Cannot open video source {source}")
             # Yield a blank frame or error frame
-            blank = cv2.imencode('.jpg', cv2.resize(cv2.imread("web_outputs/placeholder.png") if os.path.exists("web_outputs/placeholder.png") else cv2.UMat(480, 640, cv2.CV_8UC3, (0, 0, 255))), [cv2.IMWRITE_JPEG_QUALITY, 50])[1].tobytes()
+            img = cv2.imread("web_outputs/placeholder.png") if os.path.exists("web_outputs/placeholder.png") else np.zeros((480, 640, 3), dtype=np.uint8)
+            blank = cv2.imencode('.jpg', cv2.resize(img, (640, 480)), [cv2.IMWRITE_JPEG_QUALITY, 50])[1].tobytes()
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + blank + b'\r\n')
             return

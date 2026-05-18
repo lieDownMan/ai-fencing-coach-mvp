@@ -15,7 +15,6 @@ HEURISTIC_KEYS = [
     "foot_before_hand",
     "stance_too_high",
     "incomplete_arm_extension",
-    "pumping_the_arm",
     "over_parrying",
     "wide_step",
     "narrow_step",
@@ -71,8 +70,6 @@ def compute_heuristic_metric(
         return _metric_stance_too_high(skeletons, target_side)
     if heuristic_key == "incomplete_arm_extension":
         return _metric_incomplete_arm_extension(skeletons, target_side)
-    if heuristic_key == "pumping_the_arm":
-        return _metric_pumping_the_arm(skeletons, target_side)
     if heuristic_key == "over_parrying":
         return _metric_over_parrying(skeletons, target_side)
     if heuristic_key in {"wide_step", "narrow_step"}:
@@ -409,35 +406,6 @@ def _metric_incomplete_arm_extension(
         angle,
         "arm_angle_at_peak_extension < 155 deg",
         {"arm_angle": angle, "wrist_disp": max_disp, "peak_index": peak_index},
-    )
-
-
-def _metric_pumping_the_arm(skeletons: List[Dict[str, Any]], target_side: str) -> HeuristicMetric:
-    limbs = FRONT_LIMBS[target_side]
-    if len(skeletons) < 6:
-        return _empty_metric("pumping_the_arm", "need >=6 frames")
-    first = _get_joint(skeletons[0], limbs["wrist"])
-    last = _get_joint(skeletons[-1], limbs["wrist"])
-    if first is None or last is None:
-        return _empty_metric("pumping_the_arm", "missing wrist")
-    overall_dx = float(last[0] - first[0])
-    if abs(overall_dx) < 10:
-        return _empty_metric("pumping_the_arm", "overall wrist dx < 10")
-
-    attack_dir = 1.0 if overall_dx > 0 else -1.0
-    early_end = max(2, len(skeletons) // 3)
-    min_retract = 0.0
-    for skel in skeletons[:early_end]:
-        wrist = _get_joint(skel, limbs["wrist"])
-        if wrist is not None:
-            dx = float(wrist[0] - first[0]) * attack_dir
-            min_retract = min(min_retract, dx)
-    return HeuristicMetric(
-        "pumping_the_arm",
-        min_retract < -8.0,
-        min_retract,
-        "early_wrist_retraction < -8 px",
-        {"overall_dx": overall_dx, "early_min_retract": min_retract, "early_frames": early_end},
     )
 
 
