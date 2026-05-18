@@ -1,6 +1,7 @@
 import json
 import os
 import cv2
+import numpy as np
 import uvicorn
 from html import escape
 from pathlib import Path
@@ -9,7 +10,13 @@ from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from pydantic import BaseModel
 
 from inference.heuristic_debug import HEURISTIC_KEYS, compute_heuristic_metric, format_metrics, format_value
-from src.realtime.feedback_scheduler import DEFAULT_ERROR_WEIGHTS, normalize_error_keys
+from inference.heuristics_engine import FRONT_LIMBS, _get_joint, _pelvis_center
+from src.realtime.feedback_scheduler import (
+    DEFAULT_ERROR_WEIGHTS,
+    filter_error_keys_for_mode,
+    normalize_error_keys,
+    supported_modes_for_error_key,
+)
 from src.realtime.realtime_app import LiveVideoPipeline
 
 app = FastAPI()
@@ -391,12 +398,28 @@ HTML_PAGE = """
         }
 
         function checkedValues(name) {
-            return Array.from(document.querySelectorAll(`input[name="${name}"]:checked`)).map(input => input.value);
+            return Array.from(document.querySelectorAll(`input[name="${name}"]:checked:not(:disabled)`)).map(input => input.value);
         }
 
         function clearFeedbackChecks(name) {
             document.querySelectorAll(`input[name="${name}"]`).forEach(input => {
                 input.checked = false;
+            });
+        }
+
+        function syncFeedbackOptionsForMode() {
+            const mode = document.getElementById('training_mode').value;
+            document.querySelectorAll('.error-option[data-modes]').forEach(label => {
+                const modes = (label.dataset.modes || '').split('|').filter(Boolean);
+                const enabled = modes.includes(mode);
+                const input = label.querySelector('input[type="checkbox"]');
+                if (input) {
+                    input.disabled = !enabled;
+                    if (!enabled) {
+                        input.checked = false;
+                    }
+                }
+                label.style.display = enabled ? 'flex' : 'none';
             });
         }
 
@@ -415,6 +438,8 @@ HTML_PAGE = """
                 }
             });
         });
+        document.getElementById('training_mode').addEventListener('change', syncFeedbackOptionsForMode);
+        syncFeedbackOptionsForMode();
 
         // Poll the server for pipeline status every 200ms
         setInterval(async () => {
@@ -556,7 +581,8 @@ def generate_frames():
         if not cap.isOpened():
             print(f"Error: Cannot open video source {source}")
             # Yield a blank frame or error frame
-            blank = cv2.imencode('.jpg', cv2.resize(cv2.imread("web_outputs/placeholder.png") if os.path.exists("web_outputs/placeholder.png") else cv2.UMat(480, 640, cv2.CV_8UC3, (0, 0, 255))), [cv2.IMWRITE_JPEG_QUALITY, 50])[1].tobytes()
+            img = cv2.imread("web_outputs/placeholder.png") if os.path.exists("web_outputs/placeholder.png") else np.zeros((480, 640, 3), dtype=np.uint8)
+            blank = cv2.imencode('.jpg', cv2.resize(img, (640, 480)), [cv2.IMWRITE_JPEG_QUALITY, 50])[1].tobytes()
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + blank + b'\r\n')
             return
@@ -592,6 +618,30 @@ def generate_frames():
         # AI Processing (Tell pipeline NOT to draw HUD text on the frame)
         out_frame = pipeline.process_frame(frame, draw_hud=False)
         
+        # Draw shoulder and step width directly on the frame
+        if len(pipeline.raw_skeletons) > 0:
+            latest_skel = pipeline.raw_skeletons[-1]
+            if latest_skel:
+                limbs = FRONT_LIMBS.get(TARGET_SIDE)
+                if limbs:
+                    front_ankle = _get_joint(latest_skel, limbs["ankle"])
+                    back_ankle_name = "left_ankle" if TARGET_SIDE == "left" else "right_ankle"
+                    back_ankle = _get_joint(latest_skel, back_ankle_name)
+                    front_shoulder = _get_joint(latest_skel, limbs["shoulder"])
+                    pelvis = _pelvis_center(latest_skel)
+                    
+                    if front_ankle is not None and back_ankle is not None and front_shoulder is not None and pelvis is not None:
+                        # Using 2.5 as you specified in heuristics_engine.py
+                        shoulder_width = abs(float(front_shoulder[0] - pelvis[0])) * 2.5
+                        step_width = abs(float(front_ankle[0] - back_ankle[0]))
+                        ratio = step_width / shoulder_width if shoulder_width > 0 else 0.0
+                        
+                        text = f"Shoulder W: {shoulder_width:.1f} | Step W: {step_width:.1f} | Ratio: {ratio:.2f}"
+                        cv2.putText(out_frame, text, (20, out_frame.shape[0] - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+                        
+                        text2 = f"Front Ankle: {front_ankle[0]:.1f} | Back Ankle: {back_ankle[0]:.1f}"
+                        cv2.putText(out_frame, text2, (20, out_frame.shape[0] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+        
         # Encode as JPEG
         ret, buffer = cv2.imencode('.jpg', out_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
         if not ret:
@@ -619,11 +669,17 @@ def _feedback_error_label(error_key: str) -> str:
 
 def _feedback_error_checkboxes_html(group_name: str, selected_keys) -> str:
     selected = set(selected_keys or [])
-    choices = sorted(DEFAULT_ERROR_WEIGHTS.keys())
+    choices = [
+        key for key in sorted(DEFAULT_ERROR_WEIGHTS.keys())
+        if supported_modes_for_error_key(key)
+    ]
     return "\n".join(
         "\n".join(
             [
-                '<label class="error-option">',
+                (
+                    '<label class="error-option" '
+                    f'data-modes="{escape("|".join(supported_modes_for_error_key(choice)))}">'
+                ),
                 (
                     f'<input type="checkbox" name="{escape(group_name)}" '
                     f'value="{escape(choice)}" {"checked" if choice in selected else ""}>'
@@ -770,14 +826,18 @@ def update_config(config: ConfigUpdate):
     DEBUG_ENABLED = bool(config.debug_enabled)
     DEBUG_HEURISTIC = config.debug_heuristic if config.debug_heuristic in ["all"] + HEURISTIC_KEYS else "all"
     DEBUG_WINDOW_SIZE = max(5, min(90, int(config.debug_window_size)))
-    valid_errors = set(DEFAULT_ERROR_WEIGHTS.keys())
-    FEEDBACK_FOCUS_ERRORS = [
-        key for key in normalize_error_keys(config.focus_errors)
-        if key in valid_errors
-    ]
+    FEEDBACK_FOCUS_ERRORS, _ = filter_error_keys_for_mode(
+        normalize_error_keys(config.focus_errors),
+        TRAINING_MODE,
+    )
+    FEEDBACK_MUTE_ERRORS, _ = filter_error_keys_for_mode(
+        normalize_error_keys(config.mute_errors),
+        TRAINING_MODE,
+    )
+    focus_set = set(FEEDBACK_FOCUS_ERRORS)
     FEEDBACK_MUTE_ERRORS = [
-        key for key in normalize_error_keys(config.mute_errors)
-        if key in valid_errors
+        key for key in FEEDBACK_MUTE_ERRORS
+        if key not in focus_set
     ]
     FEEDBACK_ONLY_SELECTED = bool(config.only_selected)
     

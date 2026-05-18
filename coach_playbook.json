@@ -41,12 +41,7 @@
         "short_cue": "換側小一點！用手指頭控制劍尖，不要動到整支手臂和手肘！",
         "practice": "重複換側練習"
     },
-    "pumping_the_arm": {
-        "error_name": "進攻前縮一拍",
-        "diagnosis": "攻擊前把手往回縮，這個「預備動作」會讓對手很好做反攻（counter attack）",
-        "short_cue": "進攻不要縮一拍才刺！手直接往前伸。",
-        "practice": "重複長刺（lunge）練習"
-    },
+    
     "incomplete_arm_extension": {
         "error_name": "刺的時候手沒有伸直",
         "diagnosis": "手臂沒有完全伸直會讓你平白損失攻擊距離，導致原本能擊中的攻擊落空。",

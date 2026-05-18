@@ -12,7 +12,11 @@ from inference.heuristics_engine import HeuristicsEngine
 from inference.target_tracker import TargetTracker
 from src.pose_estimation import PoseEstimator
 from src.preprocessing import SpatialNormalizer
-from src.realtime.feedback_scheduler import FeedbackDecision, FeedbackScheduler
+from src.realtime.feedback_scheduler import (
+    FeedbackDecision,
+    FeedbackScheduler,
+    filter_error_keys_for_mode,
+)
 from src.realtime.realtime_voice_coach import RealtimeVoiceCoach
 
 logging.basicConfig(level=logging.INFO)
@@ -170,6 +174,7 @@ class LiveVideoPipeline:
             mute_errors=mute_errors,
             only_errors=only_errors,
             only_selected=only_selected,
+            training_mode=training_mode,
         )
         
     def _pixel_to_xyn(self, skeleton: dict, frame_h: int, frame_w: int) -> dict:
@@ -313,6 +318,18 @@ if __name__ == "__main__":
             return []
         return [item.strip() for item in value.split(",") if item.strip()]
 
+    def _filter_error_arg(label, value, training_mode):
+        allowed, rejected = filter_error_keys_for_mode(
+            _split_error_keys(value),
+            training_mode,
+        )
+        if rejected:
+            print(
+                f"[WARN] Ignoring {label} not supported in {training_mode}: "
+                f"{', '.join(rejected)}"
+            )
+        return allowed
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", default="0", help="Camera source index (0) or video path")
     parser.add_argument("--mode", default="Free Bouting", choices=["Footwork", "Target Practice", "Free Bouting"])
@@ -345,9 +362,9 @@ if __name__ == "__main__":
         pose_model=args.pose_model,
         pose_backend=args.pose_backend,
         voice_enabled=not args.no_voice,
-        focus_errors=_split_error_keys(args.focus_errors),
-        mute_errors=_split_error_keys(args.mute_errors),
-        only_errors=_split_error_keys(args.only_errors),
+        focus_errors=_filter_error_arg("focus errors", args.focus_errors, args.mode),
+        mute_errors=_filter_error_arg("mute errors", args.mute_errors, args.mode),
+        only_errors=_filter_error_arg("only errors", args.only_errors, args.mode),
     )
     print("=======================================")
     print(" Live AI Fencing Coach Started!")

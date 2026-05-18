@@ -9,7 +9,7 @@ the appropriate representation.
 Detectable keys (via skeleton geometry):
     bounce_excessive, lunge_overextension, guard_dropped,
     foot_before_hand, stance_too_high, incomplete_arm_extension,
-    pumping_the_arm, over_parrying, wide_step, narrow_step,
+    over_parrying, wide_step, narrow_step,
     center_of_mass_in_front, center_of_mass_leaning_backward
 
 Keys reserved for future detection (require sword-tip / multi-segment):
@@ -151,11 +151,7 @@ class HeuristicsEngine:
         # --- Guard Dropped (all modes, tolerance varies) ---
         self._try_append(triggered, self._check_guard(skeletons))
 
-        # --- Pumping the arm (Mode B/C, offensive) ---
-        if self.training_mode in ["Target Practice", "Free Bouting"] and is_offensive:
-            self._try_append(triggered, self._check_pumping_the_arm(skeletons))
-
-
+       
         # --- Stance too high + Bounce (en-garde check, all modes, neutral) ---
         if self.training_mode != "Footwork" and action in ["SF", "SB"]:
             self._try_append(triggered, self._check_stance_too_high(skeletons))
@@ -201,7 +197,7 @@ class HeuristicsEngine:
             return None
 
         delta_y = max(pelvis_ys) - min(pelvis_ys)
-        if delta_y > 0.1 * bbox_height:
+        if delta_y > 0.25 * bbox_height:
             return {"error_key": "bounce_excessive"}
         return None
 
@@ -330,7 +326,7 @@ class HeuristicsEngine:
         avg_angle = float(np.mean(angles))
         # A proper en-garde has front knee ~120-140°.  > 160° means
         # the fencer is basically standing upright.
-        if avg_angle > 160.0:
+        if avg_angle > 170.0:
             return {"error_key": "stance_too_high"}
         return None
 
@@ -370,48 +366,6 @@ class HeuristicsEngine:
         arm_angle = calc_angle(shoulder, elbow, wrist)
         if arm_angle < 155.0:
             return {"error_key": "incomplete_arm_extension"}
-        return None
-
-    # ------------------------------------------------------------------
-    # Rule 7: pumping_the_arm — 進攻前縮一拍
-    # Trigger: Target Practice / Free Bouting, R/JS/WW/IS
-    # Logic:  In the first third of the action window, check if the
-    #         wrist moves *backward* (away from opponent) before moving
-    #         forward.  A backward-then-forward pattern is "pumping".
-    # ------------------------------------------------------------------
-
-    def _check_pumping_the_arm(
-        self, skeletons: List[Dict[str, Any]]
-    ) -> Optional[Dict[str, Any]]:
-        limbs = FRONT_LIMBS[self.target_side]
-        if len(skeletons) < 6:
-            return None
-
-        # Determine attack direction from overall wrist movement
-        first_wrist = _get_joint(skeletons[0], limbs["wrist"])
-        last_wrist = _get_joint(skeletons[-1], limbs["wrist"])
-        if first_wrist is None or last_wrist is None:
-            return None
-
-        # attack_dir: +1 if attacking rightward, -1 if leftward
-        overall_dx = float(last_wrist[0] - first_wrist[0])
-        if abs(overall_dx) < 10:
-            return None  # negligible movement, can't tell direction
-        attack_dir = 1.0 if overall_dx > 0 else -1.0
-
-        # Check the first third: did the wrist move backward first?
-        early_end = max(2, len(skeletons) // 3)
-        min_retract = 0.0
-        for skel in skeletons[:early_end]:
-            wrist = _get_joint(skel, limbs["wrist"])
-            if wrist is not None:
-                dx = float(wrist[0] - first_wrist[0]) * attack_dir
-                if dx < min_retract:
-                    min_retract = dx
-
-        # If wrist retreated > 8px opposite to attack direction early on
-        if min_retract < -8.0:
-            return {"error_key": "pumping_the_arm"}
         return None
 
     # ------------------------------------------------------------------
@@ -481,17 +435,17 @@ class HeuristicsEngine:
         
         for skel in skeletons:
             front_ankle = _get_joint(skel, limbs["ankle"])
-            back_ankle_name = "left_ankle" if self.target_side == "right" else "right_ankle"
+            back_ankle_name = "left_ankle" if self.target_side == "left" else "right_ankle"
             back_ankle = _get_joint(skel, back_ankle_name)
             
             front_shoulder = _get_joint(skel, limbs["shoulder"])
             pelvis = _pelvis_center(skel)
-            
             if front_ankle is None or back_ankle is None or front_shoulder is None or pelvis is None:
                 continue
                 
-            # Proxy for shoulder width: distance from front shoulder to pelvis center * 2
-            shoulder_width = abs(front_shoulder[0] - pelvis[0]) * 2.0
+            # Proxy for shoulder width: distance from front shoulder to pelvis center * 1.3
+            shoulder_width = abs(front_shoulder[0] - pelvis[0]) * 2.5
+            
             if shoulder_width < 10.0:
                 continue
                 
@@ -518,7 +472,7 @@ class HeuristicsEngine:
         
         for skel in skeletons:
             front_ankle = _get_joint(skel, limbs["ankle"])
-            back_ankle_name = "left_ankle" if self.target_side == "right" else "right_ankle"
+            back_ankle_name = "left_ankle" if self.target_side == "left" else "right_ankle"
             back_ankle = _get_joint(skel, back_ankle_name)
             pelvis = _pelvis_center(skel)
             

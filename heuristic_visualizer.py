@@ -103,13 +103,6 @@ HEURISTIC_NOTES = {
         "threshold": "arm_angle < 155 deg",
         "joints": "front_shoulder, front_elbow, front_wrist",
     },
-    "pumping_the_arm": {
-        "title": "pumping_the_arm",
-        "values": "overall wrist travel direction, minimum early wrist retraction",
-        "primary": "early_min_retract",
-        "threshold": "early_wrist_retraction < -8 px",
-        "joints": "front_wrist",
-    },
     "over_parrying": {
         "title": "over_parrying",
         "values": "front wrist horizontal sweep, shoulder-width body reference, ratio",
@@ -884,7 +877,7 @@ def _pick_gradio_port(default_port: int) -> int:
     return default_port
 
 
-with gr.Blocks(title="Fencing Heuristic Visualizer") as app:
+with gr.Blocks(title="Fencing Heuristic Visualizer", css=DEBUG_CSS) as app:
     gr.Markdown("# Fencing Heuristic Visualizer")
     with gr.Row():
         with gr.Column(scale=1):
@@ -971,5 +964,4 @@ if __name__ == "__main__":
         server_port=port,
         share=os.getenv("GRADIO_SHARE", "0") == "1",
         allowed_paths=[str(_OUTPUT_DIR), str(_UPLOAD_DIR), str(_LOG_DIR), str(_GRADIO_TEMP_DIR)],
-        css=DEBUG_CSS,
     )

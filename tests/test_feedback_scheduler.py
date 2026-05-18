@@ -1,4 +1,8 @@
-from src.realtime.feedback_scheduler import FeedbackScheduler
+from src.realtime.feedback_scheduler import (
+    FeedbackScheduler,
+    available_error_keys_for_mode,
+    build_feedback_preferences,
+)
 
 
 PLAYBOOK = {
@@ -90,3 +94,32 @@ def test_only_selected_limits_feedback_to_focus_list():
 
     assert decision.voice_error_key == "minor"
     assert [item.error_key for item in decision.visual_items] == ["minor"]
+
+
+def test_mode_availability_excludes_unimplemented_future_errors():
+    footwork_errors = available_error_keys_for_mode("Footwork")
+
+    assert "stance_too_high" in footwork_errors
+    assert "wide_disengage" not in footwork_errors
+
+
+def test_mode_preferences_reject_unavailable_errors():
+    preferences = build_feedback_preferences(
+        focus_errors=["lunge_overextension", "stance_too_high"],
+        mute_errors=["foot_before_hand"],
+        training_mode="Footwork",
+    )
+
+    assert preferences.focus_errors == ("stance_too_high",)
+    assert preferences.mute_errors == ()
+    assert preferences.allows("stance_too_high") is True
+    assert preferences.allows("lunge_overextension") is False
+
+
+def test_scheduler_filters_active_errors_by_training_mode():
+    scheduler = _scheduler(training_mode="Footwork")
+
+    decision = scheduler.update(["lunge_overextension", "stance_too_high"], now=0.0)
+
+    assert decision.voice_error_key == "stance_too_high"
+    assert [item.error_key for item in decision.visual_items] == ["stance_too_high"]

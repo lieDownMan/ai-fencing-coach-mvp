@@ -19,20 +19,123 @@ _DEFAULT_PLAYBOOK_PATH = _REPO_ROOT / "coach_playbook.json"
 
 
 DEFAULT_ERROR_WEIGHTS: Dict[str, float] = {
-    "foot_before_hand": 10.0,
+    "foot_before_hand": 5.0,
     "lunge_overextension": 9.5,
-    "incomplete_arm_extension": 8.0,
-    "guard_dropped": 7.5,
-    "stance_too_high": 7.0,
+    "incomplete_arm_extension": 9.0,
+    "guard_dropped": 9.7,
+    "stance_too_high": 10.0,
     "bounce_excessive": 6.5,
     "center_of_mass_in_front": 6.0,
     "center_of_mass_leaning_backward": 6.0,
-    "pumping_the_arm": 5.5,
     "over_parrying": 5.0,
     "wide_step": 4.0,
-    "narrow_step": 4.0,
+    "narrow_step": 9.0,
     "wide_disengage": 4.0,
 }
+
+TRAINING_MODES: tuple[str, ...] = ("Footwork", "Target Practice", "Free Bouting")
+
+# Present in the playbook/weights but not emitted by the current heuristic engine.
+FUTURE_ERROR_KEYS: set[str] = {"wide_disengage"}
+
+# Mode-level availability mirrors HeuristicsEngine._check_rules. This is less
+# strict than action-level gating because the UI cannot know the next action.
+ERROR_AVAILABILITY_BY_MODE: Dict[str, set[str]] = {
+    "Footwork": {
+        "guard_dropped",
+        "bounce_excessive",
+        "stance_too_high",
+        "wide_step",
+        "narrow_step",
+        "center_of_mass_in_front",
+        "center_of_mass_leaning_backward",
+        "over_parrying",
+    },
+    "Target Practice": {
+        "guard_dropped",
+        "lunge_overextension",
+        "foot_before_hand",
+        "incomplete_arm_extension",
+        "bounce_excessive",
+        "stance_too_high",
+        "wide_step",
+        "narrow_step",
+        "center_of_mass_in_front",
+        "center_of_mass_leaning_backward",
+        "over_parrying",
+    },
+    "Free Bouting": {
+        "guard_dropped",
+        "bounce_excessive",
+        "stance_too_high",
+        "wide_step",
+        "narrow_step",
+        "center_of_mass_in_front",
+        "center_of_mass_leaning_backward",
+        "over_parrying",
+    },
+}
+
+
+def available_error_keys_for_mode(
+    training_mode: Optional[str] = None,
+    *,
+    include_future: bool = False,
+) -> List[str]:
+    """Return error keys that can be emitted in the selected training mode."""
+    if training_mode in ERROR_AVAILABILITY_BY_MODE:
+        keys = set(ERROR_AVAILABILITY_BY_MODE[str(training_mode)])
+    else:
+        keys = set(DEFAULT_ERROR_WEIGHTS.keys())
+
+    if include_future:
+        keys.update(FUTURE_ERROR_KEYS)
+    else:
+        keys.difference_update(FUTURE_ERROR_KEYS)
+
+    return sorted(key for key in keys if key in DEFAULT_ERROR_WEIGHTS)
+
+
+def supported_modes_for_error_key(
+    error_key: str,
+    *,
+    include_future: bool = False,
+) -> List[str]:
+    """Return training modes where an error can be configured."""
+    modes = [
+        mode for mode in TRAINING_MODES
+        if error_key in available_error_keys_for_mode(mode, include_future=include_future)
+    ]
+    if include_future and error_key in FUTURE_ERROR_KEYS:
+        return list(TRAINING_MODES)
+    return modes
+
+
+def is_error_available_for_mode(
+    error_key: str,
+    training_mode: Optional[str] = None,
+    *,
+    include_future: bool = False,
+) -> bool:
+    return error_key in set(
+        available_error_keys_for_mode(training_mode, include_future=include_future)
+    )
+
+
+def filter_error_keys_for_mode(
+    keys: Optional[Iterable[str]],
+    training_mode: Optional[str] = None,
+    *,
+    include_future: bool = False,
+) -> tuple[List[str], List[str]]:
+    """Split requested error keys into allowed and rejected lists."""
+    normalized = normalize_error_keys(keys)
+    allowed_set = set(
+        available_error_keys_for_mode(training_mode, include_future=include_future)
+    )
+    allowed = [key for key in normalized if key in allowed_set]
+    rejected = [key for key in normalized if key not in allowed_set]
+    return allowed, rejected
 
 
 def normalize_error_keys(keys: Optional[Iterable[str]]) -> List[str]:
@@ -58,6 +161,7 @@ class FeedbackPreferences:
     mute_errors: tuple[str, ...] = field(default_factory=tuple)
     only_errors: tuple[str, ...] = field(default_factory=tuple)
     focus_boost: float = 4.0
+    training_mode: Optional[str] = None
 
     @classmethod
     def build(
@@ -68,11 +172,21 @@ class FeedbackPreferences:
         only_errors: Optional[Iterable[str]] = None,
         only_selected: bool = False,
         focus_boost: float = 4.0,
+        training_mode: Optional[str] = None,
     ) -> "FeedbackPreferences":
-        focus = tuple(normalize_error_keys(focus_errors))
-        mute = tuple(normalize_error_keys(mute_errors))
+        if training_mode is not None:
+            focus = tuple(filter_error_keys_for_mode(focus_errors, training_mode)[0])
+            mute = tuple(filter_error_keys_for_mode(mute_errors, training_mode)[0])
+        else:
+            focus = tuple(normalize_error_keys(focus_errors))
+            mute = tuple(normalize_error_keys(mute_errors))
+
         only_source = focus if only_selected and focus else only_errors
-        only = tuple(normalize_error_keys(only_source))
+        if training_mode is not None:
+            only = tuple(filter_error_keys_for_mode(only_source, training_mode)[0])
+        else:
+            only = tuple(normalize_error_keys(only_source))
+
         focus = tuple(key for key in focus if key not in mute)
         only = tuple(key for key in only if key not in mute)
         return cls(
@@ -80,6 +194,7 @@ class FeedbackPreferences:
             mute_errors=mute,
             only_errors=only,
             focus_boost=float(focus_boost),
+            training_mode=training_mode,
         )
 
     @property
@@ -99,6 +214,8 @@ class FeedbackPreferences:
         return bool(self.focus_errors or self.mute_errors or self.only_errors)
 
     def allows(self, error_key: str) -> bool:
+        if self.training_mode is not None and not is_error_available_for_mode(error_key, self.training_mode):
+            return False
         if error_key in self.mute_set:
             return False
         only = self.only_set
@@ -115,6 +232,7 @@ def build_feedback_preferences(
     only_errors: Optional[Iterable[str]] = None,
     only_selected: bool = False,
     focus_boost: float = 4.0,
+    training_mode: Optional[str] = None,
 ) -> FeedbackPreferences:
     return FeedbackPreferences.build(
         focus_errors=focus_errors,
@@ -122,6 +240,7 @@ def build_feedback_preferences(
         only_errors=only_errors,
         only_selected=only_selected,
         focus_boost=focus_boost,
+        training_mode=training_mode,
     )
 
 
@@ -252,6 +371,7 @@ class FeedbackScheduler:
         only_errors: Optional[Iterable[str]] = None,
         only_selected: bool = False,
         focus_boost: float = 4.0,
+        training_mode: Optional[str] = None,
     ) -> None:
         self.playbook = dict(playbook) if playbook is not None else self._load_playbook(playbook_path)
         self.weights = dict(DEFAULT_ERROR_WEIGHTS)
@@ -273,6 +393,7 @@ class FeedbackScheduler:
             only_errors=only_errors,
             only_selected=only_selected,
             focus_boost=focus_boost,
+            training_mode=training_mode,
         )
 
         self._states: Dict[str, _FeedbackState] = {}
@@ -370,14 +491,17 @@ class FeedbackScheduler:
         only_errors: Optional[Iterable[str]] = None,
         only_selected: bool = False,
         focus_boost: Optional[float] = None,
+        training_mode: Optional[str] = None,
         reset_queue: bool = True,
     ) -> None:
+        next_training_mode = self.preferences.training_mode if training_mode is None else training_mode
         self.preferences = build_feedback_preferences(
             focus_errors=focus_errors,
             mute_errors=mute_errors,
             only_errors=only_errors,
             only_selected=only_selected,
             focus_boost=self.preferences.focus_boost if focus_boost is None else focus_boost,
+            training_mode=next_training_mode,
         )
         self._purge_disabled_states()
         if reset_queue:

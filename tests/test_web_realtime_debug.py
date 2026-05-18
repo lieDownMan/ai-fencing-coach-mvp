@@ -28,3 +28,10 @@ def test_feedback_error_options_include_known_errors():
     assert 'name="focus_errors"' in html
     assert 'value="stance_too_high" checked' in html
     assert 'value="guard_dropped"' in html
+
+
+def test_feedback_error_options_include_mode_metadata_and_hide_future_errors():
+    html = web_realtime._feedback_error_checkboxes_html("focus_errors", [])
+
+    assert 'data-modes="Footwork|Target Practice|Free Bouting"' in html
+    assert 'value="wide_disengage"' not in html
