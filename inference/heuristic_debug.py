@@ -146,6 +146,77 @@ def build_debug_events(
     return rows
 
 
+def build_frame_debug_events(
+    report: Dict[str, Any],
+    heuristic_key: str,
+    target_side: str,
+    training_mode: str,
+    fps: float,
+    window_size: int = 28,
+    frame_step: int = 1,
+) -> List[Dict[str, Any]]:
+    """Build one heuristic row per target frame using a rolling skeleton window."""
+    fps = fps or 30.0
+    window_size = max(1, int(window_size))
+    frame_step = max(1, int(frame_step))
+    skeleton_by_frame = _target_skeletons_by_frame(report)
+    frame_numbers = sorted(skeleton_by_frame)
+    if not frame_numbers:
+        return []
+
+    errors = report.get("posture_errors", [])
+    action_segments = report.get("action_segments", [])
+    keys = HEURISTIC_KEYS if heuristic_key == "all" else [heuristic_key]
+    rows: List[Dict[str, Any]] = []
+
+    for sample_index, frame_idx in enumerate(frame_numbers):
+        if sample_index % frame_step != 0:
+            continue
+        window_frames = frame_numbers[max(0, sample_index - window_size + 1):sample_index + 1]
+        window_skeletons = [skeleton_by_frame[i] for i in window_frames if skeleton_by_frame.get(i)]
+        if not window_skeletons:
+            continue
+
+        start = window_frames[0]
+        end = frame_idx
+        action = _action_for_frame(action_segments, frame_idx)
+
+        for key in keys:
+            metric = compute_heuristic_metric(
+                key,
+                window_skeletons,
+                target_side=target_side,
+                training_mode=training_mode,
+            )
+            alert_errors = [
+                err for err in errors
+                if err.get("error_key", err.get("error")) == key
+                and _error_overlaps_frame(err, frame_idx)
+            ]
+            metric_values = dict(metric.values)
+            metric_values["sample_count"] = len(window_skeletons)
+            metric_values["window_size"] = window_size
+            rows.append({
+                "frame_index": frame_idx,
+                "segment_index": "",
+                "heuristic": key,
+                "action": action,
+                "start_frame": start,
+                "end_frame": end,
+                "time": f"{frame_idx / fps:.2f}s",
+                "window": f"{start}-{end}",
+                "alert": bool(alert_errors),
+                "metric_triggered": metric.triggered,
+                "primary_value": metric.primary_value,
+                "threshold": metric.threshold,
+                "metric_values": metric_values,
+                "metrics": format_metrics(metric),
+                "alert_time": _alert_time(alert_errors, fps),
+            })
+
+    return rows
+
+
 def _empty_metric(heuristic_key: str, reason: str) -> HeuristicMetric:
     return HeuristicMetric(
         heuristic_key=heuristic_key,
@@ -488,6 +559,9 @@ def _target_skeletons_by_frame(report: Dict[str, Any]) -> Dict[int, Dict[str, An
         frame_index = frame.get("frame_index")
         if frame_index is None:
             continue
+        if frame.get("target_skeleton"):
+            result[int(frame_index)] = frame["target_skeleton"]
+            continue
         target = _target_detection(frame.get("tracks", []), locked_track_id)
         if target and target.get("skeleton"):
             result[int(frame_index)] = target["skeleton"]
@@ -519,6 +593,21 @@ def _error_overlaps_segment(
     err_start = int(err.get("start_frame", -1))
     err_end = int(err.get("end_frame", err_start))
     return err_start <= end and err_end >= start
+
+
+def _error_overlaps_frame(err: Dict[str, Any], frame_idx: int) -> bool:
+    err_start = int(err.get("start_frame", -1))
+    err_end = int(err.get("end_frame", err_start))
+    return err_start <= frame_idx <= err_end
+
+
+def _action_for_frame(action_segments: List[Dict[str, Any]], frame_idx: int) -> str:
+    for seg in action_segments:
+        start = int(seg.get("video_start_frame", seg.get("start_frame", -1)))
+        end = int(seg.get("video_end_frame", seg.get("end_frame", start)))
+        if start <= frame_idx <= end:
+            return seg.get("action", "")
+    return ""
 
 
 def _alert_time(errors: List[Dict[str, Any]], fps: float) -> str:
