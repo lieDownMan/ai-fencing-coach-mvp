@@ -2,7 +2,7 @@ import json
 import os
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 
@@ -43,8 +43,11 @@ class LLMAgent:
         return err.get("error_key") or err.get("error") or "unknown_error"
 
     def _aggregate_playbook_errors(
-        self, posture_errors: List[Dict]
+        self,
+        posture_errors: List[Dict],
+        focus_errors: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
+        focus_set = set(focus_errors or [])
         counts = Counter(self._error_key(err) for err in posture_errors)
         items = []
         for key, count in counts.items():
@@ -56,9 +59,17 @@ class LLMAgent:
                     "error_name": entry.get("error_name", key),
                     "diagnosis": entry.get("diagnosis", ""),
                     "short_cue": entry.get("short_cue", ""),
+                    "focused": key in focus_set,
                 }
             )
-        return sorted(items, key=lambda item: (-item["count"], item["error_name"]))
+        return sorted(
+            items,
+            key=lambda item: (
+                not item["focused"],
+                -item["count"],
+                item["error_name"],
+            ),
+        )
 
     @staticmethod
     def _format_playbook_block(playbook_errors: List[Dict[str, Any]]) -> str:
@@ -114,10 +125,11 @@ class LLMAgent:
         action_segments: List[Dict],
         posture_errors: List[Dict],
         use_llm: bool = True,
+        focus_errors: Optional[List[str]] = None,
     ) -> str:
         user = user or {}
         total_actions = len(action_segments)
-        playbook_errors = self._aggregate_playbook_errors(posture_errors)
+        playbook_errors = self._aggregate_playbook_errors(posture_errors, focus_errors)
 
         if not use_llm or not self.enabled:
             return self._generate_rule_based_summary(
@@ -137,6 +149,17 @@ class LLMAgent:
             f"height {user.get('height_cm', 180)}cm."
         )
         playbook_block = self._format_playbook_block(playbook_errors)
+        focus_line = ""
+        if focus_errors:
+            focused_names = []
+            for key in focus_errors:
+                entry = _PLAYBOOK.get(key, {})
+                focused_names.append(entry.get("error_name", key))
+            focus_line = (
+                "\n[USER FEEDBACK FOCUS]\n"
+                "The user chose to prioritize these problems in this review: "
+                f"{', '.join(focused_names)}.\n"
+            )
 
         prompt = f"""You are an elite, observant fencing coach. Your goal is to give a post-session summary based STRICTLY on objective biomechanical data extracted by our AI vision system. Do not invent errors or provide tactical advice that is not supported by the data.
 
@@ -156,6 +179,7 @@ Training Mode: {training_mode}
 [COACH PLAYBOOK CONTEXT]
 The following detected problems come from coach_playbook.json. Treat this as the source of truth for problem names, diagnoses, cue wording, and frequency:
 {playbook_block}
+{focus_line}
 
 [INSTRUCTIONS]
 Based on the stats and coach playbook context above, write a highly specific technical summary addressing the student directly.

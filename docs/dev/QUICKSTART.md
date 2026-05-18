@@ -43,6 +43,7 @@ Use this when you want:
 - save session history
 - generate annotated output
 - generate a playbook summary, optionally polished by Gemini
+- prioritize, mute, or limit which posture errors appear in the review
 
 Use the `Processing` selector in the UI:
 
@@ -70,6 +71,9 @@ python -m src.realtime.realtime_app --source 0 --target-side right
 python -m src.realtime.realtime_app --source 0 --pose-model yolov8n-pose.pt
 python -m src.realtime.realtime_app --source 0 --no-voice
 python -m src.realtime.realtime_app --source 0 --pose-backend mock --no-voice
+python -m src.realtime.realtime_app --source 0 --focus-errors stance_too_high,bounce_excessive
+python -m src.realtime.realtime_app --source 0 --mute-errors guard_dropped
+python -m src.realtime.realtime_app --source 0 --only-errors stance_too_high
 ```
 
 Use a local video file instead of a webcam:
@@ -83,6 +87,8 @@ This is the best option for:
 - local laptop webcam
 - local audio playback
 - direct real-time spoken cues
+- ranked feedback where voice speaks one selected cue and the HUD shows the top issues
+- optional focus/mute/only filters for the errors you want to train today
 
 Target selection now locks onto the first usable detection, not only frame 0.
 If ByteTrack's optional `lap` dependency is missing, the runtime falls back to
@@ -104,11 +110,14 @@ Use this when you want:
 - streaming analyzed frames
 - a web-based live demo
 - realtime heuristic metrics in a browser debug panel
+- browser controls for focused, muted, or only-selected feedback errors
 
 The page includes a heuristic debug panel. You can enable/disable it, choose a
 heuristic, tune the rolling window size, and reset the target lock from the
-browser. The camera source is still opened by the backend; for phone-camera
-setups such as DroidCam, put the DroidCam video URL in `Camera Source`.
+browser. It also includes feedback focus controls, so you can prioritize
+specific errors, mute noisy errors, or only show/speak focused errors. The
+camera source is still opened by the backend; for phone-camera setups such as
+DroidCam, put the DroidCam video URL in `Camera Source`.
 
 ## Heuristic Visualizer UI
 

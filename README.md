@@ -33,6 +33,7 @@ Use this when you want:
 - action table
 - session history
 - playbook-based summary, with optional Gemini wording
+- feedback focus controls for prioritizing, muting, or limiting shown errors
 
 ### 2. Local Live Webcam Coaching
 
@@ -45,6 +46,7 @@ Use this when you want:
 - direct webcam on the same machine
 - local OpenCV window
 - immediate spoken coaching cues through `pyttsx3`
+- ranked realtime feedback: one voice cue at a time, plus top on-screen issues
 
 This is the best choice for a **local laptop demo**.
 
@@ -54,6 +56,9 @@ Useful live flags:
 python -m src.realtime.realtime_app --source 0 --target-side right
 python -m src.realtime.realtime_app --source 0 --pose-model yolov8n-pose.pt
 python -m src.realtime.realtime_app --source 0 --no-voice
+python -m src.realtime.realtime_app --source 0 --focus-errors stance_too_high,bounce_excessive
+python -m src.realtime.realtime_app --source 0 --mute-errors guard_dropped
+python -m src.realtime.realtime_app --source 0 --only-errors stance_too_high
 ```
 
 ### 3. Browser Live Webcam Streaming
@@ -67,6 +72,7 @@ Use this when you want:
 - browser webcam streaming
 - live analyzed frames in a web page
 - realtime heuristic debug metrics in a browser panel
+- feedback focus/mute controls for live browser demos
 
 ### 4. Heuristic Visualizer
 

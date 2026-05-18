@@ -151,6 +151,13 @@ It maps machine-readable `error_key`s to:
 
 and uses `pyttsx3` for offline text-to-speech.
 
+Realtime feedback now runs through `src/realtime/feedback_scheduler.py`.
+The scheduler ranks active errors with base severity plus aging, speaks at most
+one eligible cue at a time, and exposes the top ranked items for the OpenCV HUD
+and browser status/UI. Users can now focus, mute, or exclusively show selected
+errors. In realtime this controls voice/HUD selection; in post-session review
+it controls the annotated video, warning table, and summary presentation.
+
 ### LLM summary
 
 - `llm_agent.py`

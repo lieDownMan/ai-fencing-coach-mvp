@@ -38,6 +38,11 @@ from inference.sliding_window import FullVideoPipeline
 from inference.video_annotator import VideoAnnotator
 from database import Database
 from llm_agent import LLMAgent
+from src.realtime.feedback_scheduler import (
+    build_feedback_preferences,
+    filter_posture_errors,
+    sort_posture_errors_for_feedback,
+)
 from src.realtime.realtime_voice_coach import RealtimeVoiceCoach
 import sqlite3
 
@@ -51,6 +56,64 @@ def _resolve_error_name(error_key: str) -> str:
     if entry:
         return entry.get("error_name", error_key)
     return error_key
+
+def _error_choice_label(error_key: str) -> str:
+    return f"{_resolve_error_name(error_key)} [{error_key}]"
+
+_ERROR_KEYS = sorted(_PLAYBOOK.keys())
+_ERROR_CHOICES = [_error_choice_label(key) for key in _ERROR_KEYS]
+_ERROR_CHOICE_TO_KEY = {
+    _error_choice_label(key): key
+    for key in _ERROR_KEYS
+}
+
+def _selection_to_error_keys(selection) -> list[str]:
+    if not selection:
+        return []
+    values = [selection] if isinstance(selection, str) else list(selection)
+    keys = []
+    for value in values:
+        text = str(value)
+        if text in _ERROR_CHOICE_TO_KEY:
+            keys.append(_ERROR_CHOICE_TO_KEY[text])
+        elif text in _PLAYBOOK:
+            keys.append(text)
+        elif "[" in text and text.endswith("]"):
+            keys.append(text.rsplit("[", 1)[1][:-1])
+    return keys
+
+def _format_error_keys(keys) -> str:
+    return ", ".join(_resolve_error_name(key) for key in keys)
+
+def _feedback_preference_note(preferences, hidden_error_count: int) -> str:
+    if not preferences.is_active:
+        return ""
+    lines = ["**Feedback view filter is active.**"]
+    if preferences.focus_errors:
+        lines.append(f"- Focus: {_format_error_keys(preferences.focus_errors)}")
+    if preferences.mute_errors:
+        lines.append(f"- Muted: {_format_error_keys(preferences.mute_errors)}")
+    if preferences.only_errors:
+        lines.append(f"- Only showing: {_format_error_keys(preferences.only_errors)}")
+    if hidden_error_count > 0:
+        lines.append(f"- Hidden detected errors in this view: {hidden_error_count}")
+    return "\n".join(lines)
+
+def _remove_focused_from_mute(focus_selection, mute_selection):
+    focus_set = set(focus_selection or [])
+    filtered_mute = [
+        item for item in (mute_selection or [])
+        if item not in focus_set
+    ]
+    return gr.update(value=filtered_mute)
+
+def _remove_muted_from_focus(mute_selection, focus_selection):
+    mute_set = set(mute_selection or [])
+    filtered_focus = [
+        item for item in (focus_selection or [])
+        if item not in mute_set
+    ]
+    return gr.update(value=filtered_focus)
 
 db = Database()
 llm = LLMAgent()
@@ -167,6 +230,9 @@ def analyze_video(
     training_mode,
     processing_profile,
     use_llm_summary,
+    focus_error_selection,
+    mute_error_selection,
+    only_selected_errors,
     user_str,
     progress=gr.Progress(),
 ):
@@ -198,6 +264,19 @@ def analyze_video(
         input_video_path,
         progress_callback=lambda fraction, desc: progress(fraction, desc=desc),
     )
+    preferences = build_feedback_preferences(
+        focus_errors=_selection_to_error_keys(focus_error_selection),
+        mute_errors=_selection_to_error_keys(mute_error_selection),
+        only_selected=bool(only_selected_errors),
+    )
+    visible_errors = filter_posture_errors(
+        results.get("posture_errors", []),
+        preferences,
+    )
+    visible_errors = sort_posture_errors_for_feedback(visible_errors, preferences)
+    hidden_error_count = max(0, len(results.get("posture_errors", [])) - len(visible_errors))
+    display_results = dict(results)
+    display_results["posture_errors"] = visible_errors
 
     annotator = VideoAnnotator()
     out_video = str(_OUTPUT_DIR / f"annotated_{int(time.time() * 1000)}.mp4")
@@ -207,7 +286,7 @@ def analyze_video(
     annotator.annotate_video(
         input_video_path,
         out_video,
-        results,
+        display_results,
         max_width=profile["annotated_max_width"],
     )
 
@@ -230,26 +309,30 @@ def analyze_video(
         pass
 
     session_id = db.create_session(user_id, training_mode, out_video)
-    db.save_action_logs(session_id, results["action_segments"], results["posture_errors"])
+    db.save_action_logs(session_id, display_results["action_segments"], display_results["posture_errors"])
 
     progress(0.96, desc="Writing session summary")
     summary = llm.generate_summary(
         user,
         training_mode,
-        results["action_segments"],
-        results["posture_errors"],
+        display_results["action_segments"],
+        display_results["posture_errors"],
         use_llm=use_llm_summary,
+        focus_errors=list(preferences.focus_errors),
     )
+    note = _feedback_preference_note(preferences, hidden_error_count)
+    if note:
+        summary = f"{note}\n\n{summary}"
     db.update_session_summary(session_id, summary)
 
     action_data = []
-    for seg in results.get("action_segments", []):
+    for seg in display_results.get("action_segments", []):
         start_time = seg.get("video_start_frame", 0) / 30.0
         end_time = seg.get("video_end_frame", 0) / 30.0
 
         # Find warnings in this segment
         warning = ""
-        for err in results.get("posture_errors", []):
+        for err in display_results.get("posture_errors", []):
             if err.get("start_frame", 0) >= seg.get("video_start_frame", 0) and err.get("start_frame", 0) <= seg.get("video_end_frame", 0):
                 error_key = err.get("error_key", err.get("error", ""))
                 warning = _resolve_error_name(error_key)
@@ -309,6 +392,33 @@ with gr.Blocks(title="AI Fencing Coach") as app:
                         value=llm.enabled,
                         interactive=llm.enabled,
                     )
+                    with gr.Accordion("Feedback Focus", open=False):
+                        focus_errors = gr.Dropdown(
+                            choices=_ERROR_CHOICES,
+                            multiselect=True,
+                            label="Focus Errors",
+                            info="Boost these errors in the report and realtime-style cue ranking.",
+                        )
+                        mute_errors = gr.Dropdown(
+                            choices=_ERROR_CHOICES,
+                            multiselect=True,
+                            label="Mute Errors",
+                            info="Hide these errors from the annotated video, table, and summary.",
+                        )
+                        only_selected_errors = gr.Checkbox(
+                            label="Only show focused errors",
+                            value=False,
+                        )
+                        focus_errors.change(
+                            _remove_focused_from_mute,
+                            [focus_errors, mute_errors],
+                            [mute_errors],
+                        )
+                        mute_errors.change(
+                            _remove_muted_from_focus,
+                            [mute_errors, focus_errors],
+                            [focus_errors],
+                        )
                     video_input = gr.File(
                         label="Upload Video",
                         file_types=[".mp4", ".mov", ".avi", ".mkv"],
@@ -329,6 +439,9 @@ with gr.Blocks(title="AI Fencing Coach") as app:
                     training_mode,
                     processing_profile,
                     use_llm_summary,
+                    focus_errors,
+                    mute_errors,
+                    only_selected_errors,
                     user_dropdown,
                 ],
                 [video_output, summary_output, action_table],

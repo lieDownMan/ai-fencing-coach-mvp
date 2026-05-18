@@ -91,3 +91,16 @@ def test_summary_can_force_playbook_when_llm_is_available(monkeypatch):
     assert "Gemini summary failed" not in summary
     assert "Target Practice" in summary
     assert "2" in summary
+
+
+def test_summary_aggregation_prioritizes_focus_errors(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    agent = LLMAgent()
+
+    aggregated = agent._aggregate_playbook_errors(
+        _sample_errors(),
+        focus_errors=["foot_before_hand"],
+    )
+
+    assert aggregated[0]["key"] == "foot_before_hand"
+    assert aggregated[0]["focused"] is True
