@@ -38,8 +38,8 @@ from inference.sliding_window import FullVideoPipeline
 from inference.video_annotator import VideoAnnotator
 from database import Database
 from llm_agent import LLMAgent
+from src.realtime.feedback_config import available_error_keys_for_mode
 from src.realtime.feedback_scheduler import (
-    available_error_keys_for_mode,
     build_feedback_preferences,
     filter_posture_errors,
     sort_posture_errors_for_feedback,

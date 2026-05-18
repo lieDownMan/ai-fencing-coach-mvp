@@ -45,6 +45,9 @@ Use this when you want:
 - generate a playbook summary, optionally polished by Gemini
 - prioritize, mute, or limit which posture errors appear in the review
 
+The feedback focus controls are mode-aware. Errors that the current heuristic
+engine cannot emit in the selected training mode are hidden or ignored.
+
 Use the `Processing` selector in the UI:
 
 - `Balanced`: downscaled pose inference with good output quality
@@ -90,6 +93,8 @@ This is the best option for:
 - ranked feedback where voice speaks one selected cue and the HUD shows the top issues
 - optional focus/mute/only filters for the errors you want to train today
 
+Unsupported error keys for the selected `--mode` are ignored with a warning.
+
 Target selection now locks onto the first usable detection, not only frame 0.
 If ByteTrack's optional `lap` dependency is missing, the runtime falls back to
 plain pose detection without persistent track IDs.
@@ -116,8 +121,9 @@ The page includes a heuristic debug panel. You can enable/disable it, choose a
 heuristic, tune the rolling window size, and reset the target lock from the
 browser. It also includes feedback focus controls, so you can prioritize
 specific errors, mute noisy errors, or only show/speak focused errors. The
-camera source is still opened by the backend; for phone-camera setups such as
-DroidCam, put the DroidCam video URL in `Camera Source`.
+browser hides feedback errors that are not supported by the selected training
+mode. The camera source is still opened by the backend; for phone-camera setups
+such as DroidCam, put the DroidCam video URL in `Camera Source`.
 
 ## Heuristic Visualizer UI
 

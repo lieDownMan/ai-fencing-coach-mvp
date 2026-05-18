@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from inference.heuristic_debug import HEURISTIC_KEYS, compute_heuristic_metric, format_metrics, format_value
 from inference.heuristics_engine import FRONT_LIMBS, _get_joint, _pelvis_center
-from src.realtime.feedback_scheduler import (
+from src.realtime.feedback_config import (
     DEFAULT_ERROR_WEIGHTS,
     filter_error_keys_for_mode,
     normalize_error_keys,

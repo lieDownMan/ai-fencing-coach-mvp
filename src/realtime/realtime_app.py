@@ -12,10 +12,10 @@ from inference.heuristics_engine import HeuristicsEngine
 from inference.target_tracker import TargetTracker
 from src.pose_estimation import PoseEstimator
 from src.preprocessing import SpatialNormalizer
+from src.realtime.feedback_config import filter_error_keys_for_mode
 from src.realtime.feedback_scheduler import (
     FeedbackDecision,
     FeedbackScheduler,
-    filter_error_keys_for_mode,
 )
 from src.realtime.realtime_voice_coach import RealtimeVoiceCoach
 

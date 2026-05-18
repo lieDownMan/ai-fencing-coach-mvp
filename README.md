@@ -147,6 +147,8 @@ Important runtime files:
 - `heuristic_visualizer.py`
 - `realtime_heuristic_visualizer.py`
 - `src/realtime/realtime_app.py`
+- `src/realtime/feedback_config.py`
+- `src/realtime/feedback_scheduler.py`
 - `src/realtime/realtime_voice_coach.py`
 - `web_realtime.py`
 - `coach_playbook.json`
@@ -159,6 +161,7 @@ Important runtime files:
 - The active inference package is now top-level `inference/`, not `src/inference/`.
 - Voice cues do not require Gemini. They use offline `pyttsx3`.
 - Final clip summaries do not require Gemini. Without an API key, `llm_agent.py` uses `coach_playbook.json`; with an API key, Gemini receives the same playbook details in its prompt.
+- Feedback weights and mode availability live in `src/realtime/feedback_config.py`; unsupported or future errors are hidden or ignored by the UI for the selected training mode.
 - Gradio public share links are off by default for local runs. Set `GRADIO_SHARE=1` only when you need a public tunnel.
 - The docs were cleaned to match the current code, but older branch history may still mention removed flows such as `web_app.py` or old CLI-only usage.
 - For the most accurate current state, trust [docs/dev/CURRENT_STATUS.md](docs/dev/CURRENT_STATUS.md) over older historical notes.
