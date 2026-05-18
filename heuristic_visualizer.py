@@ -857,7 +857,7 @@ def _pick_gradio_port(default_port: int) -> int:
     return default_port
 
 
-with gr.Blocks(title="Fencing Heuristic Visualizer") as app:
+with gr.Blocks(title="Fencing Heuristic Visualizer", css=DEBUG_CSS) as app:
     gr.Markdown("# Fencing Heuristic Visualizer")
     with gr.Row():
         with gr.Column(scale=1):
@@ -930,5 +930,4 @@ if __name__ == "__main__":
         server_port=port,
         share=os.getenv("GRADIO_SHARE", "0") == "1",
         allowed_paths=[str(_OUTPUT_DIR), str(_UPLOAD_DIR), str(_LOG_DIR), str(_GRADIO_TEMP_DIR)],
-        css=DEBUG_CSS,
     )
