@@ -16,6 +16,7 @@ import pandas as pd
 from inference.heuristic_debug import (
     HEURISTIC_KEYS,
     build_debug_events,
+    build_frame_debug_events,
     format_value,
     _target_detection,
 )
@@ -56,7 +57,7 @@ TERM_EXPLANATION = """### How to read this
 - **Metric Triggered**: the visualizer recomputed the raw heuristic metric and it crossed that heuristic threshold.
 - **Primary Value**: the main number this heuristic compares against the threshold. The full supporting values are in `Metrics`.
 
-If `Metric Triggered` is YES but `System Alert` is blank, the metric crossed its threshold in the debug pass, but the current runtime did not issue that warning for that segment. That can happen because the runtime only checks some heuristics for specific actions and training modes.
+Frame-by-frame mode computes each row from a rolling skeleton window ending at that frame. If `Metric Triggered` is YES but `System Alert` is blank, the metric crossed its threshold in the debug pass, but the current runtime did not issue that warning for that frame/action. That can happen because the runtime only checks some heuristics for specific actions and training modes.
 """
 
 HEURISTIC_NOTES = {
@@ -246,7 +247,8 @@ def _empty_table() -> pd.DataFrame:
     return pd.DataFrame(
         columns=[
             "Time",
-            "Frames",
+            "Frame",
+            "Window",
             "Action",
             "Heuristic",
             "System Alert (runtime)",
@@ -267,7 +269,8 @@ def _events_to_dataframe(events: List[Dict[str, Any]]) -> pd.DataFrame:
     for event in events:
         rows.append({
             "Time": event.get("time", ""),
-            "Frames": f"{event.get('start_frame')} - {event.get('end_frame')}",
+            "Frame": event.get("frame_index", ""),
+            "Window": event.get("window", f"{event.get('start_frame')} - {event.get('end_frame')}"),
             "Action": event.get("action", ""),
             "Heuristic": event.get("heuristic", ""),
             "System Alert (runtime)": "YES" if event.get("alert") else "",
@@ -299,8 +302,9 @@ def _events_to_log_dataframe(events: List[Dict[str, Any]]) -> pd.DataFrame:
         metric_values = event.get("metric_values") or {}
         row = {
             "time": event.get("time", ""),
-            "start_frame": event.get("start_frame", ""),
-            "end_frame": event.get("end_frame", ""),
+            "frame": event.get("frame_index", ""),
+            "window_start_frame": event.get("start_frame", ""),
+            "window_end_frame": event.get("end_frame", ""),
             "action": event.get("action", ""),
             "heuristic": event.get("heuristic", ""),
             "status": _event_status(event),
@@ -317,8 +321,9 @@ def _events_to_log_dataframe(events: List[Dict[str, Any]]) -> pd.DataFrame:
 
     columns = [
         "time",
-        "start_frame",
-        "end_frame",
+        "frame",
+        "window_start_frame",
+        "window_end_frame",
         "action",
         "heuristic",
         "status",
@@ -534,6 +539,8 @@ def analyze_heuristics(
     target_side: str,
     training_mode: str,
     heuristic_key: str,
+    debug_mode: str,
+    rolling_window_frames: int,
     processing_profile: str,
     progress: gr.Progress = gr.Progress(),
 ):
@@ -561,13 +568,24 @@ def analyze_heuristics(
     )
 
     progress(0.90, desc="Computing heuristic metrics")
-    events = build_debug_events(
-        results,
-        heuristic_key=heuristic_key,
-        target_side=target_side,
-        training_mode=training_mode,
-        fps=video_info["fps"],
-    )
+    if debug_mode == "Action Segment":
+        events = build_debug_events(
+            results,
+            heuristic_key=heuristic_key,
+            target_side=target_side,
+            training_mode=training_mode,
+            fps=video_info["fps"],
+        )
+    else:
+        events = build_frame_debug_events(
+            results,
+            heuristic_key=heuristic_key,
+            target_side=target_side,
+            training_mode=training_mode,
+            fps=video_info["fps"],
+            window_size=int(rolling_window_frames),
+            frame_step=1,
+        )
 
     progress(0.94, desc="Rendering debug overlay")
     output_path = str(_OUTPUT_DIR / f"heuristic_debug_{int(time.time() * 1000)}.mp4")
@@ -644,7 +662,13 @@ def render_debug_video(
         has_metric_trigger = any(event.get("metric_triggered") for event in current_events)
 
         if frame_info:
-            target = _target_detection(frame_info.get("tracks", []), locked_track_id)
+            if frame_info.get("target_skeleton"):
+                target = {
+                    "skeleton": frame_info.get("target_skeleton"),
+                    "bbox": frame_info.get("target_bbox"),
+                }
+            else:
+                target = _target_detection(frame_info.get("tracks", []), locked_track_id)
             if target:
                 _draw_target(frame, target, has_alert, has_metric_trigger)
 
@@ -678,11 +702,14 @@ def _events_for_frame(
     frame_idx: int,
     selected_heuristic: str,
 ) -> List[Dict[str, Any]]:
-    candidates = [
-        event
-        for event in events
-        if int(event.get("start_frame", -1)) <= frame_idx <= int(event.get("end_frame", -1))
-    ]
+    if any("frame_index" in event for event in events):
+        candidates = [event for event in events if int(event.get("frame_index", -1)) == frame_idx]
+    else:
+        candidates = [
+            event
+            for event in events
+            if int(event.get("start_frame", -1)) <= frame_idx <= int(event.get("end_frame", -1))
+        ]
     if selected_heuristic != "all":
         candidates = [event for event in candidates if event.get("heuristic") == selected_heuristic]
     candidates.sort(
@@ -730,7 +757,7 @@ def _draw_hud(
         f"t={frame_idx / (fps or 30.0):.2f}s frame={frame_idx} mode={selected_heuristic}"
     ]
     if not current_events:
-        lines.append("No action segment at this frame")
+        lines.append("No heuristic samples for this frame")
     else:
         for event in current_events:
             state = "ALERT" if event.get("alert") else "METRIC" if event.get("metric_triggered") else "OK"
@@ -877,6 +904,18 @@ with gr.Blocks(title="Fencing Heuristic Visualizer") as app:
                 value="all",
                 label="Heuristic Mode",
             )
+            debug_mode = gr.Radio(
+                ["Frame by Frame", "Action Segment"],
+                value="Frame by Frame",
+                label="Debug Granularity",
+            )
+            rolling_window_frames = gr.Slider(
+                minimum=5,
+                maximum=90,
+                value=28,
+                step=1,
+                label="Rolling Window Frames",
+            )
             processing_profile = gr.Radio(
                 list(PROCESSING_PROFILES.keys()),
                 value="Balanced",
@@ -909,6 +948,8 @@ with gr.Blocks(title="Fencing Heuristic Visualizer") as app:
             target_side,
             training_mode,
             heuristic_key,
+            debug_mode,
+            rolling_window_frames,
             processing_profile,
         ],
         [

@@ -1,4 +1,8 @@
-from inference.heuristic_debug import build_debug_events, compute_heuristic_metric
+from inference.heuristic_debug import (
+    build_debug_events,
+    build_frame_debug_events,
+    compute_heuristic_metric,
+)
 
 
 def _skeleton(pelvis_y=100.0, wrist_y=80.0):
@@ -114,3 +118,48 @@ def test_build_debug_events_falls_back_to_unclassified_range():
     assert rows[0]["action"] == "Unclassified"
     assert rows[0]["start_frame"] == 0
     assert rows[0]["end_frame"] == 4
+
+
+def test_build_frame_debug_events_returns_one_row_per_frame_and_heuristic():
+    report = {
+        "two_fencer_tracking": {
+            "locked_track_id": None,
+            "frames": [
+                {
+                    "frame_index": i,
+                    "target_skeleton": _skeleton(pelvis_y=100 + i * 5),
+                    "tracks": [],
+                }
+                for i in range(5)
+            ],
+        },
+        "action_segments": [{
+            "action": "SF",
+            "video_start_frame": 0,
+            "video_end_frame": 4,
+        }],
+        "posture_errors": [{
+            "error_key": "bounce_excessive",
+            "segment_index": 0,
+            "start_frame": 4,
+            "end_frame": 4,
+        }],
+    }
+
+    rows = build_frame_debug_events(
+        report,
+        heuristic_key="bounce_excessive",
+        target_side="left",
+        training_mode="Footwork",
+        fps=10.0,
+        window_size=5,
+    )
+
+    assert len(rows) == 5
+    assert rows[-1]["frame_index"] == 4
+    assert rows[-1]["time"] == "0.40s"
+    assert rows[-1]["window"] == "0-4"
+    assert rows[-1]["action"] == "SF"
+    assert rows[-1]["alert"] is True
+    assert rows[-1]["metric_triggered"] is True
+    assert rows[-1]["metric_values"]["sample_count"] == 5

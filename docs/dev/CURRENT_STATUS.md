@@ -28,7 +28,8 @@ This project is currently an AI-assisted fencing coaching prototype with:
 - optional Gemini post-session summary
 - new offline voice-coaching for immediate spoken cues
 - new real-time webcam and browser-streaming entrypoints
-- heuristic visualizer UI for skeleton overlays and threshold debugging
+- frame-by-frame heuristic visualizer UI for skeleton overlays and threshold debugging
+- realtime heuristic visualizer for live webcam threshold tuning
 
 The system is no longer just a batch video analysis tool. It now has three distinct runtime modes.
 
@@ -76,6 +77,7 @@ Use this for:
 
 - browser webcam streaming
 - live frame-by-frame analysis from a web page
+- browser heuristic debug panel with rolling per-frame metrics
 
 Key characteristics:
 
@@ -96,11 +98,23 @@ But note:
 
 Use this for:
 
-- inspecting target skeletons on uploaded clips
+- inspecting target skeletons on uploaded clips frame by frame
 - selecting one heuristic mode at a time
 - showing raw metric values, thresholds, alert timestamps, and alert values
 
 This is the best choice for tuning or debugging `inference/heuristics_engine.py`.
+
+### E. `realtime_heuristic_visualizer.py`
+
+Use this for:
+
+- live webcam skeleton overlay
+- target-lock debugging without voice cues
+- per-frame rolling heuristic values for threshold tuning
+
+The same realtime heuristic metrics are also available in `web_realtime.py` for
+browser-based viewing. The standalone OpenCV visualizer is mainly for lower
+latency local tuning.
 
 ## 4. Core Modules and Responsibilities
 
@@ -358,6 +372,7 @@ Best entry files for the next agent:
 - `docs/dev/NEXT_AGENT_PROMPT.md`
 - `app.py`
 - `heuristic_visualizer.py`
+- `realtime_heuristic_visualizer.py`
 - `src/realtime/realtime_app.py`
 - `web_realtime.py`
 - `src/realtime/realtime_voice_coach.py`
