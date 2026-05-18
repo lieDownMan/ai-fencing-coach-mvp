@@ -1,9 +1,15 @@
+import json
 import os
 import cv2
 import uvicorn
+from html import escape
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from pydantic import BaseModel
+
+from inference.heuristic_debug import HEURISTIC_KEYS, compute_heuristic_metric, format_metrics, format_value
+from src.realtime.feedback_scheduler import DEFAULT_ERROR_WEIGHTS, normalize_error_keys
 from src.realtime.realtime_app import LiveVideoPipeline
 
 app = FastAPI()
@@ -12,14 +18,38 @@ app = FastAPI()
 CAMERA_SOURCE = "0"  # Can be 0, 1, or URL like "http://192.168.x.x:4747/video"
 TARGET_SIDE = "left"
 TRAINING_MODE = "Footwork"
+DEBUG_ENABLED = True
+DEBUG_HEURISTIC = "all"
+DEBUG_WINDOW_SIZE = 28
+FEEDBACK_FOCUS_ERRORS = []
+FEEDBACK_MUTE_ERRORS = []
+FEEDBACK_ONLY_SELECTED = False
 
 pipeline = None
 cap = None
+
+_PLAYBOOK_PATH = Path(__file__).resolve().parent / "coach_playbook.json"
+
+
+def _load_playbook() -> dict:
+    if not _PLAYBOOK_PATH.exists():
+        return {}
+    with open(_PLAYBOOK_PATH, "r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+_PLAYBOOK = _load_playbook()
 
 class ConfigUpdate(BaseModel):
     camera_source: str
     target_side: str
     training_mode: str
+    debug_enabled: bool = True
+    debug_heuristic: str = "all"
+    debug_window_size: int = 28
+    focus_errors: list[str] = []
+    mute_errors: list[str] = []
+    only_selected: bool = False
 
 HTML_PAGE = """
 <!DOCTYPE html>
@@ -79,9 +109,24 @@ HTML_PAGE = """
 
         #hud-warnings {
             top: 110px;
-            color: #ff3333;
-            font-size: 2.2em;
             font-weight: bold;
+            max-width: min(900px, calc(100vw - 80px));
+        }
+        .warning-primary {
+            color: #ff4d4d;
+            font-size: 2.35em;
+            line-height: 1.08;
+        }
+        .warning-secondary {
+            color: #ffd166;
+            font-size: 1.25em;
+            line-height: 1.25;
+            margin-top: 8px;
+        }
+        .warning-score {
+            color: #ccc;
+            font-size: 0.55em;
+            margin-left: 10px;
         }
 
         .controls {
@@ -121,6 +166,132 @@ HTML_PAGE = """
         }
         button:hover {
             background: #ff8533;
+        }
+        input[type="checkbox"] {
+            transform: scale(1.2);
+            margin-right: 8px;
+        }
+        input[type="number"] {
+            padding: 5px;
+            background: #444;
+            color: white;
+            border: 1px solid #555;
+            border-radius: 4px;
+            width: 80px;
+        }
+        .secondary-button {
+            background: #555;
+            margin-top: 10px;
+        }
+        .secondary-button:hover {
+            background: #777;
+        }
+        .feedback-section {
+            margin-bottom: 15px;
+            max-width: 620px;
+        }
+        .feedback-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+        .feedback-header label {
+            width: auto;
+        }
+        .mini-button {
+            width: auto;
+            padding: 6px 10px;
+            background: #555;
+            font-size: 0.82em;
+        }
+        .mini-button:hover {
+            background: #777;
+        }
+        .error-check-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(240px, 1fr));
+            gap: 8px;
+        }
+        .error-option {
+            width: auto;
+            min-height: 44px;
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            padding: 8px;
+            border: 1px solid #444;
+            border-radius: 6px;
+            background: #242424;
+            cursor: pointer;
+            font-weight: 400;
+        }
+        .error-option:hover {
+            border-color: #777;
+            background: #303030;
+        }
+        .error-option input[type="checkbox"] {
+            margin-top: 4px;
+            flex: 0 0 auto;
+        }
+        .error-label {
+            display: block;
+            color: #fff;
+            line-height: 1.2;
+        }
+        .error-key {
+            display: block;
+            color: #aaa;
+            font-family: Consolas, monospace;
+            font-size: 0.82em;
+            line-height: 1.2;
+            margin-top: 2px;
+        }
+        @media (max-width: 760px) {
+            .error-check-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        .debug-panel {
+            margin: 20px auto 0;
+            padding: 16px;
+            background: #202020;
+            border: 1px solid #444;
+            border-radius: 8px;
+            max-width: 1180px;
+            text-align: left;
+        }
+        .debug-panel h3 {
+            margin-top: 0;
+        }
+        .debug-meta {
+            color: #bbb;
+            margin-bottom: 10px;
+            font-size: 0.95em;
+        }
+        .metric-row {
+            display: grid;
+            grid-template-columns: 210px 92px 135px 1fr;
+            gap: 10px;
+            align-items: start;
+            padding: 8px;
+            border-bottom: 1px solid #333;
+            font-family: Consolas, monospace;
+            font-size: 0.92em;
+        }
+        .metric-row.triggered {
+            background: #5a2525;
+            color: #fff;
+        }
+        .metric-row.ok {
+            background: #242424;
+        }
+        .metric-key {
+            font-weight: 700;
+        }
+        .metric-status {
+            font-weight: 700;
         }
     </style>
 </head>
@@ -163,10 +334,88 @@ HTML_PAGE = """
                 <option value="Free Bouting" {MODE_FB_SEL}>Free Bouting</option>
             </select>
         </div>
+        <div class="form-group">
+            <label for="debug_enabled">Debug:</label>
+            <input type="checkbox" id="debug_enabled" {DEBUG_CHECKED}> Show heuristic metrics
+        </div>
+        <div class="form-group">
+            <label for="debug_heuristic">Heuristic:</label>
+            <select id="debug_heuristic">
+                {HEURISTIC_OPTIONS}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="debug_window_size">Window:</label>
+            <input type="number" id="debug_window_size" min="5" max="90" value="{DEBUG_WINDOW_SIZE}"> frames
+        </div>
+        <div class="feedback-section">
+            <div class="feedback-header">
+                <label>Focus Errors</label>
+                <button type="button" class="mini-button" onclick="clearFeedbackChecks('focus_errors')">Clear</button>
+            </div>
+            <div id="focus_errors" class="error-check-grid">
+                {FOCUS_ERROR_OPTIONS}
+            </div>
+        </div>
+        <div class="feedback-section">
+            <div class="feedback-header">
+                <label>Mute Errors</label>
+                <button type="button" class="mini-button" onclick="clearFeedbackChecks('mute_errors')">Clear</button>
+            </div>
+            <div id="mute_errors" class="error-check-grid">
+                {MUTE_ERROR_OPTIONS}
+            </div>
+        </div>
+        <div class="form-group">
+            <label for="only_selected">Only:</label>
+            <input type="checkbox" id="only_selected" {ONLY_SELECTED_CHECKED}> Only show/speak focused errors
+        </div>
         <button onclick="updateConfig()">Apply & Restart Camera</button>
+        <button class="secondary-button" onclick="resetTargetLock()">Reset Target Lock</button>
+    </div>
+
+    <div id="debug-panel" class="debug-panel">
+        <h3>Realtime Heuristic Debug</h3>
+        <div id="debug-meta" class="debug-meta">Waiting for pipeline...</div>
+        <div id="debug-metrics"></div>
     </div>
 
     <script>
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#039;');
+        }
+
+        function checkedValues(name) {
+            return Array.from(document.querySelectorAll(`input[name="${name}"]:checked`)).map(input => input.value);
+        }
+
+        function clearFeedbackChecks(name) {
+            document.querySelectorAll(`input[name="${name}"]`).forEach(input => {
+                input.checked = false;
+            });
+        }
+
+        document.addEventListener('change', event => {
+            const input = event.target;
+            if (!input || input.type !== 'checkbox' || !input.checked) {
+                return;
+            }
+            if (input.name !== 'focus_errors' && input.name !== 'mute_errors') {
+                return;
+            }
+            const oppositeName = input.name === 'focus_errors' ? 'mute_errors' : 'focus_errors';
+            document.querySelectorAll(`input[name="${oppositeName}"]`).forEach(other => {
+                if (other.value === input.value) {
+                    other.checked = false;
+                }
+            });
+        });
+
         // Poll the server for pipeline status every 200ms
         setInterval(async () => {
             try {
@@ -178,8 +427,14 @@ HTML_PAGE = """
                 
                 // Update warnings
                 const warningsDiv = document.getElementById('hud-warnings');
-                if (data.warnings && data.warnings.length > 0) {
-                    warningsDiv.innerHTML = data.warnings.map(w => `⚠ ${w}`).join('<br>');
+                if (data.feedback_items && data.feedback_items.length > 0) {
+                    warningsDiv.innerHTML = data.feedback_items.map((item, index) => {
+                        const cls = index === 0 ? 'warning-primary' : 'warning-secondary';
+                        const score = Number(item.score ?? 0).toFixed(1);
+                        return `<div class="${cls}">${escapeHtml(item.message)} <span class="warning-score">score ${score}</span></div>`;
+                    }).join('');
+                } else if (data.warnings && data.warnings.length > 0) {
+                    warningsDiv.innerHTML = data.warnings.map(w => `<div class="warning-primary">${escapeHtml(w)}</div>`).join('');
                 } else {
                     warningsDiv.innerHTML = '';
                 }
@@ -193,6 +448,34 @@ HTML_PAGE = """
                 } else {
                     stateEl.style.color = '#aaaaaa';
                 }
+
+                const panel = document.getElementById('debug-panel');
+                const meta = document.getElementById('debug-meta');
+                const metrics = document.getElementById('debug-metrics');
+                if (!data.debug_enabled) {
+                    panel.style.display = 'none';
+                } else {
+                    panel.style.display = 'block';
+                    const lock = data.target_lock || {};
+                    meta.innerText = `frame=${data.frame} | lock=${lock.mode || 'unknown'} | track_id=${lock.track_id ?? 'none'} | buffer=${data.debug_buffer}/${data.debug_window_size}`;
+                    const rows = data.heuristic_metrics || [];
+                    if (rows.length === 0) {
+                        metrics.innerHTML = '<div class="debug-meta">No target skeleton yet.</div>';
+                    } else {
+                        metrics.innerHTML = rows.map(row => {
+                            const cls = row.triggered ? 'triggered' : 'ok';
+                            const status = row.triggered ? 'TRIGGER' : 'OK';
+                            return `
+                                <div class="metric-row ${cls}">
+                                    <div class="metric-key">${escapeHtml(row.heuristic)}</div>
+                                    <div class="metric-status">${status}</div>
+                                    <div>value=${escapeHtml(row.primary_value)}</div>
+                                    <div>${escapeHtml(row.metrics)}</div>
+                                </div>
+                            `;
+                        }).join('');
+                    }
+                }
                 
             } catch (err) {
                 console.error("Error fetching status:", err);
@@ -203,6 +486,12 @@ HTML_PAGE = """
             const cam = document.getElementById('camera_source').value;
             const target = document.getElementById('target_side').value;
             const mode = document.getElementById('training_mode').value;
+            const debugEnabled = document.getElementById('debug_enabled').checked;
+            const debugHeuristic = document.getElementById('debug_heuristic').value;
+            const debugWindowSize = parseInt(document.getElementById('debug_window_size').value || '28', 10);
+            const focusErrors = checkedValues('focus_errors');
+            const muteErrors = checkedValues('mute_errors');
+            const onlySelected = document.getElementById('only_selected').checked;
 
             try {
                 const res = await fetch('/config', {
@@ -211,7 +500,13 @@ HTML_PAGE = """
                     body: JSON.stringify({
                         camera_source: cam,
                         target_side: target,
-                        training_mode: mode
+                        training_mode: mode,
+                        debug_enabled: debugEnabled,
+                        debug_heuristic: debugHeuristic,
+                        debug_window_size: debugWindowSize,
+                        focus_errors: focusErrors,
+                        mute_errors: muteErrors,
+                        only_selected: onlySelected
                     })
                 });
                 
@@ -225,6 +520,19 @@ HTML_PAGE = """
                 }
             } catch (e) {
                 alert("Error updating settings.");
+            }
+        }
+
+        async function resetTargetLock() {
+            try {
+                const res = await fetch('/reset_target', { method: 'POST' });
+                if (res.ok) {
+                    alert('Target lock reset.');
+                } else {
+                    alert('Failed to reset target lock.');
+                }
+            } catch (e) {
+                alert('Error resetting target lock.');
             }
         }
     </script>
@@ -260,6 +568,9 @@ def generate_frames():
             training_mode=TRAINING_MODE,
             pose_backend="ultralytics",
             voice_enabled=True,
+            focus_errors=FEEDBACK_FOCUS_ERRORS,
+            mute_errors=FEEDBACK_MUTE_ERRORS,
+            only_selected=FEEDBACK_ONLY_SELECTED,
         )
 
     drop_count = 0
@@ -293,6 +604,94 @@ def generate_frames():
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
 
+def _heuristic_options_html() -> str:
+    choices = ["all"] + HEURISTIC_KEYS
+    return "\n".join(
+        f'<option value="{choice}" {"selected" if choice == DEBUG_HEURISTIC else ""}>{choice}</option>'
+        for choice in choices
+    )
+
+
+def _feedback_error_label(error_key: str) -> str:
+    entry = _PLAYBOOK.get(error_key, {})
+    return str(entry.get("error_name") or error_key)
+
+
+def _feedback_error_checkboxes_html(group_name: str, selected_keys) -> str:
+    selected = set(selected_keys or [])
+    choices = sorted(DEFAULT_ERROR_WEIGHTS.keys())
+    return "\n".join(
+        "\n".join(
+            [
+                '<label class="error-option">',
+                (
+                    f'<input type="checkbox" name="{escape(group_name)}" '
+                    f'value="{escape(choice)}" {"checked" if choice in selected else ""}>'
+                ),
+                "<span>",
+                f'<span class="error-label">{escape(_feedback_error_label(choice))}</span>',
+                f'<span class="error-key">{escape(choice)}</span>',
+                "</span>",
+                "</label>",
+            ]
+        )
+        for choice in choices
+    )
+
+
+def _current_heuristic_metrics():
+    if pipeline is None or not DEBUG_ENABLED:
+        return []
+    raw_skeletons = [
+        skel for skel in list(getattr(pipeline, "raw_skeletons", []))[-max(1, DEBUG_WINDOW_SIZE):]
+        if skel
+    ]
+    if not raw_skeletons:
+        return []
+
+    keys = HEURISTIC_KEYS if DEBUG_HEURISTIC == "all" else [DEBUG_HEURISTIC]
+    rows = []
+    for key in keys:
+        metric = compute_heuristic_metric(
+            key,
+            raw_skeletons,
+            target_side=TARGET_SIDE,
+            training_mode=TRAINING_MODE,
+        )
+        rows.append({
+            "heuristic": key,
+            "triggered": metric.triggered,
+            "primary_value": format_value(metric.primary_value),
+            "threshold": metric.threshold,
+            "metrics": format_metrics(metric),
+        })
+    rows.sort(key=lambda row: (not row["triggered"], row["heuristic"]))
+    return rows
+
+
+def _current_feedback_items():
+    if pipeline is None:
+        return []
+    rows = []
+    for item in getattr(pipeline, "current_feedback_items", []):
+        if hasattr(item, "to_dict"):
+            rows.append(item.to_dict())
+        elif isinstance(item, dict):
+            rows.append(dict(item))
+    return rows
+
+
+def _target_lock_status():
+    if pipeline is None:
+        return {"mode": "none", "track_id": None, "missing_frames": 0}
+    tracker = pipeline.target_tracker
+    return {
+        "mode": "track_id" if tracker.locked_track_id is not None else "position",
+        "track_id": tracker.locked_track_id,
+        "missing_frames": tracker.missing_frames_count,
+    }
+
+
 @app.get("/")
 def index():
     html = HTML_PAGE.replace("{CAMERA_SOURCE}", CAMERA_SOURCE)
@@ -303,6 +702,12 @@ def index():
     html = html.replace("{MODE_FW_SEL}", "selected" if TRAINING_MODE == "Footwork" else "")
     html = html.replace("{MODE_TP_SEL}", "selected" if TRAINING_MODE == "Target Practice" else "")
     html = html.replace("{MODE_FB_SEL}", "selected" if TRAINING_MODE == "Free Bouting" else "")
+    html = html.replace("{DEBUG_CHECKED}", "checked" if DEBUG_ENABLED else "")
+    html = html.replace("{HEURISTIC_OPTIONS}", _heuristic_options_html())
+    html = html.replace("{DEBUG_WINDOW_SIZE}", str(DEBUG_WINDOW_SIZE))
+    html = html.replace("{FOCUS_ERROR_OPTIONS}", _feedback_error_checkboxes_html("focus_errors", FEEDBACK_FOCUS_ERRORS))
+    html = html.replace("{MUTE_ERROR_OPTIONS}", _feedback_error_checkboxes_html("mute_errors", FEEDBACK_MUTE_ERRORS))
+    html = html.replace("{ONLY_SELECTED_CHECKED}", "checked" if FEEDBACK_ONLY_SELECTED else "")
 
     return HTMLResponse(content=html)
 
@@ -319,24 +724,62 @@ def status():
         return JSONResponse({
             "state": "INITIALIZING",
             "action": "Wait...",
-            "warnings": []
+            "warnings": [],
+            "feedback_items": [],
+            "debug_enabled": DEBUG_ENABLED,
+            "debug_buffer": 0,
+            "debug_window_size": DEBUG_WINDOW_SIZE,
+            "heuristic_metrics": [],
+            "feedback_preferences": {
+                "focus_errors": FEEDBACK_FOCUS_ERRORS,
+                "mute_errors": FEEDBACK_MUTE_ERRORS,
+                "only_selected": FEEDBACK_ONLY_SELECTED,
+            },
+            "target_lock": {"mode": "none", "track_id": None, "missing_frames": 0},
+            "frame": 0,
         })
         
     return JSONResponse({
         "state": getattr(pipeline.gatekeeper, "state", "UNKNOWN"),
         "action": pipeline.current_action,
-        "warnings": pipeline.current_warnings if pipeline.warning_frames_left > 0 else []
+        "warnings": pipeline.current_warnings if pipeline.warning_frames_left > 0 else [],
+        "feedback_items": _current_feedback_items() if pipeline.warning_frames_left > 0 else [],
+        "debug_enabled": DEBUG_ENABLED,
+        "debug_buffer": len([skel for skel in list(pipeline.raw_skeletons)[-max(1, DEBUG_WINDOW_SIZE):] if skel]),
+        "debug_window_size": DEBUG_WINDOW_SIZE,
+        "heuristic_metrics": _current_heuristic_metrics(),
+        "feedback_preferences": {
+            "focus_errors": FEEDBACK_FOCUS_ERRORS,
+            "mute_errors": FEEDBACK_MUTE_ERRORS,
+            "only_selected": FEEDBACK_ONLY_SELECTED,
+        },
+        "target_lock": _target_lock_status(),
+        "frame": pipeline.frame_idx,
     })
 
 
 @app.post("/config")
 def update_config(config: ConfigUpdate):
     """Endpoint to update global settings from the UI and reset the pipeline."""
-    global CAMERA_SOURCE, TARGET_SIDE, TRAINING_MODE, pipeline, cap
+    global CAMERA_SOURCE, TARGET_SIDE, TRAINING_MODE, DEBUG_ENABLED, DEBUG_HEURISTIC, DEBUG_WINDOW_SIZE
+    global FEEDBACK_FOCUS_ERRORS, FEEDBACK_MUTE_ERRORS, FEEDBACK_ONLY_SELECTED, pipeline, cap
     
     CAMERA_SOURCE = config.camera_source
     TARGET_SIDE = config.target_side
     TRAINING_MODE = config.training_mode
+    DEBUG_ENABLED = bool(config.debug_enabled)
+    DEBUG_HEURISTIC = config.debug_heuristic if config.debug_heuristic in ["all"] + HEURISTIC_KEYS else "all"
+    DEBUG_WINDOW_SIZE = max(5, min(90, int(config.debug_window_size)))
+    valid_errors = set(DEFAULT_ERROR_WEIGHTS.keys())
+    FEEDBACK_FOCUS_ERRORS = [
+        key for key in normalize_error_keys(config.focus_errors)
+        if key in valid_errors
+    ]
+    FEEDBACK_MUTE_ERRORS = [
+        key for key in normalize_error_keys(config.mute_errors)
+        if key in valid_errors
+    ]
+    FEEDBACK_ONLY_SELECTED = bool(config.only_selected)
     
     # Release current resources to trigger a re-init
     if cap is not None:
@@ -348,6 +791,16 @@ def update_config(config: ConfigUpdate):
     pipeline = None
     
     return {"status": "success", "message": "Configuration updated. Restarting pipeline."}
+
+
+@app.post("/reset_target")
+def reset_target():
+    if pipeline is not None:
+        pipeline.target_tracker.reset()
+        pipeline.raw_skeletons.clear()
+        pipeline.normalized_skeletons.clear()
+        return {"status": "success", "message": "Target lock reset."}
+    return {"status": "idle", "message": "Pipeline is not initialized."}
 
 
 if __name__ == "__main__":

@@ -43,6 +43,7 @@ Use this when you want:
 - save session history
 - generate annotated output
 - generate a playbook summary, optionally polished by Gemini
+- prioritize, mute, or limit which posture errors appear in the review
 
 Use the `Processing` selector in the UI:
 
@@ -70,6 +71,9 @@ python -m src.realtime.realtime_app --source 0 --target-side right
 python -m src.realtime.realtime_app --source 0 --pose-model yolov8n-pose.pt
 python -m src.realtime.realtime_app --source 0 --no-voice
 python -m src.realtime.realtime_app --source 0 --pose-backend mock --no-voice
+python -m src.realtime.realtime_app --source 0 --focus-errors stance_too_high,bounce_excessive
+python -m src.realtime.realtime_app --source 0 --mute-errors guard_dropped
+python -m src.realtime.realtime_app --source 0 --only-errors stance_too_high
 ```
 
 Use a local video file instead of a webcam:
@@ -83,6 +87,8 @@ This is the best option for:
 - local laptop webcam
 - local audio playback
 - direct real-time spoken cues
+- ranked feedback where voice speaks one selected cue and the HUD shows the top issues
+- optional focus/mute/only filters for the errors you want to train today
 
 Target selection now locks onto the first usable detection, not only frame 0.
 If ByteTrack's optional `lap` dependency is missing, the runtime falls back to
@@ -103,6 +109,15 @@ Use this when you want:
 - browser webcam capture
 - streaming analyzed frames
 - a web-based live demo
+- realtime heuristic metrics in a browser debug panel
+- browser controls for focused, muted, or only-selected feedback errors
+
+The page includes a heuristic debug panel. You can enable/disable it, choose a
+heuristic, tune the rolling window size, and reset the target lock from the
+browser. It also includes feedback focus controls, so you can prioritize
+specific errors, mute noisy errors, or only show/speak focused errors. The
+camera source is still opened by the backend; for phone-camera setups such as
+DroidCam, put the DroidCam video URL in `Camera Source`.
 
 ## Heuristic Visualizer UI
 
@@ -116,11 +131,43 @@ Open:
 
 Use this when you want:
 
-- see the target skeleton overlaid on a clip
+- see the target skeleton overlaid on a clip frame by frame
 - inspect one heuristic at a time, or all heuristics together
 - see the metric value and threshold used by each heuristic
 - find the exact timestamp where the current runtime emitted a posture alert
 - download a CSV log and highlighted HTML log under `web_outputs/heuristic_debug/logs/`
+
+The default `Debug Granularity` is `Frame by Frame`. It computes heuristic
+metrics from a rolling skeleton window ending at each frame. Use `Action
+Segment` only when you want the older segment-level summary.
+
+## Realtime Heuristic Visualizer
+
+```bash
+python realtime_heuristic_visualizer.py --source 0 --target-side left --mode "Footwork" --heuristic all
+```
+
+Use this when you want:
+
+- live webcam skeleton overlay
+- live target-lock debugging without voice cues
+- per-frame rolling heuristic values before tuning thresholds
+
+This is the lower-latency local OpenCV version of the debug panel in
+`web_realtime.py`.
+
+Useful flags:
+
+```bash
+python realtime_heuristic_visualizer.py --source 0 --heuristic stance_too_high
+python realtime_heuristic_visualizer.py --source path/to/video.mp4 --log-csv web_outputs/heuristic_debug/logs/realtime_debug.csv
+python realtime_heuristic_visualizer.py --source 0 --pose-backend mock
+```
+
+Controls:
+
+- `q`: quit
+- `r`: reset target lock
 
 ## Notes About Local vs Workstation Usage
 
@@ -170,6 +217,7 @@ python -m src.training.train_fencenet --dataset data/training/ffd_prepared.npz -
 
 - `annotated_output.mp4` from `app.py`
 - the OpenCV live window from `python -m src.realtime.realtime_app`
+- the OpenCV debug window from `realtime_heuristic_visualizer.py`
 - the browser stream from `web_realtime.py`
 - `web_outputs/heuristic_debug/` for heuristic visualizer uploads and overlays
 - `fencing_coach.db` for persisted users and sessions

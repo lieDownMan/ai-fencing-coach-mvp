@@ -29,28 +29,30 @@ def test_summary_without_llm_uses_playbook_counts(monkeypatch):
         _sample_actions(),
         _sample_errors(),
     )
+    aggregated = agent._aggregate_playbook_errors(_sample_errors())
 
     assert "LLM Agent disabled" not in summary
-    assert "持劍手掉落：2 次" in summary
-    assert "手腳順序錯誤：1 次" in summary
-    assert "手抬起來，劍尖指著對手" in summary
-    assert "手要先伸" in summary
+    assert aggregated[0]["key"] == "guard_dropped"
+    assert aggregated[0]["count"] == 2
+    assert aggregated[1]["key"] == "foot_before_hand"
+    assert aggregated[1]["count"] == 1
+    assert "Free Bouting" in summary
+    assert "2" in summary
+    assert "1" in summary
 
 
 def test_summary_prompt_with_llm_includes_playbook_context(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     captured = {}
 
-    class FakeModels:
-        def generate_content(self, model, contents):
-            captured["model"] = model
-            captured["contents"] = contents
+    class FakeModel:
+        def generate_content(self, prompt):
+            captured["prompt"] = prompt
             return SimpleNamespace(text="LLM summary")
 
     agent = LLMAgent()
     agent.enabled = True
-    agent.model_name = "test-model"
-    agent.client = SimpleNamespace(models=FakeModels())
+    agent.model = FakeModel()
 
     summary = agent.generate_summary(
         {"handedness": "left", "height_cm": 170},
@@ -60,24 +62,23 @@ def test_summary_prompt_with_llm_includes_playbook_context(monkeypatch):
     )
 
     assert summary == "LLM summary"
-    assert captured["model"] == "test-model"
-    assert "[COACH PLAYBOOK CONTEXT]" in captured["contents"]
-    assert "frequency: 2" in captured["contents"]
-    assert "problem: 持劍手掉落" in captured["contents"]
-    assert "short_cue: 手抬起來，劍尖指著對手" in captured["contents"]
-    assert "List every detected problem" in captured["contents"]
+    assert "[COACH PLAYBOOK CONTEXT]" in captured["prompt"]
+    assert "error_key: guard_dropped" in captured["prompt"]
+    assert "frequency: 2" in captured["prompt"]
+    assert "short_cue:" in captured["prompt"]
+    assert "List every detected problem" in captured["prompt"]
 
 
 def test_summary_can_force_playbook_when_llm_is_available(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
-    class FakeModels:
-        def generate_content(self, model, contents):
+    class FakeModel:
+        def generate_content(self, prompt):
             raise AssertionError("Gemini should not be called")
 
     agent = LLMAgent()
     agent.enabled = True
-    agent.client = SimpleNamespace(models=FakeModels())
+    agent.model = FakeModel()
 
     summary = agent.generate_summary(
         {"handedness": "left", "height_cm": 170},
@@ -90,3 +91,16 @@ def test_summary_can_force_playbook_when_llm_is_available(monkeypatch):
     assert "Gemini summary failed" not in summary
     assert "Target Practice" in summary
     assert "2" in summary
+
+
+def test_summary_aggregation_prioritizes_focus_errors(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    agent = LLMAgent()
+
+    aggregated = agent._aggregate_playbook_errors(
+        _sample_errors(),
+        focus_errors=["foot_before_hand"],
+    )
+
+    assert aggregated[0]["key"] == "foot_before_hand"
+    assert aggregated[0]["focused"] is True

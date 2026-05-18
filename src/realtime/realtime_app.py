@@ -12,6 +12,7 @@ from inference.heuristics_engine import HeuristicsEngine
 from inference.target_tracker import TargetTracker
 from src.pose_estimation import PoseEstimator
 from src.preprocessing import SpatialNormalizer
+from src.realtime.feedback_scheduler import FeedbackDecision, FeedbackScheduler
 from src.realtime.realtime_voice_coach import RealtimeVoiceCoach
 
 logging.basicConfig(level=logging.INFO)
@@ -125,6 +126,10 @@ class LiveVideoPipeline:
         pose_model=None,
         pose_backend="ultralytics",
         voice_enabled=True,
+        focus_errors=None,
+        mute_errors=None,
+        only_errors=None,
+        only_selected=False,
     ):
         self.target_side = target_side
         self.training_mode = training_mode
@@ -155,10 +160,17 @@ class LiveVideoPipeline:
         self.last_inference_idx = 0
         self.current_action = "Idle"
         self.current_warnings = []       # list of warning strings to display
+        self.current_feedback_items = [] # ranked FeedbackItem objects for web/UI status
         self.warning_frames_left = 0
         self.prev_gatekeeper_active = False  # Track transitions for normalizer re-fit
-        self._error_cooldowns = {}       # error_key → last trigger time (monotonic)
-        self.ERROR_COOLDOWN_SEC = 5.0    # same error won't repeat within 5 seconds
+        playbook = self.voice_coach.playbook if self.voice_coach else None
+        self.feedback_scheduler = FeedbackScheduler(
+            playbook=playbook,
+            focus_errors=focus_errors,
+            mute_errors=mute_errors,
+            only_errors=only_errors,
+            only_selected=only_selected,
+        )
         
     def _pixel_to_xyn(self, skeleton: dict, frame_h: int, frame_w: int) -> dict:
         """Convert pixel (xy) skeleton to normalized (xyn) skeleton (0.0~1.0).
@@ -170,6 +182,20 @@ class LiveVideoPipeline:
         for joint_name, coords in skeleton.items():
             xyn[joint_name] = (coords[0] / frame_w, coords[1] / frame_h)
         return xyn
+
+    def _apply_feedback_decision(self, decision: FeedbackDecision) -> None:
+        """Apply one scheduler decision to voice output and visible warnings."""
+        self.current_feedback_items = decision.visual_items
+        self.current_warnings = [item.message for item in decision.visual_items]
+        self.warning_frames_left = 90 if self.current_warnings else 0
+
+        if not decision.voice_error_key:
+            return
+
+        cue = decision.voice_message or decision.voice_error_key
+        print(f"\n[COACHING FEEDBACK] {cue}")
+        if self.voice_coach:
+            self.voice_coach.speak_async(decision.voice_error_key)
 
     def process_frame(self, frame, draw_hud: bool = True):
         height, width = frame.shape[:2]
@@ -236,40 +262,23 @@ class LiveVideoPipeline:
                 conf = best_result["confidence"]
                 print(f"[INFERENCE] action={self.current_action} conf={conf:.3f}")
                 
-                # Only run heuristics for non-Idle actions
+                posture_errors = []
                 if self.current_action != "Idle":
-                    # Check Heuristics
                     posture_errors = self.heuristics.evaluate(
-                        [best_result], 
-                        list(self.raw_skeletons)
+                        [best_result],
+                        list(self.raw_skeletons),
                     )
-                    
-                    now = time.monotonic()
-                    new_warnings = []
-                    for err in posture_errors:
-                        error_key = err.get("error_key", "")
-                        if not error_key:
-                            continue
-                        
-                        # 5-second cooldown per error key
-                        last_time = self._error_cooldowns.get(error_key, 0.0)
-                        if now - last_time < self.ERROR_COOLDOWN_SEC:
-                            continue
-                        self._error_cooldowns[error_key] = now
-                        
-                        cue = error_key
-                        if self.voice_coach:
-                            cue = self.voice_coach.get_cue(error_key) or error_key
-                            print(f"\n[COACHING FEEDBACK] {cue}")
-                            self.voice_coach.speak_async(error_key)
-                        else:
-                            print(f"\n[COACHING FEEDBACK] {error_key}")
-                        
-                        new_warnings.append(cue)
-                    
-                    if new_warnings:
-                        self.current_warnings = new_warnings
-                        self.warning_frames_left = 90  # Show warnings for ~3 seconds
+
+                active_error_keys = [
+                    err.get("error_key", "")
+                    for err in posture_errors
+                    if err.get("error_key")
+                ]
+                decision = self.feedback_scheduler.update(
+                    active_error_keys,
+                    now=time.monotonic(),
+                )
+                self._apply_feedback_decision(decision)
             self.last_inference_idx = self.frame_idx
             
             
@@ -280,9 +289,12 @@ class LiveVideoPipeline:
             
             if self.warning_frames_left > 0:
                 y_offset = 105
-                for warn_text in self.current_warnings:
-                    frame = _put_text_pil(frame, f"⚠ {warn_text}", (20, y_offset), color=(0, 0, 255), font=_FONT_WARNING)
-                    y_offset += 60  # spacing between lines
+                for index, warn_text in enumerate(self.current_warnings):
+                    prefix = "PRIMARY" if index == 0 else "NEXT"
+                    font = _FONT_WARNING if index == 0 else _FONT_SMALL
+                    color = (255, 80, 80) if index == 0 else (255, 200, 80)
+                    frame = _put_text_pil(frame, f"{prefix}: {warn_text}", (20, y_offset), color=color, font=font)
+                    y_offset += 60 if index == 0 else 42  # spacing between lines
                 self.warning_frames_left -= 1
         else:
             # Still decrement the warning timer if HUD is disabled so web UI can sync
@@ -295,6 +307,12 @@ class LiveVideoPipeline:
 
 if __name__ == "__main__":
     import argparse
+
+    def _split_error_keys(value):
+        if not value:
+            return []
+        return [item.strip() for item in value.split(",") if item.strip()]
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", default="0", help="Camera source index (0) or video path")
     parser.add_argument("--mode", default="Free Bouting", choices=["Footwork", "Target Practice", "Free Bouting"])
@@ -302,6 +320,9 @@ if __name__ == "__main__":
     parser.add_argument("--pose-model", default=None, help="Path/name for YOLO pose weights (default: yolov8n-pose.pt)")
     parser.add_argument("--pose-backend", default="ultralytics", choices=["ultralytics", "mock"], help="Use mock for smoke checks without pose inference")
     parser.add_argument("--no-voice", action="store_true", help="Disable offline spoken cues")
+    parser.add_argument("--focus-errors", default="", help="Comma-separated error keys to prioritize, e.g. stance_too_high,bounce_excessive")
+    parser.add_argument("--mute-errors", default="", help="Comma-separated error keys to hide/silence")
+    parser.add_argument("--only-errors", default="", help="Comma-separated error keys to exclusively show/speak")
     args = parser.parse_args()
 
     # Determine if source is integer (webcam) or string (file)
@@ -324,10 +345,19 @@ if __name__ == "__main__":
         pose_model=args.pose_model,
         pose_backend=args.pose_backend,
         voice_enabled=not args.no_voice,
+        focus_errors=_split_error_keys(args.focus_errors),
+        mute_errors=_split_error_keys(args.mute_errors),
+        only_errors=_split_error_keys(args.only_errors),
     )
     print("=======================================")
     print(" Live AI Fencing Coach Started!")
     print(f" Source: {source} | Mode: {args.mode} | Target: {args.target_side}")
+    if args.focus_errors:
+        print(f" Focus errors: {args.focus_errors}")
+    if args.mute_errors:
+        print(f" Muted errors: {args.mute_errors}")
+    if args.only_errors:
+        print(f" Only errors: {args.only_errors}")
     print(" Press 'q' to quit.")
     print("=======================================")
     

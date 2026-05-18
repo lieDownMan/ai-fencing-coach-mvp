@@ -31,7 +31,8 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-_PLAYBOOK_PATH = Path(__file__).resolve().parent / "coach_playbook.json"
+_PLAYBOOK_PATH = Path(__file__).resolve().parents[2] / "coach_playbook.json"
+_LEGACY_PLAYBOOK_PATH = Path(__file__).resolve().parent / "coach_playbook.json"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -39,9 +40,15 @@ _PLAYBOOK_PATH = Path(__file__).resolve().parent / "coach_playbook.json"
 
 def _load_playbook(path: Path | str | None = None) -> Dict[str, Any]:
     """Load and cache the playbook JSON from disk."""
-    target = Path(path) if path else _PLAYBOOK_PATH
+    if path:
+        candidates = [Path(path)]
+    else:
+        candidates = [_PLAYBOOK_PATH, _LEGACY_PLAYBOOK_PATH]
+
+    target = next((candidate for candidate in candidates if candidate.exists()), candidates[0])
     if not target.exists():
-        raise FileNotFoundError(f"Coach playbook not found at {target}")
+        checked = ", ".join(str(candidate) for candidate in candidates)
+        raise FileNotFoundError(f"Coach playbook not found. Checked: {checked}")
     with open(target, "r", encoding="utf-8") as f:
         return json.load(f)
 

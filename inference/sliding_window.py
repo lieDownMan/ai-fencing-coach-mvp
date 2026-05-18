@@ -362,6 +362,9 @@ class FullVideoPipeline:
                 frames_meta.append({
                     "frame_index": frame_idx,
                     "tracks": detections,
+                    "target_skeleton": target_skel,
+                    "target_bbox": self.target_tracker.last_known_bbox,
+                    "target_track_id": self.target_tracker.locked_track_id,
                     "gatekeeper_state": self.gatekeeper.state,
                     "knee_angle": self.gatekeeper._get_knee_angle(target_skel, self.target_side) if target_skel else 180.0
                 })

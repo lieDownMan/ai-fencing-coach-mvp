@@ -84,9 +84,9 @@ class Database:
                     continue
                 # Naive matching by segment_index if available, or just frame
                 if "segment_index" in err:
-                    error_map[err["segment_index"]] = warning
+                    error_map.setdefault(err["segment_index"], warning)
                 else:
-                    error_map[err.get("start_frame")] = warning
+                    error_map.setdefault(err.get("start_frame"), warning)
                     
             for idx, seg in enumerate(action_segments):
                 start_frame = seg.get("video_start_frame", seg.get("start_frame", 0))
