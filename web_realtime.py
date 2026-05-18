@@ -11,7 +11,12 @@ from pydantic import BaseModel
 
 from inference.heuristic_debug import HEURISTIC_KEYS, compute_heuristic_metric, format_metrics, format_value
 from inference.heuristics_engine import FRONT_LIMBS, _get_joint, _pelvis_center
-from src.realtime.feedback_scheduler import DEFAULT_ERROR_WEIGHTS, normalize_error_keys
+from src.realtime.feedback_scheduler import (
+    DEFAULT_ERROR_WEIGHTS,
+    filter_error_keys_for_mode,
+    normalize_error_keys,
+    supported_modes_for_error_key,
+)
 from src.realtime.realtime_app import LiveVideoPipeline
 
 app = FastAPI()
@@ -393,12 +398,28 @@ HTML_PAGE = """
         }
 
         function checkedValues(name) {
-            return Array.from(document.querySelectorAll(`input[name="${name}"]:checked`)).map(input => input.value);
+            return Array.from(document.querySelectorAll(`input[name="${name}"]:checked:not(:disabled)`)).map(input => input.value);
         }
 
         function clearFeedbackChecks(name) {
             document.querySelectorAll(`input[name="${name}"]`).forEach(input => {
                 input.checked = false;
+            });
+        }
+
+        function syncFeedbackOptionsForMode() {
+            const mode = document.getElementById('training_mode').value;
+            document.querySelectorAll('.error-option[data-modes]').forEach(label => {
+                const modes = (label.dataset.modes || '').split('|').filter(Boolean);
+                const enabled = modes.includes(mode);
+                const input = label.querySelector('input[type="checkbox"]');
+                if (input) {
+                    input.disabled = !enabled;
+                    if (!enabled) {
+                        input.checked = false;
+                    }
+                }
+                label.style.display = enabled ? 'flex' : 'none';
             });
         }
 
@@ -417,6 +438,8 @@ HTML_PAGE = """
                 }
             });
         });
+        document.getElementById('training_mode').addEventListener('change', syncFeedbackOptionsForMode);
+        syncFeedbackOptionsForMode();
 
         // Poll the server for pipeline status every 200ms
         setInterval(async () => {
@@ -646,11 +669,17 @@ def _feedback_error_label(error_key: str) -> str:
 
 def _feedback_error_checkboxes_html(group_name: str, selected_keys) -> str:
     selected = set(selected_keys or [])
-    choices = sorted(DEFAULT_ERROR_WEIGHTS.keys())
+    choices = [
+        key for key in sorted(DEFAULT_ERROR_WEIGHTS.keys())
+        if supported_modes_for_error_key(key)
+    ]
     return "\n".join(
         "\n".join(
             [
-                '<label class="error-option">',
+                (
+                    '<label class="error-option" '
+                    f'data-modes="{escape("|".join(supported_modes_for_error_key(choice)))}">'
+                ),
                 (
                     f'<input type="checkbox" name="{escape(group_name)}" '
                     f'value="{escape(choice)}" {"checked" if choice in selected else ""}>'
@@ -797,14 +826,18 @@ def update_config(config: ConfigUpdate):
     DEBUG_ENABLED = bool(config.debug_enabled)
     DEBUG_HEURISTIC = config.debug_heuristic if config.debug_heuristic in ["all"] + HEURISTIC_KEYS else "all"
     DEBUG_WINDOW_SIZE = max(5, min(90, int(config.debug_window_size)))
-    valid_errors = set(DEFAULT_ERROR_WEIGHTS.keys())
-    FEEDBACK_FOCUS_ERRORS = [
-        key for key in normalize_error_keys(config.focus_errors)
-        if key in valid_errors
-    ]
+    FEEDBACK_FOCUS_ERRORS, _ = filter_error_keys_for_mode(
+        normalize_error_keys(config.focus_errors),
+        TRAINING_MODE,
+    )
+    FEEDBACK_MUTE_ERRORS, _ = filter_error_keys_for_mode(
+        normalize_error_keys(config.mute_errors),
+        TRAINING_MODE,
+    )
+    focus_set = set(FEEDBACK_FOCUS_ERRORS)
     FEEDBACK_MUTE_ERRORS = [
-        key for key in normalize_error_keys(config.mute_errors)
-        if key in valid_errors
+        key for key in FEEDBACK_MUTE_ERRORS
+        if key not in focus_set
     ]
     FEEDBACK_ONLY_SELECTED = bool(config.only_selected)
     

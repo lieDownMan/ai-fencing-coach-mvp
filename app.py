@@ -39,6 +39,7 @@ from inference.video_annotator import VideoAnnotator
 from database import Database
 from llm_agent import LLMAgent
 from src.realtime.feedback_scheduler import (
+    available_error_keys_for_mode,
     build_feedback_preferences,
     filter_posture_errors,
     sort_posture_errors_for_feedback,
@@ -66,6 +67,13 @@ _ERROR_CHOICE_TO_KEY = {
     _error_choice_label(key): key
     for key in _ERROR_KEYS
 }
+
+def _error_choices_for_mode(training_mode: str) -> list[str]:
+    return [
+        _error_choice_label(key)
+        for key in available_error_keys_for_mode(training_mode)
+        if key in _PLAYBOOK
+    ]
 
 def _selection_to_error_keys(selection) -> list[str]:
     if not selection:
@@ -114,6 +122,16 @@ def _remove_muted_from_focus(mute_selection, focus_selection):
         if item not in mute_set
     ]
     return gr.update(value=filtered_focus)
+
+def _sync_feedback_choices_for_mode(training_mode, focus_selection, mute_selection):
+    choices = _error_choices_for_mode(training_mode)
+    allowed = set(choices)
+    focus = [item for item in (focus_selection or []) if item in allowed]
+    mute = [item for item in (mute_selection or []) if item in allowed and item not in set(focus)]
+    return (
+        gr.update(choices=choices, value=focus),
+        gr.update(choices=choices, value=mute),
+    )
 
 db = Database()
 llm = LLMAgent()
@@ -268,6 +286,7 @@ def analyze_video(
         focus_errors=_selection_to_error_keys(focus_error_selection),
         mute_errors=_selection_to_error_keys(mute_error_selection),
         only_selected=bool(only_selected_errors),
+        training_mode=training_mode,
     )
     visible_errors = filter_posture_errors(
         results.get("posture_errors", []),
@@ -394,13 +413,13 @@ with gr.Blocks(title="AI Fencing Coach") as app:
                     )
                     with gr.Accordion("Feedback Focus", open=False):
                         focus_errors = gr.Dropdown(
-                            choices=_ERROR_CHOICES,
+                            choices=_error_choices_for_mode("Footwork"),
                             multiselect=True,
                             label="Focus Errors",
                             info="Boost these errors in the report and realtime-style cue ranking.",
                         )
                         mute_errors = gr.Dropdown(
-                            choices=_ERROR_CHOICES,
+                            choices=_error_choices_for_mode("Footwork"),
                             multiselect=True,
                             label="Mute Errors",
                             info="Hide these errors from the annotated video, table, and summary.",
@@ -418,6 +437,11 @@ with gr.Blocks(title="AI Fencing Coach") as app:
                             _remove_muted_from_focus,
                             [mute_errors, focus_errors],
                             [focus_errors],
+                        )
+                        training_mode.change(
+                            _sync_feedback_choices_for_mode,
+                            [training_mode, focus_errors, mute_errors],
+                            [focus_errors, mute_errors],
                         )
                     video_input = gr.File(
                         label="Upload Video",
