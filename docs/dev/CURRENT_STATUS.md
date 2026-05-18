@@ -1,7 +1,7 @@
 # Current Status and Handoff
 
 Status: Active handoff note
-Last updated: 2026-05-11
+Last updated: 2026-05-18
 Purpose: Give the next developer or agent an accurate picture of the current codebase, what changed recently, what is actually runnable, and what still needs attention.
 
 ## 1. Current Branch and Direction
@@ -28,6 +28,7 @@ This project is currently an AI-assisted fencing coaching prototype with:
 - optional Gemini post-session summary
 - new offline voice-coaching for immediate spoken cues
 - new real-time webcam and browser-streaming entrypoints
+- heuristic visualizer UI for skeleton overlays and threshold debugging
 
 The system is no longer just a batch video analysis tool. It now has three distinct runtime modes.
 
@@ -53,7 +54,7 @@ Key characteristics:
 
 This is the best general-purpose UI for local demoing and clip review.
 
-### B. `realtime_app.py`
+### B. `src/realtime/realtime_app.py`
 
 Use this for:
 
@@ -69,7 +70,7 @@ Key characteristics:
 
 This is the best choice for a **local laptop live coaching demo**.
 
-### C. `web_realtime_app.py`
+### C. `web_realtime.py`
 
 Use this for:
 
@@ -90,6 +91,16 @@ This is the best choice for:
 But note:
 
 - voice output still happens on the backend machine because `pyttsx3` runs there
+
+### D. `heuristic_visualizer.py`
+
+Use this for:
+
+- inspecting target skeletons on uploaded clips
+- selecting one heuristic mode at a time
+- showing raw metric values, thresholds, alert timestamps, and alert values
+
+This is the best choice for tuning or debugging `inference/heuristics_engine.py`.
 
 ## 4. Core Modules and Responsibilities
 
@@ -112,7 +123,7 @@ Current reality:
 
 ### Voice coaching
 
-- `realtime_voice_coach.py`
+- `src/realtime/realtime_voice_coach.py`
 - `coach_playbook.json`
 
 This is the new immediate-coaching path.
@@ -263,7 +274,7 @@ For a local laptop setup:
 
 Use:
 
-- `python realtime_app.py --source 0 --mode "Free Bouting" --target-side left`
+- `python -m src.realtime.realtime_app --source 0 --mode "Free Bouting" --target-side left`
 
 if the goal is:
 
@@ -288,7 +299,7 @@ if the goal is:
 
 Use:
 
-- `python web_realtime_app.py`
+- `python web_realtime.py`
 
 if the goal is:
 
@@ -309,13 +320,13 @@ For local voice coaching:
 
 - `pyttsx3` must install and work on the local OS audio stack
 
-If `lap` is missing, `realtime_app.py` falls back to plain pose detections
-without persistent track IDs instead of crashing.
+If `lap` is missing, `python -m src.realtime.realtime_app` falls back to plain
+pose detections without persistent track IDs instead of crashing.
 
 ## 9. Suggested Next Tasks for the New Agent
 
 1. verify local setup and entrypoints
-2. test `realtime_app.py` on the local laptop webcam
+2. test `python -m src.realtime.realtime_app` on the local laptop webcam
 3. test `app.py` on a short local video clip
 4. verify that `pyttsx3` voice cues are audible locally
 5. verify Gemini summary after `.env` is configured
@@ -346,9 +357,10 @@ Best entry files for the next agent:
 - `docs/dev/CURRENT_STATUS.md`
 - `docs/dev/NEXT_AGENT_PROMPT.md`
 - `app.py`
-- `realtime_app.py`
-- `web_realtime_app.py`
-- `realtime_voice_coach.py`
+- `heuristic_visualizer.py`
+- `src/realtime/realtime_app.py`
+- `web_realtime.py`
+- `src/realtime/realtime_voice_coach.py`
 - `coach_playbook.json`
 - `inference/heuristics_engine.py`
 

@@ -53,29 +53,29 @@ Use the `Processing` selector in the UI:
 ## Local Live Webcam Coaching
 
 ```bash
-python realtime_app.py --source 0 --mode "Free Bouting" --target-side left
+python -m src.realtime.realtime_app --source 0 --mode "Free Bouting" --target-side left
 ```
 
 Other modes:
 
 ```bash
-python realtime_app.py --source 0 --mode "Footwork"
-python realtime_app.py --source 0 --mode "Target Practice"
+python -m src.realtime.realtime_app --source 0 --mode "Footwork"
+python -m src.realtime.realtime_app --source 0 --mode "Target Practice"
 ```
 
 Useful local flags:
 
 ```bash
-python realtime_app.py --source 0 --target-side right
-python realtime_app.py --source 0 --pose-model yolov8n-pose.pt
-python realtime_app.py --source 0 --no-voice
-python realtime_app.py --source 0 --pose-backend mock --no-voice
+python -m src.realtime.realtime_app --source 0 --target-side right
+python -m src.realtime.realtime_app --source 0 --pose-model yolov8n-pose.pt
+python -m src.realtime.realtime_app --source 0 --no-voice
+python -m src.realtime.realtime_app --source 0 --pose-backend mock --no-voice
 ```
 
 Use a local video file instead of a webcam:
 
 ```bash
-python realtime_app.py --source path/to/video.mp4 --mode "Free Bouting"
+python -m src.realtime.realtime_app --source path/to/video.mp4 --mode "Free Bouting"
 ```
 
 This is the best option for:
@@ -91,12 +91,12 @@ plain pose detection without persistent track IDs.
 ## Browser Live Webcam Streaming
 
 ```bash
-python web_realtime_app.py
+python web_realtime.py
 ```
 
 Open:
 
-- `http://127.0.0.1:7861`
+- `http://127.0.0.1:8000`
 
 Use this when you want:
 
@@ -104,10 +104,28 @@ Use this when you want:
 - streaming analyzed frames
 - a web-based live demo
 
+## Heuristic Visualizer UI
+
+```bash
+python heuristic_visualizer.py
+```
+
+Open:
+
+- `http://127.0.0.1:7862` or the printed port if `7862` is busy
+
+Use this when you want:
+
+- see the target skeleton overlaid on a clip
+- inspect one heuristic at a time, or all heuristics together
+- see the metric value and threshold used by each heuristic
+- find the exact timestamp where the current runtime emitted a posture alert
+- download a CSV log and highlighted HTML log under `web_outputs/heuristic_debug/logs/`
+
 ## Notes About Local vs Workstation Usage
 
-- For local webcam plus local voice, prefer `realtime_app.py`.
-- For workstation compute plus browser webcam, use `web_realtime_app.py`.
+- For local webcam plus local voice, prefer `python -m src.realtime.realtime_app`.
+- For workstation compute plus browser webcam, use `web_realtime.py`.
 - Voice coaching uses `pyttsx3`, so audio comes out on the machine running the backend.
 - Gradio apps are local by default. Set `GRADIO_SHARE=1` before launch only when you need a public Gradio share link.
 
@@ -151,8 +169,9 @@ python -m src.training.train_fencenet --dataset data/training/ffd_prepared.npz -
 ## Outputs To Check
 
 - `annotated_output.mp4` from `app.py`
-- the OpenCV live window from `realtime_app.py`
-- the browser stream from `web_realtime_app.py`
+- the OpenCV live window from `python -m src.realtime.realtime_app`
+- the browser stream from `web_realtime.py`
+- `web_outputs/heuristic_debug/` for heuristic visualizer uploads and overlays
 - `fencing_coach.db` for persisted users and sessions
 - `reports/` for saved debug JSON or prior artifacts
 - `web_outputs/` for browser-generated files when applicable
@@ -165,5 +184,5 @@ python -m src.training.train_fencenet --dataset data/training/ffd_prepared.npz -
 - `GEMINI_API_KEY not set`: create `.env` in the repo root and restart `app.py`.
 - `pyttsx3` voice does not play: verify local OS audio support and package installation.
 - `ModuleNotFoundError: lap`: reinstall requirements. The live app can continue without persistent track IDs, but ByteTrack is more stable with `lap` installed.
-- webcam unavailable in `realtime_app.py`: confirm the camera is attached to the same machine.
+- webcam unavailable in `python -m src.realtime.realtime_app`: confirm the camera is attached to the same machine.
 - browser webcam works but no audio: remember `pyttsx3` speaks on the backend machine, not the browser client.

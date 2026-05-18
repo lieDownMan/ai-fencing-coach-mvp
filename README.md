@@ -6,6 +6,7 @@ This repository is an AI-assisted fencing coaching prototype focused on:
 - live local webcam coaching
 - browser webcam streaming
 - rule-based biomechanics feedback
+- skeleton and heuristic debugging for threshold tuning
 - playbook-based session summaries, optionally polished by Gemini
 
 The project is a coaching aid, not a referee replacement.
@@ -36,7 +37,7 @@ Use this when you want:
 ### 2. Local Live Webcam Coaching
 
 ```bash
-python realtime_app.py --source 0 --mode "Free Bouting" --target-side left
+python -m src.realtime.realtime_app --source 0 --mode "Free Bouting" --target-side left
 ```
 
 Use this when you want:
@@ -50,21 +51,34 @@ This is the best choice for a **local laptop demo**.
 Useful live flags:
 
 ```bash
-python realtime_app.py --source 0 --target-side right
-python realtime_app.py --source 0 --pose-model yolov8n-pose.pt
-python realtime_app.py --source 0 --no-voice
+python -m src.realtime.realtime_app --source 0 --target-side right
+python -m src.realtime.realtime_app --source 0 --pose-model yolov8n-pose.pt
+python -m src.realtime.realtime_app --source 0 --no-voice
 ```
 
 ### 3. Browser Live Webcam Streaming
 
 ```bash
-python web_realtime_app.py
+python web_realtime.py
 ```
 
 Use this when you want:
 
 - browser webcam streaming
 - live analyzed frames in a web page
+
+### 4. Heuristic Visualizer
+
+```bash
+python heuristic_visualizer.py
+```
+
+Use this when you want:
+
+- skeleton overlay for a clip
+- one mode per heuristic
+- raw metric values, thresholds, alert times, and alert values
+- a debugging table for tuning `inference/heuristics_engine.py`
 
 ## Setup
 
@@ -107,9 +121,10 @@ camera or video
 Important runtime files:
 
 - `app.py`
-- `realtime_app.py`
-- `web_realtime_app.py`
-- `realtime_voice_coach.py`
+- `heuristic_visualizer.py`
+- `src/realtime/realtime_app.py`
+- `src/realtime/realtime_voice_coach.py`
+- `web_realtime.py`
 - `coach_playbook.json`
 - `inference/`
 - `llm_agent.py`
