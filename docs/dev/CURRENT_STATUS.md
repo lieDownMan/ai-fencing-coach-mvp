@@ -157,6 +157,9 @@ one eligible cue at a time, and exposes the top ranked items for the OpenCV HUD
 and browser status/UI. Users can now focus, mute, or exclusively show selected
 errors. In realtime this controls voice/HUD selection; in post-session review
 it controls the annotated video, warning table, and summary presentation.
+Shared feedback weights, training-mode availability, and future-disabled
+errors live in `src/realtime/feedback_config.py`, so the CLI, Gradio app,
+browser realtime UI, and scheduler use the same supported-error list.
 
 ### LLM summary
 
