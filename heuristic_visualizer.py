@@ -352,12 +352,21 @@ def _build_log_html(df: pd.DataFrame) -> str:
     for _, row in df.iterrows():
         status = str(row.get("status", "OK"))
         row_class = "alert" if status == "ALERT" else "triggered" if status == "THRESHOLD" else "ok"
+        row_style = _row_highlight_style(status)
         cells = []
         for col in df.columns:
             value = row.get(col, "")
-            cell_class = "primary" if col == "primary_value" and status != "OK" else ""
-            cells.append(f"<td class=\"{cell_class}\">{escape(_format_log_value(value))}</td>")
-        body_rows.append(f"<tr class=\"{row_class}\">{''.join(cells)}</tr>")
+            cell_style = row_style
+            cell_class = ""
+            if col == "primary_value" and status != "OK":
+                cell_class = "primary"
+                cell_style += "font-weight:700;color:#9a0000;"
+            style_attr = f" style=\"{cell_style}\"" if cell_style else ""
+            cells.append(
+                f"<td class=\"{cell_class}\"{style_attr}>"
+                f"{escape(_format_log_value(value))}</td>"
+            )
+        body_rows.append(f"<tr class=\"{row_class}\" style=\"{row_style}\">{''.join(cells)}</tr>")
 
     return f"""<!doctype html>
 <html>
@@ -427,6 +436,14 @@ Primary value cells are bold when the row is over threshold.
 </div>
 </body>
 </html>"""
+
+
+def _row_highlight_style(status: str) -> str:
+    if status == "ALERT":
+        return "background-color:#ffd4d4;"
+    if status == "THRESHOLD":
+        return "background-color:#fff0b8;"
+    return "background-color:#ffffff;"
 
 
 def _format_log_value(value: Any) -> str:
