@@ -5,22 +5,34 @@ from typing import Any, Dict, Iterable, List, Optional
 
 import numpy as np
 
-from .heuristics_engine import FRONT_LIMBS, calc_angle, _get_joint, _pelvis_center
+from .heuristics_engine import (
+    BOUNCE_MIN_PELVIS_SAMPLES,
+    BOUNCE_RATIO_THRESHOLD,
+    COM_IN_FRONT_RATIO_THRESHOLD,
+    COM_LEANING_BACK_RATIO_THRESHOLD,
+    COM_MIN_BASE_WIDTH_PX,
+    FOOT_BEFORE_HAND_MIN_DISPLACEMENT_PX,
+    FRONT_LIMBS,
+    GUARD_DROPPED_FREE_BOUTING_THRESHOLD_FRAMES,
+    GUARD_DROPPED_THRESHOLD_FRAMES,
+    HEURISTIC_ERROR_KEYS,
+    INCOMPLETE_ARM_EXTENSION_ANGLE_DEG,
+    LUNGE_KNEE_MIN_ANGLE_DEG,
+    NARROW_STEP_RATIO_THRESHOLD,
+    OVER_PARRY_MIN_WRIST_SAMPLES,
+    OVER_PARRY_RATIO_THRESHOLD,
+    OVER_PARRY_SHOULDER_MULTIPLIER,
+    STANCE_TOO_HIGH_ANGLE_DEG,
+    STEP_MIN_SHOULDER_WIDTH_PX,
+    STEP_SHOULDER_PROXY_MULTIPLIER,
+    WIDE_STEP_RATIO_THRESHOLD,
+    calc_angle,
+    _get_joint,
+    _pelvis_center,
+)
 
 
-HEURISTIC_KEYS = [
-    "bounce_excessive",
-    "lunge_overextension",
-    "guard_dropped",
-    "foot_before_hand",
-    "stance_too_high",
-    "incomplete_arm_extension",
-    "over_parrying",
-    "wide_step",
-    "narrow_step",
-    "center_of_mass_in_front",
-    "center_of_mass_leaning_backward",
-]
+HEURISTIC_KEYS = list(HEURISTIC_ERROR_KEYS)
 
 
 @dataclass
@@ -235,8 +247,11 @@ def _metric_bounce(skeletons: List[Dict[str, Any]]) -> HeuristicMetric:
             if isinstance(joint, (list, tuple, np.ndarray)) and len(joint) == 2:
                 all_ys.append(float(joint[1]))
 
-    if len(pelvis_ys) < 5 or len(all_ys) < 2:
-        return _empty_metric("bounce_excessive", "need >=5 pelvis samples")
+    if len(pelvis_ys) < BOUNCE_MIN_PELVIS_SAMPLES or len(all_ys) < 2:
+        return _empty_metric(
+            "bounce_excessive",
+            f"need >={BOUNCE_MIN_PELVIS_SAMPLES} pelvis samples",
+        )
     bbox_height = max(all_ys) - min(all_ys)
     if bbox_height < 1e-6:
         return _empty_metric("bounce_excessive", "bbox height too small")
@@ -244,9 +259,9 @@ def _metric_bounce(skeletons: List[Dict[str, Any]]) -> HeuristicMetric:
     ratio = delta_y / bbox_height
     return HeuristicMetric(
         "bounce_excessive",
-        ratio > 0.10,
+        ratio > BOUNCE_RATIO_THRESHOLD,
         ratio,
-        "pelvis_delta / bbox_height > 0.10",
+        f"pelvis_delta / bbox_height > {BOUNCE_RATIO_THRESHOLD:.2f}",
         {"pelvis_delta": delta_y, "bbox_height": bbox_height, "ratio": ratio},
     )
 
@@ -277,9 +292,9 @@ def _metric_lunge(skeletons: List[Dict[str, Any]], target_side: str) -> Heuristi
     angle = calc_angle(hip, knee, ankle)
     return HeuristicMetric(
         "lunge_overextension",
-        angle < 90.0,
+        angle < LUNGE_KNEE_MIN_ANGLE_DEG,
         angle,
-        "front_knee_angle < 90 deg",
+        f"front_knee_angle < {LUNGE_KNEE_MIN_ANGLE_DEG:.0f} deg",
         {"front_knee_angle": angle, "front_ankle_disp": max_disp, "peak_index": peak_index},
     )
 
@@ -290,7 +305,11 @@ def _metric_guard(
     training_mode: str,
 ) -> HeuristicMetric:
     limbs = FRONT_LIMBS[target_side]
-    threshold = 20 if training_mode == "Free Bouting" else 10
+    threshold = (
+        GUARD_DROPPED_FREE_BOUTING_THRESHOLD_FRAMES
+        if training_mode == "Free Bouting"
+        else GUARD_DROPPED_THRESHOLD_FRAMES
+    )
     consecutive = 0
     max_consecutive = 0
     frames_low = 0
@@ -337,12 +356,20 @@ def _metric_foot_before_hand(skeletons: List[Dict[str, Any]], target_side: str) 
             if disp > max_ankle_disp:
                 max_ankle_disp = disp
                 ankle_peak = i
-    triggered = max_ankle_disp > 5 and max_wrist_disp > 5 and ankle_peak < wrist_peak
+    triggered = (
+        max_ankle_disp > FOOT_BEFORE_HAND_MIN_DISPLACEMENT_PX
+        and max_wrist_disp > FOOT_BEFORE_HAND_MIN_DISPLACEMENT_PX
+        and ankle_peak < wrist_peak
+    )
     return HeuristicMetric(
         "foot_before_hand",
         triggered,
         float(ankle_peak - wrist_peak),
-        "ankle_disp > 5, wrist_disp > 5, ankle_peak_frame < wrist_peak_frame",
+        (
+            f"ankle_disp > {FOOT_BEFORE_HAND_MIN_DISPLACEMENT_PX:.0f}, "
+            f"wrist_disp > {FOOT_BEFORE_HAND_MIN_DISPLACEMENT_PX:.0f}, "
+            "ankle_peak_frame < wrist_peak_frame"
+        ),
         {
             "wrist_peak_index": wrist_peak,
             "ankle_peak_index": ankle_peak,
@@ -366,9 +393,9 @@ def _metric_stance_too_high(skeletons: List[Dict[str, Any]], target_side: str) -
     avg_angle = float(np.mean(angles))
     return HeuristicMetric(
         "stance_too_high",
-        avg_angle > 160.0,
+        avg_angle > STANCE_TOO_HIGH_ANGLE_DEG,
         avg_angle,
-        "avg_front_knee_angle > 160 deg",
+        f"avg_front_knee_angle > {STANCE_TOO_HIGH_ANGLE_DEG:.0f} deg",
         {"avg_front_knee_angle": avg_angle, "min_angle": min(angles), "max_angle": max(angles)},
     )
 
@@ -402,9 +429,9 @@ def _metric_incomplete_arm_extension(
     angle = calc_angle(shoulder, elbow, wrist)
     return HeuristicMetric(
         "incomplete_arm_extension",
-        angle < 155.0,
+        angle < INCOMPLETE_ARM_EXTENSION_ANGLE_DEG,
         angle,
-        "arm_angle_at_peak_extension < 155 deg",
+        f"arm_angle_at_peak_extension < {INCOMPLETE_ARM_EXTENSION_ANGLE_DEG:.0f} deg",
         {"arm_angle": angle, "wrist_disp": max_disp, "peak_index": peak_index},
     )
 
@@ -421,7 +448,7 @@ def _metric_over_parrying(skeletons: List[Dict[str, Any]], target_side: str) -> 
             break
         pelvis = _pelvis_center(skel)
         if shoulder is not None and pelvis is not None:
-            shoulder_width = abs(float(shoulder[0] - pelvis[0])) * 2.0
+            shoulder_width = abs(float(shoulder[0] - pelvis[0])) * OVER_PARRY_SHOULDER_MULTIPLIER
             break
     if shoulder_width is None or shoulder_width < 1e-6:
         return _empty_metric("over_parrying", "missing shoulder width")
@@ -431,15 +458,18 @@ def _metric_over_parrying(skeletons: List[Dict[str, Any]], target_side: str) -> 
         wrist = _get_joint(skel, limbs["wrist"])
         if wrist is not None:
             wrist_xs.append(float(wrist[0]))
-    if len(wrist_xs) < 5:
-        return _empty_metric("over_parrying", "need >=5 wrist samples")
+    if len(wrist_xs) < OVER_PARRY_MIN_WRIST_SAMPLES:
+        return _empty_metric(
+            "over_parrying",
+            f"need >={OVER_PARRY_MIN_WRIST_SAMPLES} wrist samples",
+        )
     sweep = max(wrist_xs) - min(wrist_xs)
     ratio = sweep / shoulder_width
     return HeuristicMetric(
         "over_parrying",
-        ratio > 2.0,
+        ratio > OVER_PARRY_RATIO_THRESHOLD,
         ratio,
-        "wrist_sweep / shoulder_width > 2.0",
+        f"wrist_sweep / shoulder_width > {OVER_PARRY_RATIO_THRESHOLD:.1f}",
         {"wrist_sweep": sweep, "shoulder_width": shoulder_width, "ratio": ratio},
     )
 
@@ -459,8 +489,8 @@ def _metric_step_width(
         pelvis = _pelvis_center(skel)
         if front_ankle is None or back_ankle is None or front_shoulder is None or pelvis is None:
             continue
-        shoulder_width = abs(float(front_shoulder[0] - pelvis[0])) * 2.5
-        if shoulder_width < 10.0:
+        shoulder_width = abs(float(front_shoulder[0] - pelvis[0])) * STEP_SHOULDER_PROXY_MULTIPLIER
+        if shoulder_width < STEP_MIN_SHOULDER_WIDTH_PX:
             continue
         step_width = abs(float(front_ankle[0] - back_ankle[0]))
         ratios.append(step_width / shoulder_width)
@@ -468,8 +498,16 @@ def _metric_step_width(
         return _empty_metric(heuristic_key, "missing step-width samples")
 
     primary = max(ratios) if heuristic_key == "wide_step" else min(ratios)
-    triggered = primary > 3.0 if heuristic_key == "wide_step" else primary < 1.0
-    threshold = "max_ratio > 3.0" if heuristic_key == "wide_step" else "min_ratio < 1.0"
+    triggered = (
+        primary > WIDE_STEP_RATIO_THRESHOLD
+        if heuristic_key == "wide_step"
+        else primary < NARROW_STEP_RATIO_THRESHOLD
+    )
+    threshold = (
+        f"max_ratio > {WIDE_STEP_RATIO_THRESHOLD:.1f}"
+        if heuristic_key == "wide_step"
+        else f"min_ratio < {NARROW_STEP_RATIO_THRESHOLD:.1f}"
+    )
     return HeuristicMetric(
         heuristic_key,
         triggered,
@@ -497,7 +535,7 @@ def _metric_center_of_mass(
         back_x = float(back_ankle[0])
         pelvis_x = float(pelvis[0])
         base_width = abs(front_x - back_x)
-        if base_width < 10.0:
+        if base_width < COM_MIN_BASE_WIDTH_PX:
             continue
         if front_x > back_x:
             ratio = (pelvis_x - back_x) / base_width
@@ -508,8 +546,16 @@ def _metric_center_of_mass(
         return _empty_metric(heuristic_key, "missing center-of-mass samples")
 
     primary = max(ratios) if heuristic_key == "center_of_mass_in_front" else min(ratios)
-    triggered = primary > 0.65 if heuristic_key == "center_of_mass_in_front" else primary < 0.35
-    threshold = "max_ratio > 0.65" if heuristic_key == "center_of_mass_in_front" else "min_ratio < 0.35"
+    triggered = (
+        primary > COM_IN_FRONT_RATIO_THRESHOLD
+        if heuristic_key == "center_of_mass_in_front"
+        else primary < COM_LEANING_BACK_RATIO_THRESHOLD
+    )
+    threshold = (
+        f"max_ratio > {COM_IN_FRONT_RATIO_THRESHOLD:.2f}"
+        if heuristic_key == "center_of_mass_in_front"
+        else f"min_ratio < {COM_LEANING_BACK_RATIO_THRESHOLD:.2f}"
+    )
     return HeuristicMetric(
         heuristic_key,
         triggered,

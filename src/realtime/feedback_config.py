@@ -6,65 +6,58 @@ error weights and mode availability do not drift apart.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional
 
 
-DEFAULT_ERROR_WEIGHTS: Dict[str, float] = {
-    "foot_before_hand": 5.0,
-    "lunge_overextension": 9.5,
-    "incomplete_arm_extension": 9.0,
-    "guard_dropped": 9.7,
-    "stance_too_high": 10.0,
-    "bounce_excessive": 6.5,
-    "center_of_mass_in_front": 6.0,
-    "center_of_mass_leaning_backward": 6.0,
-    "over_parrying": 5.0,
-    "wide_step": 4.0,
-    "narrow_step": 9.0,
-    "wide_disengage": 4.0,
-}
-
 TRAINING_MODES: tuple[str, ...] = ("Footwork", "Target Practice", "Free Bouting")
 
+
+@dataclass(frozen=True)
+class FeedbackErrorConfig:
+    """UI/scheduler metadata for one coaching error key."""
+
+    weight: float
+    modes: tuple[str, ...] = TRAINING_MODES
+    future: bool = False
+
+
+# Add or tune feedback errors here. The scheduler, CLI, Gradio app, and web UI
+# derive their weights and supported-mode lists from this single registry.
+FEEDBACK_ERROR_CONFIG: Dict[str, FeedbackErrorConfig] = {
+    "foot_before_hand": FeedbackErrorConfig(5.0, ("Target Practice",)),
+    "lunge_overextension": FeedbackErrorConfig(9.5, ("Target Practice",)),
+    "incomplete_arm_extension": FeedbackErrorConfig(9.0, ("Target Practice",)),
+    "guard_dropped": FeedbackErrorConfig(9.7),
+    "stance_too_high": FeedbackErrorConfig(10.0),
+    "bounce_excessive": FeedbackErrorConfig(6.5),
+    "center_of_mass_in_front": FeedbackErrorConfig(6.0),
+    "center_of_mass_leaning_backward": FeedbackErrorConfig(6.0),
+    "over_parrying": FeedbackErrorConfig(5.0),
+    "wide_step": FeedbackErrorConfig(4.0),
+    "narrow_step": FeedbackErrorConfig(9.0),
+    "wide_disengage": FeedbackErrorConfig(4.0, future=True),
+}
+
+DEFAULT_ERROR_WEIGHTS: Dict[str, float] = {
+    key: config.weight
+    for key, config in FEEDBACK_ERROR_CONFIG.items()
+}
+
 # Present in the playbook/weights but not emitted by the current heuristic engine.
-FUTURE_ERROR_KEYS: set[str] = {"wide_disengage"}
+FUTURE_ERROR_KEYS: set[str] = {
+    key for key, config in FEEDBACK_ERROR_CONFIG.items()
+    if config.future
+}
 
 # Mode-level availability mirrors HeuristicsEngine._check_rules. This is less
 # strict than action-level gating because the UI cannot know the next action.
 ERROR_AVAILABILITY_BY_MODE: Dict[str, set[str]] = {
-    "Footwork": {
-        "guard_dropped",
-        "bounce_excessive",
-        "stance_too_high",
-        "wide_step",
-        "narrow_step",
-        "center_of_mass_in_front",
-        "center_of_mass_leaning_backward",
-        "over_parrying",
-    },
-    "Target Practice": {
-        "guard_dropped",
-        "lunge_overextension",
-        "foot_before_hand",
-        "incomplete_arm_extension",
-        "bounce_excessive",
-        "stance_too_high",
-        "wide_step",
-        "narrow_step",
-        "center_of_mass_in_front",
-        "center_of_mass_leaning_backward",
-        "over_parrying",
-    },
-    "Free Bouting": {
-        "guard_dropped",
-        "bounce_excessive",
-        "stance_too_high",
-        "wide_step",
-        "narrow_step",
-        "center_of_mass_in_front",
-        "center_of_mass_leaning_backward",
-        "over_parrying",
-    },
+    mode: {
+        key for key, config in FEEDBACK_ERROR_CONFIG.items()
+        if mode in config.modes and not config.future
+    }
+    for mode in TRAINING_MODES
 }
 
 
@@ -89,17 +82,18 @@ def available_error_keys_for_mode(
     include_future: bool = False,
 ) -> List[str]:
     """Return error keys that can be emitted in the selected training mode."""
-    if training_mode in ERROR_AVAILABILITY_BY_MODE:
-        keys = set(ERROR_AVAILABILITY_BY_MODE[str(training_mode)])
+    if training_mode in TRAINING_MODES:
+        keys = {
+            key for key, config in FEEDBACK_ERROR_CONFIG.items()
+            if str(training_mode) in config.modes
+        }
     else:
-        keys = set(DEFAULT_ERROR_WEIGHTS.keys())
+        keys = set(FEEDBACK_ERROR_CONFIG.keys())
 
-    if include_future:
-        keys.update(FUTURE_ERROR_KEYS)
-    else:
+    if not include_future:
         keys.difference_update(FUTURE_ERROR_KEYS)
 
-    return sorted(key for key in keys if key in DEFAULT_ERROR_WEIGHTS)
+    return sorted(keys)
 
 
 def supported_modes_for_error_key(
@@ -108,13 +102,12 @@ def supported_modes_for_error_key(
     include_future: bool = False,
 ) -> List[str]:
     """Return training modes where an error can be configured."""
-    modes = [
-        mode for mode in TRAINING_MODES
-        if error_key in available_error_keys_for_mode(mode, include_future=include_future)
-    ]
-    if include_future and error_key in FUTURE_ERROR_KEYS:
-        return list(TRAINING_MODES)
-    return modes
+    config = FEEDBACK_ERROR_CONFIG.get(error_key)
+    if config is None:
+        return []
+    if config.future and not include_future:
+        return []
+    return list(config.modes)
 
 
 def is_error_available_for_mode(

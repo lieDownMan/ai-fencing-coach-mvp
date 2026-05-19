@@ -15,6 +15,7 @@ The project is a coaching aid, not a referee replacement.
 
 - [docs/dev/CURRENT_STATUS.md](docs/dev/CURRENT_STATUS.md): best handoff and reality-check document
 - [docs/dev/QUICKSTART.md](docs/dev/QUICKSTART.md): actual run commands
+- [docs/dev/ADDING_HEURISTIC.md](docs/dev/ADDING_HEURISTIC.md): how to tune weights or add a heuristic
 - [docs/dev/README.md](docs/dev/README.md): development overview
 - [docs/README.md](docs/README.md): full docs index
 

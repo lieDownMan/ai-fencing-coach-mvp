@@ -34,6 +34,7 @@ def test_summary_without_llm_uses_playbook_counts(monkeypatch):
     assert "LLM Agent disabled" not in summary
     assert aggregated[0]["key"] == "guard_dropped"
     assert aggregated[0]["count"] == 2
+    assert "practice" in aggregated[0]
     assert aggregated[1]["key"] == "foot_before_hand"
     assert aggregated[1]["count"] == 1
     assert "Free Bouting" in summary
@@ -66,6 +67,8 @@ def test_summary_prompt_with_llm_includes_playbook_context(monkeypatch):
     assert "error_key: guard_dropped" in captured["prompt"]
     assert "frequency: 2" in captured["prompt"]
     assert "short_cue:" in captured["prompt"]
+    assert "practice:" in captured["prompt"]
+    assert "practice recommendation" in captured["prompt"]
     assert "List every detected problem" in captured["prompt"]
 
 

@@ -20,6 +20,20 @@ from inference.heuristic_debug import (
     format_value,
     _target_detection,
 )
+from inference.heuristics_engine import (
+    BOUNCE_RATIO_THRESHOLD,
+    COM_IN_FRONT_RATIO_THRESHOLD,
+    COM_LEANING_BACK_RATIO_THRESHOLD,
+    FOOT_BEFORE_HAND_MIN_DISPLACEMENT_PX,
+    GUARD_DROPPED_FREE_BOUTING_THRESHOLD_FRAMES,
+    GUARD_DROPPED_THRESHOLD_FRAMES,
+    INCOMPLETE_ARM_EXTENSION_ANGLE_DEG,
+    LUNGE_KNEE_MIN_ANGLE_DEG,
+    NARROW_STEP_RATIO_THRESHOLD,
+    OVER_PARRY_RATIO_THRESHOLD,
+    STANCE_TOO_HIGH_ANGLE_DEG,
+    WIDE_STEP_RATIO_THRESHOLD,
+)
 from inference.sliding_window import FullVideoPipeline
 
 
@@ -65,77 +79,83 @@ HEURISTIC_NOTES = {
         "title": "bounce_excessive",
         "values": "pelvis vertical movement, full skeleton bbox height, ratio = pelvis_delta / bbox_height",
         "primary": "ratio",
-        "threshold": "ratio > 0.10",
+        "threshold": f"ratio > {BOUNCE_RATIO_THRESHOLD:.2f}",
         "joints": "left_hip, right_hip, all detected joints for bbox height",
     },
     "lunge_overextension": {
         "title": "lunge_overextension",
         "values": "front ankle displacement, front knee angle at peak ankle displacement",
         "primary": "front_knee_angle",
-        "threshold": "front_knee_angle < 90 deg",
+        "threshold": f"front_knee_angle < {LUNGE_KNEE_MIN_ANGLE_DEG:.0f} deg",
         "joints": "front hip, front knee, front ankle",
     },
     "guard_dropped": {
         "title": "guard_dropped",
         "values": "whether front wrist is below pelvis, consecutive low-guard frames",
         "primary": "max_consecutive low-guard frames",
-        "threshold": "> 10 frames outside Free Bouting, > 20 frames in Free Bouting",
+        "threshold": (
+            f"> {GUARD_DROPPED_THRESHOLD_FRAMES} frames outside Free Bouting, "
+            f"> {GUARD_DROPPED_FREE_BOUTING_THRESHOLD_FRAMES} frames in Free Bouting"
+        ),
         "joints": "front_wrist, left_hip, right_hip",
     },
     "foot_before_hand": {
         "title": "foot_before_hand",
         "values": "front wrist displacement peak frame, front ankle displacement peak frame",
         "primary": "ankle_peak_index - wrist_peak_index",
-        "threshold": "ankle and wrist displacement > 5 px, ankle peak happens before wrist peak",
+        "threshold": (
+            f"ankle and wrist displacement > {FOOT_BEFORE_HAND_MIN_DISPLACEMENT_PX:.0f} px, "
+            "ankle peak happens before wrist peak"
+        ),
         "joints": "front_wrist, front_ankle",
     },
     "stance_too_high": {
         "title": "stance_too_high",
         "values": "front knee angle over the action window",
         "primary": "average front knee angle",
-        "threshold": "avg_front_knee_angle > 160 deg",
+        "threshold": f"avg_front_knee_angle > {STANCE_TOO_HIGH_ANGLE_DEG:.0f} deg",
         "joints": "front hip, front knee, front ankle",
     },
     "incomplete_arm_extension": {
         "title": "incomplete_arm_extension",
         "values": "front wrist displacement, arm angle at peak wrist extension",
         "primary": "arm_angle",
-        "threshold": "arm_angle < 155 deg",
+        "threshold": f"arm_angle < {INCOMPLETE_ARM_EXTENSION_ANGLE_DEG:.0f} deg",
         "joints": "front_shoulder, front_elbow, front_wrist",
     },
     "over_parrying": {
         "title": "over_parrying",
         "values": "front wrist horizontal sweep, shoulder-width body reference, ratio",
         "primary": "wrist_sweep / shoulder_width",
-        "threshold": "ratio > 2.0",
+        "threshold": f"ratio > {OVER_PARRY_RATIO_THRESHOLD:.1f}",
         "joints": "front_wrist, front_shoulder, opposite shoulder or pelvis fallback",
     },
     "wide_step": {
         "title": "wide_step",
         "values": "front/back ankle distance, shoulder-width proxy, step-width ratio",
         "primary": "max step_width / shoulder_width ratio",
-        "threshold": "max_ratio > 3.0",
+        "threshold": f"max_ratio > {WIDE_STEP_RATIO_THRESHOLD:.1f}",
         "joints": "front ankle, back ankle, front_shoulder, pelvis",
     },
     "narrow_step": {
         "title": "narrow_step",
         "values": "front/back ankle distance, shoulder-width proxy, step-width ratio",
         "primary": "min step_width / shoulder_width ratio",
-        "threshold": "min_ratio < 1.0",
+        "threshold": f"min_ratio < {NARROW_STEP_RATIO_THRESHOLD:.1f}",
         "joints": "front ankle, back ankle, front_shoulder, pelvis",
     },
     "center_of_mass_in_front": {
         "title": "center_of_mass_in_front",
         "values": "pelvis x-position between back ankle and front ankle",
         "primary": "max pelvis position ratio",
-        "threshold": "max_ratio > 0.65",
+        "threshold": f"max_ratio > {COM_IN_FRONT_RATIO_THRESHOLD:.2f}",
         "joints": "front ankle, back ankle, left_hip, right_hip",
     },
     "center_of_mass_leaning_backward": {
         "title": "center_of_mass_leaning_backward",
         "values": "pelvis x-position between back ankle and front ankle",
         "primary": "min pelvis position ratio",
-        "threshold": "min_ratio < 0.35",
+        "threshold": f"min_ratio < {COM_LEANING_BACK_RATIO_THRESHOLD:.2f}",
         "joints": "front ankle, back ankle, left_hip, right_hip",
     },
 }
