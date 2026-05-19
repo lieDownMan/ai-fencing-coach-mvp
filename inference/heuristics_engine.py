@@ -1,5 +1,4 @@
-"""
-Geometric Heuristics Engine — Posture evaluator for fencing actions.
+"""Geometric posture heuristics for fencing actions.
 
 Returns machine-readable error *keys* (matching coach_playbook.json)
 instead of human-readable strings so that downstream consumers
@@ -22,6 +21,43 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+HEURISTIC_ERROR_KEYS: tuple[str, ...] = (
+    "bounce_excessive",
+    "lunge_overextension",
+    "guard_dropped",
+    "foot_before_hand",
+    "stance_too_high",
+    "incomplete_arm_extension",
+    "over_parrying",
+    "wide_step",
+    "narrow_step",
+    "center_of_mass_in_front",
+    "center_of_mass_leaning_backward",
+)
+FUTURE_HEURISTIC_ERROR_KEYS: tuple[str, ...] = ("wide_disengage",)
+
+OFFENSIVE_ACTIONS: set[str] = {"R", "JS", "WW", "IS"}
+FOOTWORK_ACTIONS: set[str] = {"SF", "SB"}
+
+BOUNCE_MIN_PELVIS_SAMPLES = 5
+BOUNCE_RATIO_THRESHOLD = 0.25
+LUNGE_KNEE_MIN_ANGLE_DEG = 90.0
+GUARD_DROPPED_THRESHOLD_FRAMES = 10
+GUARD_DROPPED_FREE_BOUTING_THRESHOLD_FRAMES = 20
+FOOT_BEFORE_HAND_MIN_DISPLACEMENT_PX = 5.0
+STANCE_TOO_HIGH_ANGLE_DEG = 170.0
+INCOMPLETE_ARM_EXTENSION_ANGLE_DEG = 155.0
+OVER_PARRY_MIN_WRIST_SAMPLES = 5
+OVER_PARRY_SHOULDER_MULTIPLIER = 2.0
+OVER_PARRY_RATIO_THRESHOLD = 2.0
+STEP_SHOULDER_PROXY_MULTIPLIER = 2.5
+STEP_MIN_SHOULDER_WIDTH_PX = 10.0
+WIDE_STEP_RATIO_THRESHOLD = 3.0
+NARROW_STEP_RATIO_THRESHOLD = 1.0
+COM_MIN_BASE_WIDTH_PX = 10.0
+COM_IN_FRONT_RATIO_THRESHOLD = 0.65
+COM_LEANING_BACK_RATIO_THRESHOLD = 0.35
 
 FRONT_LIMBS = {
     "left": {
@@ -133,10 +169,10 @@ class HeuristicsEngine:
             return []
 
         triggered: List[Dict[str, Any]] = []
-        is_offensive = action in ["R", "JS", "WW", "IS"]
+        is_offensive = action in OFFENSIVE_ACTIONS
 
-        # --- Footwork rules (Mode A, SF/SB) ---
-        if self.training_mode == "Footwork" and action in ["SF", "SB"]:
+        # --- Footwork rules ---
+        if self.training_mode == "Footwork" and action in FOOTWORK_ACTIONS:
             self._try_append(triggered, self._check_bounce(skeletons))
             self._try_append(triggered, self._check_stance_too_high(skeletons))
             self._try_append(triggered, self._check_step_width(skeletons))
@@ -153,14 +189,14 @@ class HeuristicsEngine:
 
        
         # --- Stance too high + Bounce (en-garde check, all modes, neutral) ---
-        if self.training_mode != "Footwork" and action in ["SF", "SB"]:
+        if self.training_mode != "Footwork" and action in FOOTWORK_ACTIONS:
             self._try_append(triggered, self._check_stance_too_high(skeletons))
             self._try_append(triggered, self._check_bounce(skeletons))
             self._try_append(triggered, self._check_step_width(skeletons))
             self._try_append(triggered, self._check_center_of_mass(skeletons))
 
         # --- Over-parrying (defensive context: SB all modes, or SF/SB in Free Bouting) ---
-        if action == "SB" or (self.training_mode == "Free Bouting" and action in ["SF", "SB"]):
+        if action == "SB" or (self.training_mode == "Free Bouting" and action in FOOTWORK_ACTIONS):
             self._try_append(triggered, self._check_over_parrying(skeletons))
 
         return triggered
@@ -173,7 +209,7 @@ class HeuristicsEngine:
             target.append(err)
 
     # ------------------------------------------------------------------
-    # Rule 1: bounce_excessive — 步伐上下浮動
+    # Rule 1: bounce_excessive
     # Trigger: Footwork mode, SF/SB
     # ------------------------------------------------------------------
 
@@ -190,19 +226,19 @@ class HeuristicsEngine:
                 if isinstance(j, (list, tuple, np.ndarray)) and len(j) == 2:
                     all_ys.append(float(j[1]))
 
-        if len(pelvis_ys) < 5 or len(all_ys) < 2:
+        if len(pelvis_ys) < BOUNCE_MIN_PELVIS_SAMPLES or len(all_ys) < 2:
             return None
         bbox_height = max(all_ys) - min(all_ys)
         if bbox_height < 1e-6:
             return None
 
         delta_y = max(pelvis_ys) - min(pelvis_ys)
-        if delta_y > 0.25 * bbox_height:
+        if delta_y > BOUNCE_RATIO_THRESHOLD * bbox_height:
             return {"error_key": "bounce_excessive"}
         return None
 
     # ------------------------------------------------------------------
-    # Rule 2: lunge_overextension — 弓步過度前傾
+    # Rule 2: lunge_overextension
     # Trigger: Target Practice mode, R/JS/WW/IS
     # ------------------------------------------------------------------
 
@@ -231,12 +267,12 @@ class HeuristicsEngine:
             return None
 
         angle = calc_angle(hip, knee, ankle)
-        if angle < 90.0:
+        if angle < LUNGE_KNEE_MIN_ANGLE_DEG:
             return {"error_key": "lunge_overextension"}
         return None
 
     # ------------------------------------------------------------------
-    # Rule 3: guard_dropped — 持劍手掉落
+    # Rule 3: guard_dropped
     # Trigger: All modes (threshold varies)
     # ------------------------------------------------------------------
 
@@ -245,7 +281,11 @@ class HeuristicsEngine:
     ) -> Optional[Dict[str, Any]]:
         limbs = FRONT_LIMBS[self.target_side]
         consecutive_frames = 0
-        threshold = 20 if self.training_mode == "Free Bouting" else 10
+        threshold = (
+            GUARD_DROPPED_FREE_BOUTING_THRESHOLD_FRAMES
+            if self.training_mode == "Free Bouting"
+            else GUARD_DROPPED_THRESHOLD_FRAMES
+        )
 
         for skel in skeletons:
             wrist = _get_joint(skel, limbs["wrist"])
@@ -259,7 +299,7 @@ class HeuristicsEngine:
         return None
 
     # ------------------------------------------------------------------
-    # Rule 4: foot_before_hand — 手腳順序錯誤
+    # Rule 4: foot_before_hand
     # Trigger: Target Practice, R/JS/WW/IS
     # Logic:  Compare frame index of peak wrist displacement vs. peak
     #         ankle displacement.  If ankle peaks first the foot moved
@@ -294,17 +334,18 @@ class HeuristicsEngine:
                     max_ankle_disp = d
                     ankle_peak_frame = i
 
-        # Ankle peaks before wrist ⇒ foot moved first
-        if (max_ankle_disp > 5 and max_wrist_disp > 5
+        # Ankle peaks before wrist: foot moved first.
+        if (max_ankle_disp > FOOT_BEFORE_HAND_MIN_DISPLACEMENT_PX
+                and max_wrist_disp > FOOT_BEFORE_HAND_MIN_DISPLACEMENT_PX
                 and ankle_peak_frame < wrist_peak_frame):
             return {"error_key": "foot_before_hand"}
         return None
 
     # ------------------------------------------------------------------
-    # Rule 5: stance_too_high — 預備姿勢沒蹲好
+    # Rule 5: stance_too_high
     # Trigger: Footwork SF/SB or neutral stance in other modes
     # Logic:  Average front knee angle across the window.  If the knee
-    #         stays near-straight (> 160°) the fencer is standing too
+    #         stays near-straight, the fencer is standing too
     #         tall.
     # ------------------------------------------------------------------
 
@@ -324,17 +365,17 @@ class HeuristicsEngine:
             return None
 
         avg_angle = float(np.mean(angles))
-        # A proper en-garde has front knee ~120-140°.  > 160° means
-        # the fencer is basically standing upright.
-        if avg_angle > 170.0:
+        # A proper en-garde has front knee around 120-140 degrees. Higher
+        # values mean the fencer is closer to standing upright.
+        if avg_angle > STANCE_TOO_HIGH_ANGLE_DEG:
             return {"error_key": "stance_too_high"}
         return None
 
     # ------------------------------------------------------------------
-    # Rule 6: incomplete_arm_extension — 刺的時候手沒有伸直
+    # Rule 6: incomplete_arm_extension
     # Trigger: Target Practice, R/JS/WW/IS
     # Logic:  At the frame of maximum wrist-forward displacement,
-    #         measure the shoulder-elbow-wrist angle.  If < 155° the
+    #         measure the shoulder-elbow-wrist angle.  If too small the
     #         arm is not fully extended.
     # ------------------------------------------------------------------
 
@@ -364,15 +405,15 @@ class HeuristicsEngine:
             return None
 
         arm_angle = calc_angle(shoulder, elbow, wrist)
-        if arm_angle < 155.0:
+        if arm_angle < INCOMPLETE_ARM_EXTENSION_ANGLE_DEG:
             return {"error_key": "incomplete_arm_extension"}
         return None
 
     # ------------------------------------------------------------------
-    # Rule 9: over_parrying — 防守動作太大且太頻繁
+    # Rule 9: over_parrying
     # Trigger: SB in all modes; SF/SB in Free Bouting
     # Logic:  Measure the horizontal sweep range of front_wrist across
-    #         the window.  If the wrist travels more than 2× the
+    #         the window. If the wrist travels more than the configured
     #         shoulder width, the parry motion is excessively large.
     # ------------------------------------------------------------------
 
@@ -391,10 +432,10 @@ class HeuristicsEngine:
             )
             other_shoulder = _get_joint(skel, other_shoulder_name)
             if other_shoulder is None:
-                # fallback: use front_shoulder ↔ pelvis center as proxy
+                # Fallback: use front_shoulder to pelvis center as proxy.
                 pelvis = _pelvis_center(skel)
                 if shoulder is not None and pelvis is not None:
-                    shoulder_width = abs(float(shoulder[0] - pelvis[0])) * 2.0
+                    shoulder_width = abs(float(shoulder[0] - pelvis[0])) * OVER_PARRY_SHOULDER_MULTIPLIER
                     break
             else:
                 if shoulder is not None:
@@ -411,18 +452,18 @@ class HeuristicsEngine:
             if wrist is not None:
                 wrist_xs.append(float(wrist[0]))
 
-        if len(wrist_xs) < 5:
+        if len(wrist_xs) < OVER_PARRY_MIN_WRIST_SAMPLES:
             return None
 
         sweep_range = max(wrist_xs) - min(wrist_xs)
 
-        # Wrist sweeps more than 2× shoulder width ⇒ over-parrying
-        if sweep_range > 2.0 * shoulder_width:
+        # Wrist sweeps more than the configured shoulder-width ratio.
+        if sweep_range > OVER_PARRY_RATIO_THRESHOLD * shoulder_width:
             return {"error_key": "over_parrying"}
         return None
 
     # ------------------------------------------------------------------
-    # Rule 10: wide_step / narrow_step — 步伐太大/太小
+    # Rule 10: wide_step / narrow_step
     # Trigger: SF/SB in all modes
     # Logic: Measure the distance between front and back ankles compared
     #        to the shoulder width. If ratio > 3.0, wide. If < 1.0, narrow.
@@ -443,18 +484,18 @@ class HeuristicsEngine:
             if front_ankle is None or back_ankle is None or front_shoulder is None or pelvis is None:
                 continue
                 
-            # Proxy for shoulder width: distance from front shoulder to pelvis center * 1.3
-            shoulder_width = abs(front_shoulder[0] - pelvis[0]) * 2.5
+            # Proxy for shoulder width: distance from front shoulder to pelvis center.
+            shoulder_width = abs(front_shoulder[0] - pelvis[0]) * STEP_SHOULDER_PROXY_MULTIPLIER
             
-            if shoulder_width < 10.0:
+            if shoulder_width < STEP_MIN_SHOULDER_WIDTH_PX:
                 continue
                 
             step_width = abs(front_ankle[0] - back_ankle[0])
             ratio = step_width / shoulder_width
             
-            if ratio > 3.0:
+            if ratio > WIDE_STEP_RATIO_THRESHOLD:
                 return {"error_key": "wide_step"}
-            elif ratio < 1.0:
+            elif ratio < NARROW_STEP_RATIO_THRESHOLD:
                 return {"error_key": "narrow_step"}
         return None
 
@@ -484,7 +525,7 @@ class HeuristicsEngine:
             pelvis_x = float(pelvis[0])
             
             base_width = abs(front_x - back_x)
-            if base_width < 10.0:
+            if base_width < COM_MIN_BASE_WIDTH_PX:
                 continue
                 
             # 0.0 means pelvis is directly over back ankle
@@ -494,9 +535,9 @@ class HeuristicsEngine:
             else:
                 ratio = (back_x - pelvis_x) / base_width
                 
-            if ratio > 0.65:
+            if ratio > COM_IN_FRONT_RATIO_THRESHOLD:
                 return {"error_key": "center_of_mass_in_front"}
-            elif ratio < 0.35:
+            elif ratio < COM_LEANING_BACK_RATIO_THRESHOLD:
                 return {"error_key": "center_of_mass_leaning_backward"}
                 
         return None

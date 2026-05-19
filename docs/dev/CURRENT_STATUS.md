@@ -160,6 +160,7 @@ it controls the annotated video, warning table, and summary presentation.
 Shared feedback weights, training-mode availability, and future-disabled
 errors live in `src/realtime/feedback_config.py`, so the CLI, Gradio app,
 browser realtime UI, and scheduler use the same supported-error list.
+For the edit checklist, see [ADDING_HEURISTIC.md](ADDING_HEURISTIC.md).
 
 ### LLM summary
 

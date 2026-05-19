@@ -59,6 +59,7 @@ class LLMAgent:
                     "error_name": entry.get("error_name", key),
                     "diagnosis": entry.get("diagnosis", ""),
                     "short_cue": entry.get("short_cue", ""),
+                    "practice": entry.get("practice", ""),
                     "focused": key in focus_set,
                 }
             )
@@ -92,6 +93,10 @@ class LLMAgent:
                             "  short_cue: "
                             f"{item['short_cue'] or 'No playbook cue available.'}"
                         ),
+                        (
+                            "  practice: "
+                            f"{item['practice'] or 'No playbook practice available.'}"
+                        ),
                     ]
                 )
             )
@@ -115,6 +120,8 @@ class LLMAgent:
                 detail += f"。{item['diagnosis']}"
             if item["short_cue"]:
                 detail += f" 教練提示：{item['short_cue']}"
+            if item["practice"]:
+                detail += f" 練習建議：{item['practice']}"
             lines.append(detail)
         return "\n".join(lines)
 
@@ -177,7 +184,7 @@ Training Mode: {training_mode}
 {stats_str}
 
 [COACH PLAYBOOK CONTEXT]
-The following detected problems come from coach_playbook.json. Treat this as the source of truth for problem names, diagnoses, cue wording, and frequency:
+The following detected problems come from coach_playbook.json. Treat this as the source of truth for problem names, diagnoses, cue wording, practice recommendations, and frequency:
 {playbook_block}
 {focus_line}
 
@@ -185,7 +192,7 @@ The following detected problems come from coach_playbook.json. Treat this as the
 Based on the stats and coach playbook context above, write a highly specific technical summary addressing the student directly.
 1. Acknowledge the volume/type of actions they practiced.
 2. List every detected problem and how many times it appeared.
-3. Use the playbook diagnosis and short cue when explaining each problem.
+3. Use the playbook diagnosis, short cue, and practice recommendation when explaining each problem.
 4. If multiple problems were detected, prioritize the most frequent one at the end.
 5. Tone: Direct, professional, and encouraging.
 6. Constraint: Strictly under 160 words. Do NOT list timecodes. Please reply in Traditional Chinese.

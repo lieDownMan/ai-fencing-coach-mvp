@@ -13,6 +13,8 @@ from pathlib import Path
 import time
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
+# Keep these imports available from feedback_scheduler for older callers while
+# the source of truth lives in feedback_config.
 from src.realtime.feedback_config import (
     DEFAULT_ERROR_WEIGHTS,
     ERROR_AVAILABILITY_BY_MODE,

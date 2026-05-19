@@ -3,6 +3,7 @@ from inference.heuristic_debug import (
     build_frame_debug_events,
     compute_heuristic_metric,
 )
+from inference.heuristics_engine import BOUNCE_RATIO_THRESHOLD
 
 
 def _skeleton(pelvis_y=100.0, wrist_y=80.0):
@@ -21,13 +22,13 @@ def _skeleton(pelvis_y=100.0, wrist_y=80.0):
 
 
 def test_bounce_metric_reports_ratio_and_trigger():
-    skeletons = [_skeleton(pelvis_y=y) for y in [100, 105, 110, 115, 120]]
+    skeletons = [_skeleton(pelvis_y=y) for y in [100, 120, 140, 160, 180]]
 
     metric = compute_heuristic_metric("bounce_excessive", skeletons)
 
     assert metric.triggered is True
-    assert metric.values["pelvis_delta"] == 20.0
-    assert metric.primary_value > 0.10
+    assert metric.values["pelvis_delta"] == 80.0
+    assert metric.primary_value > BOUNCE_RATIO_THRESHOLD
 
 
 def test_guard_metric_uses_training_mode_threshold():
@@ -47,7 +48,7 @@ def test_guard_metric_uses_training_mode_threshold():
 
 def test_build_debug_events_marks_system_alert_and_metric_value():
     frames = []
-    for i, pelvis_y in enumerate([100, 105, 110, 115, 120]):
+    for i, pelvis_y in enumerate([100, 120, 140, 160, 180]):
         frames.append({
             "frame_index": i,
             "tracks": [{
@@ -86,8 +87,8 @@ def test_build_debug_events_marks_system_alert_and_metric_value():
     assert rows[0]["alert"] is True
     assert rows[0]["metric_triggered"] is True
     assert rows[0]["alert_time"] == "0.00s"
-    assert rows[0]["primary_value"] > 0.10
-    assert rows[0]["metric_values"]["ratio"] > 0.10
+    assert rows[0]["primary_value"] > BOUNCE_RATIO_THRESHOLD
+    assert rows[0]["metric_values"]["ratio"] > BOUNCE_RATIO_THRESHOLD
 
 
 def test_build_debug_events_falls_back_to_unclassified_range():
@@ -127,7 +128,7 @@ def test_build_frame_debug_events_returns_one_row_per_frame_and_heuristic():
             "frames": [
                 {
                     "frame_index": i,
-                    "target_skeleton": _skeleton(pelvis_y=100 + i * 5),
+                    "target_skeleton": _skeleton(pelvis_y=100 + i * 20),
                     "tracks": [],
                 }
                 for i in range(5)
