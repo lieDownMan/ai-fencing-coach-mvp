@@ -35,6 +35,8 @@ data/
 .venv/
 venv/
 logs/
+Ultralytics/
+.ultralytics/
 
 
 FFD/

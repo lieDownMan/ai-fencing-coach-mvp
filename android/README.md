@@ -5,7 +5,7 @@ phone:
 
 ```text
 CameraX frame
--> selected pose backend (MediaPipe now, YOLO slot next)
+-> selected pose backend (MediaPipe or YOLO)
 -> skeleton mapping
 -> SpatialNormalizer + FenceNet ONNX
 -> Kotlin heuristics + feedback scheduler
@@ -27,10 +27,11 @@ python -m pip install -r requirements.txt
 
 3. Open this `android/` folder in Android Studio.
 4. Let Android Studio install the Android SDK/Gradle files it recommends.
-5. Generate the FenceNet ONNX asset from the repo root:
+5. Generate the ONNX assets from the repo root:
 
 ```powershell
 python scripts/export_fencenet_onnx.py
+python scripts/export_yolo_pose_onnx.py
 ```
 
 6. Confirm these files exist:
@@ -38,6 +39,7 @@ python scripts/export_fencenet_onnx.py
 ```text
 android/app/src/main/assets/fencenet_v2.onnx
 android/app/src/main/assets/pose_landmarker_lite.task
+android/app/src/main/assets/yolo_pose.onnx
 android/app/src/main/assets/coach_playbook.json
 ```
 
@@ -64,8 +66,8 @@ From Android Studio:
 - Live coach only.
 - No runtime backend.
 - Pose backend selector in the HUD.
-- MediaPipe backend is active today.
-- YOLO backend is exposed as a selectable slot, but model export/decoder wiring is still next work.
+- MediaPipe backend uses the MediaPipe Tasks pose landmarker.
+- YOLO backend runs `yolo_pose.onnx` through ONNX Runtime with local decoding/NMS.
 - Back camera by default.
 - Landscape orientation.
 - One selected target fencer plus optional opponent context.
