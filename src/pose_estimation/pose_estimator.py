@@ -34,7 +34,19 @@ class PoseEstimator:
         15: "left_ankle", 16: "right_ankle",
     }
     
-    # Mapping for fencing-specific joints (right-handed fencer assumed)
+    RAW_JOINTS = {
+        "nose": 0,
+        "left_shoulder": 5, "right_shoulder": 6,
+        "left_elbow": 7, "right_elbow": 8,
+        "left_wrist": 9, "right_wrist": 10,
+        "left_hip": 11, "right_hip": 12,
+        "left_knee": 13, "right_knee": 14,
+        "left_ankle": 15, "right_ankle": 16,
+    }
+
+    # Mapping for the legacy fencing-specific schema. The actual side is now
+    # derived by canonicalize_skeleton(); defaults preserve the old right-front
+    # behavior used by local demos and training prep.
     REQUIRED_JOINTS = {
         "nose": 0,
         "front_wrist": 10,  # right wrist
@@ -48,6 +60,7 @@ class PoseEstimator:
         "right_ankle": 16,
         "front_ankle": 16,  # right ankle
     }
+    FRONT_SIDE_BY_TARGET_SIDE = {"left": "right", "right": "left"}
 
     DEFAULT_MODEL_PATH = "yolov8n-pose.pt"
     SUPPORTED_BACKENDS = {"auto", "ultralytics", "mock"}
@@ -56,7 +69,9 @@ class PoseEstimator:
         self,
         model_path: Optional[str] = None,
         conf_threshold: float = 0.5,
-        backend: str = "auto"
+        backend: str = "auto",
+        target_side: str = "left",
+        handedness: str = "auto",
     ):
         """
         Initialize Pose Estimator.
@@ -76,6 +91,8 @@ class PoseEstimator:
         self.conf_threshold = conf_threshold
         self.requested_backend = backend
         self.backend = backend
+        self.target_side = self._normalize_side(target_side, default="left")
+        self.handedness = self._normalize_handedness(handedness)
         self.model = self._load_model()
         self.fencer_tracker = FencerTracker()
         self._warned_tracking_unavailable = False
@@ -303,9 +320,17 @@ class PoseEstimator:
             person_confidences = (
                 confidences[person_idx] if confidences is not None else None
             )
-            skeleton = self._build_skeleton_from_keypoints(
+            raw_result = self._build_raw_skeleton_from_keypoints(
                 keypoints=keypoints[person_idx],
                 confidences=person_confidences
+            )
+            if raw_result is None:
+                continue
+            raw_skeleton, joint_confidence = raw_result
+            skeleton = self.canonicalize_skeleton(
+                raw_skeleton,
+                target_side=self.target_side,
+                handedness=self.handedness,
             )
             if skeleton is None:
                 continue
@@ -319,6 +344,8 @@ class PoseEstimator:
                 confidence=confidence,
                 source_rank=person_idx
             )
+            candidate["raw_skeleton"] = raw_skeleton
+            candidate["joint_confidence"] = joint_confidence
             if boxes is not None:
                 bbox = [float(value) for value in boxes[person_idx][:4]]
                 candidate["bbox"] = bbox
@@ -387,7 +414,7 @@ class PoseEstimator:
 
         required_indices = [
             keypoint_idx
-            for keypoint_idx in self.REQUIRED_JOINTS.values()
+            for keypoint_idx in self.RAW_JOINTS.values()
             if keypoint_idx < keypoint_confidences.shape[0]
         ]
         values = keypoint_confidences[required_indices]
@@ -408,10 +435,27 @@ class PoseEstimator:
         keypoints: np.ndarray,
         confidences: Optional[np.ndarray] = None
     ) -> Optional[Dict[str, Tuple[float, float]]]:
-        """Build the required skeleton dictionary from COCO keypoints."""
-        skeleton = {}
+        """Build the canonical skeleton dictionary from COCO keypoints."""
+        raw_result = self._build_raw_skeleton_from_keypoints(keypoints, confidences)
+        if raw_result is None:
+            return None
+        raw_skeleton, _ = raw_result
+        return self.canonicalize_skeleton(
+            raw_skeleton,
+            target_side=self.target_side,
+            handedness=self.handedness,
+        )
 
-        for joint_name, keypoint_idx in self.REQUIRED_JOINTS.items():
+    def _build_raw_skeleton_from_keypoints(
+        self,
+        keypoints: np.ndarray,
+        confidences: Optional[np.ndarray] = None
+    ) -> Optional[Tuple[Dict[str, Tuple[float, float]], Dict[str, float]]]:
+        """Build raw left/right COCO joints and per-joint confidence."""
+        skeleton = {}
+        joint_confidence: Dict[str, float] = {}
+
+        for joint_name, keypoint_idx in self.RAW_JOINTS.items():
             if keypoint_idx >= keypoints.shape[0]:
                 return None
             if (
@@ -420,6 +464,8 @@ class PoseEstimator:
                 and confidences[keypoint_idx] < self.conf_threshold
             ):
                 return None
+            if confidences is not None and keypoint_idx < confidences.shape[0]:
+                joint_confidence[joint_name] = float(confidences[keypoint_idx])
 
             x_coord, y_coord = keypoints[keypoint_idx][:2]
             if not np.isfinite(x_coord) or not np.isfinite(y_coord):
@@ -427,14 +473,83 @@ class PoseEstimator:
 
             skeleton[joint_name] = (float(x_coord), float(y_coord))
 
-        return skeleton if self.validate_skeleton(skeleton) else None
+        return skeleton, joint_confidence
+
+    @classmethod
+    def canonicalize_skeleton(
+        cls,
+        raw_skeleton: Dict[str, Tuple[float, float]],
+        target_side: str = "left",
+        handedness: str = "auto",
+    ) -> Optional[Dict[str, Tuple[float, float]]]:
+        """Preserve raw joints and derive fencing front/back aliases.
+
+        ``target_side`` determines the limb closest to the opponent for the
+        default side-view setup: left fencer faces right, right fencer faces
+        left. Passing explicit handedness ("left" or "right") overrides that
+        default for weapon-arm/lead-foot studies while keeping "auto" backward
+        compatible.
+        """
+        if not isinstance(raw_skeleton, dict):
+            return None
+
+        clean = {}
+        for joint_name, coords in raw_skeleton.items():
+            try:
+                if len(coords) != 2:
+                    return None
+                point = (float(coords[0]), float(coords[1]))
+            except (TypeError, ValueError):
+                return None
+            if not np.all(np.isfinite(point)):
+                return None
+            clean[joint_name] = point
+
+        target_side = cls._normalize_side(target_side, default="left")
+        handedness = cls._normalize_handedness(handedness)
+        front_side = (
+            handedness
+            if handedness in {"left", "right"}
+            else cls.FRONT_SIDE_BY_TARGET_SIDE.get(target_side, "right")
+        )
+        back_side = "left" if front_side == "right" else "right"
+
+        required_raw = [
+            "nose",
+            f"{front_side}_wrist",
+            f"{front_side}_elbow",
+            f"{front_side}_shoulder",
+            f"{front_side}_ankle",
+            f"{back_side}_wrist",
+            f"{back_side}_ankle",
+            "left_hip",
+            "right_hip",
+            "left_knee",
+            "right_knee",
+            "left_ankle",
+            "right_ankle",
+        ]
+        if any(joint_name not in clean for joint_name in required_raw):
+            return None
+
+        canonical = dict(clean)
+        canonical.update({
+            "front_wrist": clean[f"{front_side}_wrist"],
+            "front_elbow": clean[f"{front_side}_elbow"],
+            "front_shoulder": clean[f"{front_side}_shoulder"],
+            "front_ankle": clean[f"{front_side}_ankle"],
+            "back_wrist": clean[f"{back_side}_wrist"],
+            "back_ankle": clean[f"{back_side}_ankle"],
+        })
+
+        return canonical if cls._validate_required(canonical) else None
 
     def _mock_fencer_detections(self, frame: np.ndarray) -> List[Dict[str, Any]]:
         """Generate two deterministic fencer candidates for tests and demos."""
         height, width = frame.shape[:2]
         left_skeleton = self._mock_skeleton(frame, center_x=width * 0.36)
         right_skeleton = self._mock_skeleton(frame, center_x=width * 0.64)
-        return [
+        detections = [
             self.fencer_tracker.candidate_from_skeleton(
                 left_skeleton,
                 confidence=1.0,
@@ -446,6 +561,17 @@ class PoseEstimator:
                 source_rank=1
             ),
         ]
+        for detection in detections:
+            detection["raw_skeleton"] = {
+                joint_name: detection["skeleton"][joint_name]
+                for joint_name in self.RAW_JOINTS
+                if joint_name in detection["skeleton"]
+            }
+            detection["joint_confidence"] = {
+                joint_name: 1.0
+                for joint_name in detection["raw_skeleton"]
+            }
+        return detections
 
     def _mock_skeleton(
         self,
@@ -462,11 +588,14 @@ class PoseEstimator:
         knee_y = height * 0.7
         ankle_y = height * 0.85
 
-        skeleton = {
+        raw_skeleton = {
             "nose": (center_x, head_y),
-            "front_shoulder": (center_x + width * 0.06, shoulder_y),
-            "front_elbow": (center_x + width * 0.13, height * 0.45),
-            "front_wrist": (center_x + width * 0.20, height * 0.48),
+            "left_shoulder": (center_x - width * 0.06, shoulder_y),
+            "right_shoulder": (center_x + width * 0.06, shoulder_y),
+            "left_elbow": (center_x - width * 0.13, height * 0.45),
+            "right_elbow": (center_x + width * 0.13, height * 0.45),
+            "left_wrist": (center_x - width * 0.20, height * 0.48),
+            "right_wrist": (center_x + width * 0.20, height * 0.48),
             "left_hip": (center_x - width * 0.05, hip_y),
             "right_hip": (center_x + width * 0.05, hip_y),
             "left_knee": (center_x - width * 0.12, knee_y),
@@ -474,8 +603,28 @@ class PoseEstimator:
             "left_ankle": (center_x - width * 0.18, ankle_y),
             "right_ankle": (center_x + width * 0.18, ankle_y),
         }
-        skeleton["front_ankle"] = skeleton["right_ankle"]
+        skeleton = self.canonicalize_skeleton(
+            raw_skeleton,
+            target_side=self.target_side,
+            handedness=self.handedness,
+        )
+        if skeleton is None:
+            raise RuntimeError("Mock skeleton canonicalization failed")
         return skeleton
+
+    @staticmethod
+    def _normalize_side(value: str, default: str = "left") -> str:
+        value = str(value or default).strip().lower()
+        return value if value in {"left", "right"} else default
+
+    @staticmethod
+    def _normalize_handedness(value: str) -> str:
+        value = str(value or "auto").strip().lower()
+        return value if value in {"left", "right", "auto"} else "auto"
+
+    @classmethod
+    def _validate_required(cls, skeleton: Dict[str, Tuple[float, float]]) -> bool:
+        return all(joint in skeleton for joint in cls.REQUIRED_JOINTS)
 
     @staticmethod
     def _to_numpy(value: Any) -> np.ndarray:

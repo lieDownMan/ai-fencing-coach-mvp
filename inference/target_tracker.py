@@ -14,7 +14,14 @@ class TargetTracker:
     Isolates the target fencer's skeleton stream using YOLOv8 ByteTrack.
     """
     
-    def __init__(self, target_side: str = "left"):
+    def __init__(
+        self,
+        target_side: str = "left",
+        *,
+        min_bbox_area: float = 100.0,
+        min_detection_confidence: float = 0.0,
+        max_aspect_ratio: float = 8.0,
+    ):
         """
         Args:
             target_side: "left" or "right"
@@ -22,14 +29,23 @@ class TargetTracker:
         self.target_side = target_side
         self.locked_track_id: Optional[int] = None
         self.locked_fallback_bbox: Optional[List[float]] = None
+        self.lock_state = "unlocked"
         
         # Buffer for interpolation (max gap = 5)
+        self.previous_known_skeleton: Optional[Dict[str, Tuple[float, float]]] = None
+        self.previous_known_bbox: Optional[List[float]] = None
         self.last_known_skeleton: Optional[Dict[str, Tuple[float, float]]] = None
         self.last_known_bbox: Optional[List[float]] = None
+        self.last_target_detection: Optional[Dict[str, Any]] = None
+        self.last_opponent_detection: Optional[Dict[str, Any]] = None
+        self.last_interpolated = False
         self.missing_frames_count = 0
         self.max_missing_frames = 5
         self.max_position_jump = 1.75
         self.max_track_jump = 2.5
+        self.min_bbox_area = float(min_bbox_area)
+        self.min_detection_confidence = float(min_detection_confidence)
+        self.max_aspect_ratio = float(max_aspect_ratio)
         
     def _get_bbox_center_x(self, bbox: List[float]) -> float:
         """Calculate center X of a bounding box [x1, y1, x2, y2]."""
@@ -57,6 +73,25 @@ class TargetTracker:
         # fencer is much closer to the camera, but position remains dominant.
         area_ratio = abs(math.log(self._bbox_area(det["bbox"]) / self._bbox_area(reference_bbox)))
         return center_dist + 0.25 * area_ratio
+
+    def _is_valid_detection(self, det: Dict[str, Any]) -> bool:
+        if det.get("skeleton") is None or det.get("bbox") is None:
+            return False
+        try:
+            x1, y1, x2, y2 = [float(value) for value in det["bbox"]]
+        except (TypeError, ValueError):
+            return False
+        width = abs(x2 - x1)
+        height = abs(y2 - y1)
+        if width < 1.0 or height < 1.0:
+            return False
+        if width * height < self.min_bbox_area:
+            return False
+        aspect = max(width / height, height / width)
+        if aspect > self.max_aspect_ratio:
+            return False
+        confidence = float(det.get("confidence", 1.0))
+        return confidence >= self.min_detection_confidence
 
     def _pick_initial_target(self, detections: List[Dict[str, Any]]) -> Dict[str, Any]:
         if self.target_side == "left":
@@ -94,17 +129,29 @@ class TargetTracker:
         return False
 
     def _remember_target(self, target_det: Dict[str, Any]) -> None:
+        self.previous_known_skeleton = self.last_known_skeleton
+        self.previous_known_bbox = self.last_known_bbox
         self.last_known_skeleton = target_det["skeleton"]
         self.last_known_bbox = list(target_det["bbox"])
         self.locked_fallback_bbox = list(target_det["bbox"])
+        self.last_target_detection = dict(target_det)
+        self.last_target_detection["interpolated"] = False
+        self.last_interpolated = False
         self.missing_frames_count = 0
+        self.lock_state = "locked"
 
     def reset(self) -> None:
         """Clear target identity so the next frame locks from target_side again."""
         self.locked_track_id = None
         self.locked_fallback_bbox = None
+        self.lock_state = "unlocked"
+        self.previous_known_skeleton = None
+        self.previous_known_bbox = None
         self.last_known_skeleton = None
         self.last_known_bbox = None
+        self.last_target_detection = None
+        self.last_opponent_detection = None
+        self.last_interpolated = False
         self.missing_frames_count = 0
 
     def process_frame_detections(
@@ -129,8 +176,11 @@ class TargetTracker:
         # source_rank a common cause of left/right target flips.
         valid_detections = [
             d for d in detections
-            if d.get("skeleton") is not None and d.get("bbox") is not None
+            if self._is_valid_detection(d)
         ]
+        self.last_target_detection = None
+        self.last_opponent_detection = None
+        self.last_interpolated = False
         
         if not valid_detections:
             return self._handle_missing_target(), None
@@ -142,6 +192,7 @@ class TargetTracker:
 
             if target.get("track_id") is not None:
                 self.locked_track_id = target["track_id"]
+                self.lock_state = "locked"
                 logger.info(
                     "Frame %s: locked onto track_id %s as %s fencer.",
                     frame_idx,
@@ -150,6 +201,7 @@ class TargetTracker:
                 )
             else:
                 self.locked_fallback_bbox = list(target["bbox"])
+                self.lock_state = "locked"
                 logger.info(
                     "Frame %s: locked onto %s fencer by position fallback.",
                     frame_idx,
@@ -188,6 +240,8 @@ class TargetTracker:
                 if opponent_det is None or det.get("area", 0) > opponent_det.get("area", 0):
                     opponent_det = det
 
+        self.last_opponent_detection = dict(opponent_det) if opponent_det else None
+
         # If locked target is found
         if target_det is not None:
             self._remember_target(target_det)
@@ -199,8 +253,56 @@ class TargetTracker:
         return self._handle_missing_target(), (opponent_det["skeleton"] if opponent_det else None)
 
     def _handle_missing_target(self) -> Optional[Dict[str, Any]]:
-        """Pad missing frames with the last known skeleton if <= 5 frames."""
-        if self.last_known_skeleton is not None and self.missing_frames_count < self.max_missing_frames:
+        """Predict short target gaps using the last motion vector."""
+        if (
+            self.last_known_skeleton is not None
+            and self.missing_frames_count < self.max_missing_frames
+        ):
             self.missing_frames_count += 1
-            return self.last_known_skeleton
+            skeleton = self._predict_missing_skeleton(self.missing_frames_count)
+            self.last_interpolated = True
+            self.lock_state = "interpolating"
+            self.last_target_detection = self._interpolated_detection(skeleton)
+            return skeleton
+
+        self.lock_state = "lost"
+        self.locked_track_id = None
+        self.locked_fallback_bbox = None
+        self.last_target_detection = None
         return None
+
+    def _predict_missing_skeleton(self, gap_index: int) -> Dict[str, Tuple[float, float]]:
+        if self.previous_known_skeleton is None:
+            return dict(self.last_known_skeleton or {})
+
+        predicted: Dict[str, Tuple[float, float]] = {}
+        for joint_name, last_point in (self.last_known_skeleton or {}).items():
+            previous_point = self.previous_known_skeleton.get(joint_name)
+            if previous_point is None:
+                predicted[joint_name] = last_point
+                continue
+            vx = float(last_point[0]) - float(previous_point[0])
+            vy = float(last_point[1]) - float(previous_point[1])
+            predicted[joint_name] = (
+                float(last_point[0]) + vx * gap_index,
+                float(last_point[1]) + vy * gap_index,
+            )
+        return predicted
+
+    def _interpolated_detection(
+        self,
+        skeleton: Dict[str, Tuple[float, float]],
+    ) -> Dict[str, Any]:
+        detection: Dict[str, Any] = {
+            "skeleton": skeleton,
+            "bbox": list(self.last_known_bbox) if self.last_known_bbox else None,
+            "confidence": 0.0,
+            "source_rank": -1,
+            "interpolated": True,
+        }
+        if self.locked_track_id is not None:
+            detection["track_id"] = self.locked_track_id
+        if detection["bbox"] is not None:
+            detection["center"] = list(self._get_bbox_center(detection["bbox"]))
+            detection["area"] = self._bbox_area(detection["bbox"])
+        return detection
