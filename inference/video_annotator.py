@@ -95,12 +95,17 @@ class VideoAnnotator:
                     break
                     
             if frame_info:
-                target_det = None
+                target_det = frame_info.get("target_detection")
                 if locked_track_id is not None:
                     for det in frame_info.get("tracks", []):
                         if det.get("track_id") == locked_track_id:
                             target_det = det
                             break
+                if target_det is None and frame_info.get("target_skeleton"):
+                    target_det = {
+                        "bbox": frame_info.get("target_bbox"),
+                        "skeleton": frame_info.get("target_skeleton"),
+                    }
                             
                 if target_det:
                     bbox = target_det.get("bbox")

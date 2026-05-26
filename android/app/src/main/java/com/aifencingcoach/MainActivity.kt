@@ -54,7 +54,7 @@ import androidx.core.content.ContextCompat
 import com.aifencingcoach.runtime.CoachFrameState
 import com.aifencingcoach.runtime.FeedbackCue
 import com.aifencingcoach.runtime.LiveCoachPipeline
-import com.aifencingcoach.runtime.Point2
+import com.aifencingcoach.runtime.PoseBackendKind
 import com.aifencingcoach.runtime.Skeleton
 import com.aifencingcoach.runtime.TargetSide
 import com.aifencingcoach.runtime.TrainingMode
@@ -130,12 +130,13 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
 
     var targetSide by remember { mutableStateOf(TargetSide.LEFT) }
     var trainingMode by remember { mutableStateOf(TrainingMode.FREE_BOUTING) }
+    var poseBackend by remember { mutableStateOf(PoseBackendKind.MEDIAPIPE) }
     var voiceEnabled by remember { mutableStateOf(true) }
     var frameState by remember { mutableStateOf(CoachFrameState()) }
     var resetToken by remember { mutableStateOf(0) }
 
-    val pipeline = remember(targetSide, trainingMode, resetToken) {
-        LiveCoachPipeline(context, targetSide, trainingMode)
+    val pipeline = remember(poseBackend, targetSide, trainingMode, resetToken) {
+        LiveCoachPipeline(context, poseBackend, targetSide, trainingMode)
     }
 
     DisposableEffect(pipeline) {
@@ -153,9 +154,11 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
         SkeletonOverlay(state = frameState)
         HudPanel(
             state = frameState,
+            poseBackend = poseBackend,
             targetSide = targetSide,
             trainingMode = trainingMode,
             voiceEnabled = voiceEnabled,
+            onPoseBackend = { poseBackend = it },
             onTargetSide = { targetSide = it },
             onTrainingMode = { trainingMode = it },
             onVoiceEnabled = { voiceEnabled = it },
@@ -258,9 +261,11 @@ private fun SkeletonOverlay(state: CoachFrameState) {
 @Composable
 private fun HudPanel(
     state: CoachFrameState,
+    poseBackend: PoseBackendKind,
     targetSide: TargetSide,
     trainingMode: TrainingMode,
     voiceEnabled: Boolean,
+    onPoseBackend: (PoseBackendKind) -> Unit,
     onTargetSide: (TargetSide) -> Unit,
     onTrainingMode: (TrainingMode) -> Unit,
     onVoiceEnabled: (Boolean) -> Unit,
@@ -290,7 +295,7 @@ private fun HudPanel(
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "${state.state}  |  ${state.action} ${(state.confidence * 100f).toInt()}%",
+                    text = "${state.poseBackend.label}  |  ${state.state}  |  ${state.action} ${(state.confidence * 100f).toInt()}%",
                     color = Color(0xFFD7FF5F),
                     fontSize = 16.sp
                 )
@@ -327,6 +332,11 @@ private fun HudPanel(
                 labels = TrainingMode.entries.map { it.label },
                 selected = trainingMode.label,
                 onSelected = { onTrainingMode(TrainingMode.fromLabel(it)) }
+            )
+            SegmentedGroup(
+                labels = PoseBackendKind.entries.map { it.label },
+                selected = poseBackend.label,
+                onSelected = { onPoseBackend(PoseBackendKind.fromLabel(it)) }
             )
             SegmentedGroup(
                 labels = listOf("left", "right"),

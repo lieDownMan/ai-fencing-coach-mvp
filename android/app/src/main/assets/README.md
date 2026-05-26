@@ -4,12 +4,19 @@ Required runtime assets:
 
 - `pose_landmarker_lite.task`
 - `fencenet_v2.onnx`
+- `yolo_pose.onnx`
 - `coach_playbook.json`
 
 Generate `fencenet_v2.onnx` from the repo root:
 
 ```powershell
 python scripts/export_fencenet_onnx.py
+```
+
+Generate `yolo_pose.onnx` from the repo root:
+
+```powershell
+python scripts/export_yolo_pose_onnx.py
 ```
 
 Download the MediaPipe lite pose model into this folder:

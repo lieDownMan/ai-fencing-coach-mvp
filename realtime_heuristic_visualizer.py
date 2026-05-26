@@ -230,7 +230,11 @@ def main() -> int:
         print(f"Error: Cannot open video source {source}")
         return 1
 
-    pose_estimator = PoseEstimator(model_path=args.pose_model, backend=args.pose_backend)
+    pose_estimator = PoseEstimator(
+        model_path=args.pose_model,
+        backend=args.pose_backend,
+        target_side=args.target_side,
+    )
     tracker = TargetTracker(target_side=args.target_side)
     skeleton_window = deque(maxlen=max(1, args.window_size))
     log_rows: List[Dict[str, Any]] = []

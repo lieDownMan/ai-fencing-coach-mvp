@@ -59,6 +59,20 @@ COM_MIN_BASE_WIDTH_PX = 10.0
 COM_IN_FRONT_RATIO_THRESHOLD = 0.65
 COM_LEANING_BACK_RATIO_THRESHOLD = 0.35
 
+SEVERITY_BY_ERROR_KEY = {
+    "lunge_overextension": "high",
+    "guard_dropped": "medium",
+    "bounce_excessive": "medium",
+    "foot_before_hand": "medium",
+    "stance_too_high": "medium",
+    "incomplete_arm_extension": "high",
+    "over_parrying": "low",
+    "wide_step": "low",
+    "narrow_step": "medium",
+    "center_of_mass_in_front": "medium",
+    "center_of_mass_leaning_backward": "medium",
+}
+
 FRONT_LIMBS = {
     "left": {
         "hip": "right_hip", "knee": "right_knee", "ankle": "right_ankle",
@@ -148,11 +162,20 @@ class HeuristicsEngine:
 
             seg_errors = self._check_rules(action, window_skeletons)
             for err in seg_errors:
+                evidence_index = int(err.pop("evidence_index", 0) or 0)
+                evidence_index = max(0, min(evidence_index, len(window_skeletons) - 1))
+                error_key = err.get("error_key")
                 err.update({
                     "action": action,
                     "segment_index": seg_idx,
                     "start_frame": start,
                     "end_frame": end,
+                    "evidence_frame": start + evidence_index,
+                    "sample_count": err.get("sample_count", len(window_skeletons)),
+                    "severity": err.get(
+                        "severity",
+                        SEVERITY_BY_ERROR_KEY.get(str(error_key), "medium"),
+                    ),
                 })
                 errors.append(err)
         return errors
@@ -208,6 +231,27 @@ class HeuristicsEngine:
         if err is not None:
             target.append(err)
 
+    @staticmethod
+    def _error(
+        error_key: str,
+        *,
+        metric_name: str,
+        metric_value: float,
+        threshold: float,
+        evidence_index: int = 0,
+        sample_count: int = 0,
+        severity: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return {
+            "error_key": error_key,
+            "metric_name": metric_name,
+            "metric_value": float(metric_value),
+            "threshold": float(threshold),
+            "evidence_index": int(evidence_index),
+            "sample_count": int(sample_count),
+            "severity": severity or SEVERITY_BY_ERROR_KEY.get(error_key, "medium"),
+        }
+
     # ------------------------------------------------------------------
     # Rule 1: bounce_excessive
     # Trigger: Footwork mode, SF/SB
@@ -233,8 +277,17 @@ class HeuristicsEngine:
             return None
 
         delta_y = max(pelvis_ys) - min(pelvis_ys)
-        if delta_y > BOUNCE_RATIO_THRESHOLD * bbox_height:
-            return {"error_key": "bounce_excessive"}
+        ratio = delta_y / bbox_height
+        if ratio > BOUNCE_RATIO_THRESHOLD:
+            evidence_index = int(np.argmax(pelvis_ys))
+            return self._error(
+                "bounce_excessive",
+                metric_name="pelvis_delta_ratio",
+                metric_value=ratio,
+                threshold=BOUNCE_RATIO_THRESHOLD,
+                evidence_index=evidence_index,
+                sample_count=len(pelvis_ys),
+            )
         return None
 
     # ------------------------------------------------------------------
@@ -251,14 +304,16 @@ class HeuristicsEngine:
             return None
 
         max_disp = 0.0
+        evidence_index = 0
         peak_skel = skeletons[0]
-        for skel in skeletons:
+        for index, skel in enumerate(skeletons):
             ankle = _get_joint(skel, limbs["ankle"])
             if ankle is not None:
                 disp = float(np.linalg.norm(ankle - ref_ankle))
                 if disp > max_disp:
                     max_disp = disp
                     peak_skel = skel
+                    evidence_index = index
 
         hip = _get_joint(peak_skel, limbs["hip"])
         knee = _get_joint(peak_skel, limbs["knee"])
@@ -268,7 +323,15 @@ class HeuristicsEngine:
 
         angle = calc_angle(hip, knee, ankle)
         if angle < LUNGE_KNEE_MIN_ANGLE_DEG:
-            return {"error_key": "lunge_overextension"}
+            return self._error(
+                "lunge_overextension",
+                metric_name="front_knee_angle_deg",
+                metric_value=angle,
+                threshold=LUNGE_KNEE_MIN_ANGLE_DEG,
+                evidence_index=evidence_index,
+                sample_count=len(skeletons),
+                severity="high",
+            )
         return None
 
     # ------------------------------------------------------------------
@@ -287,13 +350,20 @@ class HeuristicsEngine:
             else GUARD_DROPPED_THRESHOLD_FRAMES
         )
 
-        for skel in skeletons:
+        for index, skel in enumerate(skeletons):
             wrist = _get_joint(skel, limbs["wrist"])
             pelvis = _pelvis_center(skel)
             if wrist is not None and pelvis is not None and wrist[1] > pelvis[1]:
                 consecutive_frames += 1
                 if consecutive_frames > threshold:
-                    return {"error_key": "guard_dropped"}
+                    return self._error(
+                        "guard_dropped",
+                        metric_name="consecutive_frames",
+                        metric_value=consecutive_frames,
+                        threshold=threshold,
+                        evidence_index=index,
+                        sample_count=len(skeletons),
+                    )
             else:
                 consecutive_frames = 0
         return None
@@ -338,7 +408,14 @@ class HeuristicsEngine:
         if (max_ankle_disp > FOOT_BEFORE_HAND_MIN_DISPLACEMENT_PX
                 and max_wrist_disp > FOOT_BEFORE_HAND_MIN_DISPLACEMENT_PX
                 and ankle_peak_frame < wrist_peak_frame):
-            return {"error_key": "foot_before_hand"}
+            return self._error(
+                "foot_before_hand",
+                metric_name="ankle_peak_before_wrist_peak_frames",
+                metric_value=float(wrist_peak_frame - ankle_peak_frame),
+                threshold=1.0,
+                evidence_index=ankle_peak_frame,
+                sample_count=len(skeletons),
+            )
         return None
 
     # ------------------------------------------------------------------
@@ -368,7 +445,14 @@ class HeuristicsEngine:
         # A proper en-garde has front knee around 120-140 degrees. Higher
         # values mean the fencer is closer to standing upright.
         if avg_angle > STANCE_TOO_HIGH_ANGLE_DEG:
-            return {"error_key": "stance_too_high"}
+            return self._error(
+                "stance_too_high",
+                metric_name="avg_front_knee_angle_deg",
+                metric_value=avg_angle,
+                threshold=STANCE_TOO_HIGH_ANGLE_DEG,
+                evidence_index=0,
+                sample_count=len(angles),
+            )
         return None
 
     # ------------------------------------------------------------------
@@ -389,14 +473,16 @@ class HeuristicsEngine:
 
         # Find the peak-extension frame (max wrist horizontal displacement)
         max_disp = 0.0
+        evidence_index = 0
         peak_skel = skeletons[0]
-        for skel in skeletons:
+        for index, skel in enumerate(skeletons):
             wrist = _get_joint(skel, limbs["wrist"])
             if wrist is not None:
                 d = abs(float(wrist[0] - ref_wrist[0]))
                 if d > max_disp:
                     max_disp = d
                     peak_skel = skel
+                    evidence_index = index
 
         shoulder = _get_joint(peak_skel, limbs["shoulder"])
         elbow = _get_joint(peak_skel, limbs["elbow"])
@@ -406,7 +492,15 @@ class HeuristicsEngine:
 
         arm_angle = calc_angle(shoulder, elbow, wrist)
         if arm_angle < INCOMPLETE_ARM_EXTENSION_ANGLE_DEG:
-            return {"error_key": "incomplete_arm_extension"}
+            return self._error(
+                "incomplete_arm_extension",
+                metric_name="front_arm_angle_deg",
+                metric_value=arm_angle,
+                threshold=INCOMPLETE_ARM_EXTENSION_ANGLE_DEG,
+                evidence_index=evidence_index,
+                sample_count=len(skeletons),
+                severity="high",
+            )
         return None
 
     # ------------------------------------------------------------------
@@ -459,7 +553,16 @@ class HeuristicsEngine:
 
         # Wrist sweeps more than the configured shoulder-width ratio.
         if sweep_range > OVER_PARRY_RATIO_THRESHOLD * shoulder_width:
-            return {"error_key": "over_parrying"}
+            ratio = sweep_range / shoulder_width
+            return self._error(
+                "over_parrying",
+                metric_name="wrist_sweep_shoulder_ratio",
+                metric_value=ratio,
+                threshold=OVER_PARRY_RATIO_THRESHOLD,
+                evidence_index=0,
+                sample_count=len(wrist_xs),
+                severity="low",
+            )
         return None
 
     # ------------------------------------------------------------------
@@ -494,9 +597,24 @@ class HeuristicsEngine:
             ratio = step_width / shoulder_width
             
             if ratio > WIDE_STEP_RATIO_THRESHOLD:
-                return {"error_key": "wide_step"}
+                return self._error(
+                    "wide_step",
+                    metric_name="ankle_distance_shoulder_ratio",
+                    metric_value=ratio,
+                    threshold=WIDE_STEP_RATIO_THRESHOLD,
+                    evidence_index=0,
+                    sample_count=len(skeletons),
+                    severity="low",
+                )
             elif ratio < NARROW_STEP_RATIO_THRESHOLD:
-                return {"error_key": "narrow_step"}
+                return self._error(
+                    "narrow_step",
+                    metric_name="ankle_distance_shoulder_ratio",
+                    metric_value=ratio,
+                    threshold=NARROW_STEP_RATIO_THRESHOLD,
+                    evidence_index=0,
+                    sample_count=len(skeletons),
+                )
         return None
 
     # ------------------------------------------------------------------
@@ -536,8 +654,22 @@ class HeuristicsEngine:
                 ratio = (back_x - pelvis_x) / base_width
                 
             if ratio > COM_IN_FRONT_RATIO_THRESHOLD:
-                return {"error_key": "center_of_mass_in_front"}
+                return self._error(
+                    "center_of_mass_in_front",
+                    metric_name="pelvis_position_ratio",
+                    metric_value=ratio,
+                    threshold=COM_IN_FRONT_RATIO_THRESHOLD,
+                    evidence_index=0,
+                    sample_count=len(skeletons),
+                )
             elif ratio < COM_LEANING_BACK_RATIO_THRESHOLD:
-                return {"error_key": "center_of_mass_leaning_backward"}
+                return self._error(
+                    "center_of_mass_leaning_backward",
+                    metric_name="pelvis_position_ratio",
+                    metric_value=ratio,
+                    threshold=COM_LEANING_BACK_RATIO_THRESHOLD,
+                    evidence_index=0,
+                    sample_count=len(skeletons),
+                )
                 
         return None

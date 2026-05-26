@@ -137,7 +137,11 @@ class LiveVideoPipeline:
     ):
         self.target_side = target_side
         self.training_mode = training_mode
-        self.pose_estimator = PoseEstimator(model_path=pose_model, backend=pose_backend)
+        self.pose_estimator = PoseEstimator(
+            model_path=pose_model,
+            backend=pose_backend,
+            target_side=target_side,
+        )
         self.target_tracker = TargetTracker(target_side=target_side)
         self.gatekeeper = ActivityGatekeeper(fps=30)
         self.sliding_window = SlidingWindowInference(model_path="weights/fencenet/best_model.pth", device="auto")
@@ -175,6 +179,8 @@ class LiveVideoPipeline:
             only_errors=only_errors,
             only_selected=only_selected,
             training_mode=training_mode,
+            min_active_count=2,
+            pending_ttl_seconds=3.5,
         )
         
     def _pixel_to_xyn(self, skeleton: dict, frame_h: int, frame_w: int) -> dict:
@@ -222,6 +228,12 @@ class LiveVideoPipeline:
         if is_active and not self.prev_gatekeeper_active and target_skel:
             self.normalizer.reference_nose = None  # Reset to re-fit
             self.normalizer.scale_factor = None
+            self.raw_skeletons.clear()
+            self.normalized_skeletons.clear()
+        elif not is_active and self.prev_gatekeeper_active:
+            self.raw_skeletons.clear()
+            self.normalized_skeletons.clear()
+            self.current_action = "Idle"
         self.prev_gatekeeper_active = is_active
         
         # Debug: log pipeline state every 30 frames (~1s)
@@ -232,37 +244,34 @@ class LiveVideoPipeline:
                   f"active={is_active} buf={buf_fill}/{self.window_size} action={self.current_action}")
         
         # 3. Normalization & Buffer Management
-        if target_skel:
+        if target_skel and is_active:
             self.raw_skeletons.append(target_skel)
             
             # Convert pixel coords → xyn (0~1) to match training data format
             xyn_skel = self._pixel_to_xyn(target_skel, height, width)
             
-            if is_active:
-                try:
-                    if self.normalizer.reference_nose is None:
-                        self.normalizer.fit([xyn_skel])
-                    norm_dict = self.normalizer.normalize_skeleton(xyn_skel)
-                    norm_arr = np.array([norm_dict[j] for j in self.normalizer.MODEL_JOINT_NAMES])
-                except Exception:
-                    norm_arr = np.zeros((9, 2))
-            else:
-                norm_arr = np.zeros((9, 2))
-                
-            self.normalized_skeletons.append(norm_arr)
-        else:
-            self.raw_skeletons.append({})
-            self.normalized_skeletons.append(np.zeros((9, 2)))
+            try:
+                if self.normalizer.reference_nose is None:
+                    self.normalizer.fit([xyn_skel])
+                norm_dict = self.normalizer.normalize_skeleton(xyn_skel)
+                norm_arr = np.array([norm_dict[j] for j in self.normalizer.MODEL_JOINT_NAMES])
+                self.normalized_skeletons.append(norm_arr)
+            except Exception as exc:
+                if self.raw_skeletons:
+                    self.raw_skeletons.pop()
+                logger.warning("Realtime normalization failed: %s", exc)
 
         # 4. Inference & Heuristics when buffer is full and stride is met
-        if len(self.normalized_skeletons) == self.window_size and (self.frame_idx - self.last_inference_idx) >= self.stride:
+        if is_active and len(self.normalized_skeletons) == self.window_size and (self.frame_idx - self.last_inference_idx) >= self.stride:
             skel_array = np.array(self.normalized_skeletons)
             
-            # Real-time: classify the single window directly (skip NMS which filters out Idle)
-            window_results = self.sliding_window._classify_windows(skel_array)
-            
-            if window_results:
-                best_result = max(window_results, key=lambda x: x["confidence"])
+            try:
+                best_result = self.sliding_window.classify_window(skel_array)
+            except RuntimeError as exc:
+                logger.error("FenceNet unavailable: %s", exc)
+                best_result = None
+
+            if best_result:
                 self.current_action = best_result["action"]
                 conf = best_result["confidence"]
                 print(f"[INFERENCE] action={self.current_action} conf={conf:.3f}")
