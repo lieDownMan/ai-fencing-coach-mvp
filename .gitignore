@@ -42,3 +42,9 @@ FFD.zip
 
 .env
 
+# Android local/build outputs
+android/.gradle/
+android/**/build/
+android/local.properties
+android/captures/
+

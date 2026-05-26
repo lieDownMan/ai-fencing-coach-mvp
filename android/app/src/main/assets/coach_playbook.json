@@ -1,0 +1,68 @@
+{
+  "foot_before_hand": {
+    "error_name": "Foot before hand",
+    "short_cue": "Extend first, then step.",
+    "diagnosis": "The front foot is moving before the weapon arm starts the attack.",
+    "practice": "Practice slow step-lunge reps where the hand clearly leads the foot."
+  },
+  "lunge_overextension": {
+    "error_name": "Overextended lunge",
+    "short_cue": "Keep the front knee stacked.",
+    "diagnosis": "The front knee angle suggests the lunge is collapsing past a strong support position.",
+    "practice": "Pause at the end of each lunge and check knee-over-ankle control."
+  },
+  "incomplete_arm_extension": {
+    "error_name": "Incomplete arm extension",
+    "short_cue": "Finish the arm.",
+    "diagnosis": "The attacking arm is not reaching a clear extension during the lunge.",
+    "practice": "Use extension-lunge drills with a target and freeze the finish."
+  },
+  "guard_dropped": {
+    "error_name": "Guard dropped",
+    "short_cue": "Keep your guard up.",
+    "diagnosis": "The front wrist is dropping below the shoulder line for too long.",
+    "practice": "Shadow footwork while keeping the bell/hand in the same visual lane."
+  },
+  "stance_too_high": {
+    "error_name": "Stance too high",
+    "short_cue": "Stay lower in guard.",
+    "diagnosis": "The front knee is too straight for a stable en-garde position.",
+    "practice": "Hold en-garde for short intervals and reset when the knees straighten."
+  },
+  "bounce_excessive": {
+    "error_name": "Excessive bounce",
+    "short_cue": "Quiet the bounce.",
+    "diagnosis": "The pelvis is moving up and down more than needed during footwork.",
+    "practice": "Practice advance-retreat with a quiet head and steady hip height."
+  },
+  "center_of_mass_in_front": {
+    "error_name": "Weight too far forward",
+    "short_cue": "Bring weight back.",
+    "diagnosis": "The body center is drifting too close to the front foot.",
+    "practice": "Reset to balanced en-garde after each step."
+  },
+  "center_of_mass_leaning_backward": {
+    "error_name": "Weight too far back",
+    "short_cue": "Center your weight.",
+    "diagnosis": "The body center is drifting too close to the back foot.",
+    "practice": "Use mirror footwork and keep the hips centered between the feet."
+  },
+  "over_parrying": {
+    "error_name": "Over-parrying",
+    "short_cue": "Make the parry smaller.",
+    "diagnosis": "The front wrist is traveling wider than needed for a compact defensive action.",
+    "practice": "Practice small parry-recover reps without letting the hand drift."
+  },
+  "wide_step": {
+    "error_name": "Step too wide",
+    "short_cue": "Shorten the step.",
+    "diagnosis": "The foot distance is wider than the shoulder-width reference.",
+    "practice": "Mark a comfortable step length and keep repeated steps inside it."
+  },
+  "narrow_step": {
+    "error_name": "Step too narrow",
+    "short_cue": "Widen your base.",
+    "diagnosis": "The foot distance is too narrow for stable fencing footwork.",
+    "practice": "Reset the feet to a shoulder-aware guard before moving again."
+  }
+}
