@@ -236,8 +236,8 @@ class _MainScreenState extends State<MainScreen>
   // ── Camera ─────────────────────────────────────────────────────────────────
 
   Future<void> _initCamera() async {
-    final status = await Permission.camera.request();
-    if (!status.isGranted) return;
+    //final status = await Permission.camera.request();
+    //if (!status.isGranted) return;
 
     if (_cameras.isEmpty) return;
 

@@ -70,5 +70,9 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>需要相機權限來分析您的擊劍動作</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>需要麥克風權限來播放語音提示</string>
 </dict>
 </plist>
