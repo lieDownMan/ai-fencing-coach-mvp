@@ -2,21 +2,16 @@ package com.aifencingcoach.runtime
 
 import android.content.Context
 import androidx.camera.core.ImageProxy
-import com.google.mediapipe.framework.image.MediaImageBuilder
-import com.google.mediapipe.tasks.core.BaseOptions
-import com.google.mediapipe.tasks.vision.core.ImageProcessingOptions
-import com.google.mediapipe.tasks.vision.core.RunningMode
-import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
 import java.util.ArrayDeque
 import kotlin.system.measureNanoTime
 
 class LiveCoachPipeline(
     context: Context,
+    private var poseBackendKind: PoseBackendKind = PoseBackendKind.MEDIAPIPE,
     private var targetSide: TargetSide = TargetSide.LEFT,
     private var trainingMode: TrainingMode = TrainingMode.FREE_BOUTING
 ) : AutoCloseable {
     private val appContext = context.applicationContext
-    private val mapper = PoseMapper()
     private val gatekeeper = ActivityGatekeeper(fps = 30)
     private val normalizer = SpatialNormalizer()
     private val heuristics = HeuristicsEngine(targetSide, trainingMode)
@@ -24,7 +19,7 @@ class LiveCoachPipeline(
     private val rawSkeletons = ArrayDeque<Skeleton>()
     private val normalizedFrames = ArrayDeque<FloatArray>()
     private val classifier = FenceNetClassifier.createOrNull(appContext)
-    private val poseLandmarker = createPoseLandmarker(appContext)
+    private val poseBackend = createPoseBackend(appContext, poseBackendKind)
     private var frameIndex = 0L
     private var lastInferenceFrame = 0L
     private var lastAction = "Idle"
@@ -33,7 +28,7 @@ class LiveCoachPipeline(
     private var previousActive = false
 
     val ready: Boolean
-        get() = poseLandmarker != null && classifier != null
+        get() = poseBackend.ready && classifier != null
 
     fun configure(targetSide: TargetSide, trainingMode: TrainingMode) {
         this.targetSide = targetSide
@@ -61,12 +56,17 @@ class LiveCoachPipeline(
         val width = imageProxy.width
         val height = imageProxy.height
 
-        if (!ready || poseLandmarker == null || classifier == null) {
+        if (!ready || classifier == null) {
             frameIndex += 1
+            val missing = buildList {
+                if (!poseBackend.ready) add(poseBackend.missingMessage)
+                if (classifier == null) add("Add fencenet_v2.onnx to assets.")
+            }.joinToString(" ")
             return CoachFrameState(
                 state = "MODEL MISSING",
                 action = "Idle",
-                cue = "Add pose_landmarker_lite.task and fencenet_v2.onnx assets.",
+                cue = missing,
+                poseBackend = poseBackendKind,
                 frameWidth = width,
                 frameHeight = height,
                 frameIndex = frameIndex,
@@ -89,6 +89,7 @@ class LiveCoachPipeline(
                 action = lastAction,
                 confidence = lastConfidence,
                 cue = "",
+                poseBackend = poseBackendKind,
                 frameWidth = width,
                 frameHeight = height,
                 frameIndex = frameIndex,
@@ -97,27 +98,11 @@ class LiveCoachPipeline(
             ) to null
         }
 
-        if (shouldExtractPose) {
-            poseMs = measureNanoTime {
-                val mediaImage = imageProxy.image
-                if (mediaImage != null) {
-                    val mpImage = MediaImageBuilder(mediaImage).build()
-                    val processingOptions = ImageProcessingOptions.builder()
-                        .setRotationDegrees(imageProxy.imageInfo.rotationDegrees)
-                        .build()
-                    val timestampMs = imageProxy.imageInfo.timestamp / 1_000_000
-                    val result = poseLandmarker.detectForVideo(mpImage, processingOptions, timestampMs)
-                    val selected = mapper.selectFencers(
-                        poses = result.landmarks(),
-                        frameWidth = width,
-                        frameHeight = height,
-                        targetSide = targetSide
-                    )
-                    targetSkeleton = selected.first
-                    opponentSkeleton = selected.second
-                }
-            }.nanosToMillis()
-        }
+        poseMs = measureNanoTime {
+            val result = poseBackend.detect(imageProxy, targetSide)
+            targetSkeleton = result.targetSkeleton
+            opponentSkeleton = result.opponentSkeleton
+        }.nanosToMillis()
 
         val active = gatekeeper.update(targetSkeleton, opponentSkeleton, width, targetSide)
         if (active && !previousActive) {
@@ -164,6 +149,7 @@ class LiveCoachPipeline(
             action = lastAction,
             confidence = lastConfidence,
             cue = cue?.message ?: decision.visualCues.firstOrNull()?.message.orEmpty(),
+            poseBackend = poseBackendKind,
             visualCues = decision.visualCues,
             targetSkeleton = targetSkeleton,
             opponentSkeleton = opponentSkeleton,
@@ -199,24 +185,10 @@ class LiveCoachPipeline(
 
     override fun close() {
         classifier?.close()
-        poseLandmarker?.close()
+        poseBackend.close()
     }
 
     companion object {
-        private fun createPoseLandmarker(context: Context): PoseLandmarker? = runCatching {
-            val baseOptions = BaseOptions.builder()
-                .setModelAssetPath("pose_landmarker_lite.task")
-                .build()
-            val options = PoseLandmarker.PoseLandmarkerOptions.builder()
-                .setBaseOptions(baseOptions)
-                .setRunningMode(RunningMode.VIDEO)
-                .setNumPoses(2)
-                .setMinPoseDetectionConfidence(0.5f)
-                .setMinTrackingConfidence(0.5f)
-                .build()
-            PoseLandmarker.createFromOptions(context, options)
-        }.getOrNull()
-
         private fun Long.nanosToMillis(): Long = this / 1_000_000
     }
 }

@@ -33,6 +33,16 @@ enum class TrainingMode(val label: String) {
     }
 }
 
+enum class PoseBackendKind(val label: String) {
+    MEDIAPIPE("MediaPipe"),
+    YOLO("YOLO");
+
+    companion object {
+        fun fromLabel(label: String): PoseBackendKind =
+            entries.firstOrNull { it.label == label } ?: MEDIAPIPE
+    }
+}
+
 data class ActionPrediction(
     val action: String,
     val confidence: Float,
@@ -66,6 +76,7 @@ data class CoachFrameState(
     val action: String = "Idle",
     val confidence: Float = 0f,
     val cue: String = "",
+    val poseBackend: PoseBackendKind = PoseBackendKind.MEDIAPIPE,
     val visualCues: List<FeedbackCue> = emptyList(),
     val targetSkeleton: Skeleton? = null,
     val opponentSkeleton: Skeleton? = null,

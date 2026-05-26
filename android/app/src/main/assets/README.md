@@ -6,6 +6,10 @@ Required runtime assets:
 - `fencenet_v2.onnx`
 - `coach_playbook.json`
 
+Planned YOLO pose backend asset:
+
+- `yolo_pose.onnx`
+
 Generate `fencenet_v2.onnx` from the repo root:
 
 ```powershell

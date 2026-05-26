@@ -5,7 +5,7 @@ phone:
 
 ```text
 CameraX frame
--> MediaPipe Pose Landmarker
+-> selected pose backend (MediaPipe now, YOLO slot next)
 -> skeleton mapping
 -> SpatialNormalizer + FenceNet ONNX
 -> Kotlin heuristics + feedback scheduler
@@ -63,6 +63,9 @@ From Android Studio:
 
 - Live coach only.
 - No runtime backend.
+- Pose backend selector in the HUD.
+- MediaPipe backend is active today.
+- YOLO backend is exposed as a selectable slot, but model export/decoder wiring is still next work.
 - Back camera by default.
 - Landscape orientation.
 - One selected target fencer plus optional opponent context.
