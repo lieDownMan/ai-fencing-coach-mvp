@@ -12,10 +12,19 @@ The Android app expects:
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Any
 
 import torch
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, "reconfigure"):
+        stream.reconfigure(encoding="utf-8", errors="replace")
 
 from src.data.fencing_dataset import CLASS_NAMES, NUM_CHANNELS, SEQUENCE_LENGTH
 from src.models.fencenet_v2 import FenceNetV2
@@ -68,7 +77,7 @@ def export_model(
     model: FenceNetV2,
     output_path: Path = DEFAULT_OUTPUT,
     *,
-    opset_version: int = 17,
+    opset_version: int = 18,
 ) -> Path:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     sample = torch.randn(1, NUM_CHANNELS, SEQUENCE_LENGTH, dtype=torch.float32)
@@ -83,6 +92,7 @@ def export_model(
             input_names=[INPUT_NAME],
             output_names=[OUTPUT_NAME],
             dynamic_axes=None,
+            external_data=False,
         )
     return output_path
 
@@ -118,7 +128,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Export FenceNetV2 to ONNX for Android.")
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--opset", type=int, default=17)
+    parser.add_argument("--opset", type=int, default=18)
     parser.add_argument(
         "--allow-random",
         action="store_true",
