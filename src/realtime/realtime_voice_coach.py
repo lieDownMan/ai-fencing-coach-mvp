@@ -25,6 +25,7 @@ import platform
 import subprocess
 import threading
 import time
+import base64
 from pathlib import Path
 from queue import Empty, Queue
 from typing import Any, Dict, Optional
@@ -93,6 +94,48 @@ def _macos_say(text: str) -> bool:
         return False
 
 
+def _windows_sapi_speak(text: str) -> bool:
+    """Speak text through Windows SAPI in a short-lived PowerShell process."""
+    if platform.system() != "Windows":
+        return False
+
+    script = f"""
+Add-Type -AssemblyName System.Speech
+$speaker = New-Object System.Speech.Synthesis.SpeechSynthesizer
+$speaker.Rate = -1
+$speaker.Volume = 100
+$voice = $speaker.GetInstalledVoices() |
+  Where-Object {{ $_.VoiceInfo.Culture.Name -like 'zh*' }} |
+  Select-Object -First 1
+if ($voice) {{ $speaker.SelectVoice($voice.VoiceInfo.Name) }}
+$speaker.Speak(@'
+{text}
+'@)
+$speaker.Dispose()
+"""
+    encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        result = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-EncodedCommand",
+                encoded,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creationflags,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
 # ---------------------------------------------------------------------------
 # Core class
 # ---------------------------------------------------------------------------
@@ -142,6 +185,10 @@ class RealtimeVoiceCoach:
             return False
         if not self._cooldown_ok(error_key):
             return False
+
+        if _windows_sapi_speak(cue):
+            logger.info("Voice coach (sync/windows): [%s] -> %s", error_key, cue)
+            return True
 
         if self._engine is None:
             self._engine = _init_tts_engine()
@@ -243,21 +290,19 @@ class RealtimeVoiceCoach:
             self._worker_thread.start()
 
     def _worker_loop(self) -> None:
-        """Background loop: pulls (error_key, cue) from the queue and speaks.
-        
-        NOTE: We always use macOS 'say' command instead of pyttsx3 because
-        pyttsx3 uses NSSpeechSynthesizer which conflicts with OpenCV's
-        main-thread GUI event loop, causing silent process crashes.
-        """
-        if platform.system() != "Darwin":
-            # Try pyttsx3 only on non-macOS (Linux/Windows)
+        """Background loop: pulls (error_key, cue) from the queue and speaks."""
+        system = platform.system()
+        if system == "Windows":
+            engine = None
+            logger.info("Voice worker: using Windows SAPI subprocess backend.")
+        elif system == "Darwin":
+            engine = None
+            logger.info("Voice worker: using macOS 'say' command for TTS.")
+        else:
             engine = _init_tts_engine()
             if engine is None:
                 logger.error("Voice worker: no TTS backend available. Worker exiting.")
                 return
-        else:
-            engine = None
-            logger.info("Voice worker: using macOS 'say' command for TTS (pyttsx3 skipped to avoid GUI conflict).")
 
         while not self._shutdown_event.is_set():
             try:
@@ -266,7 +311,10 @@ class RealtimeVoiceCoach:
                 continue
             logger.info("Voice worker speaking: [%s] → %s", error_key, cue)
             try:
-                if engine is not None:
+                if system == "Windows":
+                    if not _windows_sapi_speak(cue):
+                        logger.error("Windows SAPI failed for [%s]", error_key)
+                elif engine is not None:
                     engine.say(cue)
                     engine.runAndWait()
                 else:
