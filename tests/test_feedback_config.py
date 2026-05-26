@@ -28,7 +28,9 @@ def test_feedback_registry_derives_weights_and_future_keys():
 
 
 def test_feedback_registry_matches_playbook_keys():
-    playbook_path = Path(__file__).resolve().parents[1] / "coach_playbook.json"
+    playbook_path = Path(__file__).resolve().parents[1] / "backend" / "coach_playbook.json"
+    if not playbook_path.exists():
+        playbook_path = Path(__file__).resolve().parents[1] / "coach_playbook.json"
     playbook_keys = set(json.loads(playbook_path.read_text(encoding="utf-8")))
 
     assert set(FEEDBACK_ERROR_CONFIG) == playbook_keys

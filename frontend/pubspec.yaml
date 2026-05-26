@@ -1,0 +1,44 @@
+name: frontend
+description: "AI Fencing Coach — Standalone On-Device App"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # Camera
+  camera: ^0.12.0+1
+
+  # Google ML Kit Pose Detection (on-device)
+  google_mlkit_pose_detection: ^0.14.1
+
+  # TFLite for FenceNet action classification
+  tflite_flutter: ^0.11.0
+
+  # Text-to-Speech for coaching feedback
+  flutter_tts: ^4.2.5
+
+  # Permission handling
+  permission_handler: ^12.0.1
+
+  # Wakelock for preventing screen sleep during session
+  wakelock_plus: ^1.6.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/models/
+    - assets/data/
