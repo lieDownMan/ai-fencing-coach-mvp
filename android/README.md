@@ -7,6 +7,7 @@ phone:
 CameraX frame
 -> selected pose backend (MediaPipe or YOLO)
 -> skeleton mapping
+-> target lock + short-gap interpolation
 -> SpatialNormalizer + FenceNet ONNX
 -> Kotlin heuristics + feedback scheduler
 -> overlay + Android TextToSpeech cue
@@ -68,6 +69,10 @@ From Android Studio:
 - Pose backend selector in the HUD.
 - MediaPipe backend uses the MediaPipe Tasks pose landmarker.
 - YOLO backend runs `yolo_pose.onnx` through ONNX Runtime with local decoding/NMS.
+- Target tracker keeps the selected fencer locked through short pose dropouts.
+- FenceNet only receives active fencing frames; idle frames do not fill the model window.
+- HUD shows target lock, warmup progress, cue stack/history, FPS, latency, dropped-frame estimate, and session counts.
+- Controls include training mode, pose backend, target side, pause/resume, voice, and reset.
 - Back camera by default.
 - Landscape orientation.
 - One selected target fencer plus optional opponent context.

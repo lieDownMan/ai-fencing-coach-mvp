@@ -9,15 +9,32 @@ class PoseMapper(private val minVisibility: Float = 0.35f) {
         frameHeight: Int,
         targetSide: TargetSide
     ): Pair<Skeleton?, Skeleton?> {
-        val candidates = poses.mapNotNull { landmarks ->
-            mapPose(landmarks, frameWidth, frameHeight, targetSide)
-        }.sortedBy { centerX(it) }
+        val candidates = mapDetections(poses, frameWidth, frameHeight, targetSide)
+            .map { it.skeleton }
+            .sortedBy { centerX(it) }
 
         if (candidates.isEmpty()) return null to null
         val target = if (targetSide == TargetSide.LEFT) candidates.first() else candidates.last()
         val opponent = candidates.firstOrNull { it !== target }
         return target to opponent
     }
+
+    fun mapDetections(
+        poses: List<List<NormalizedLandmark>>,
+        frameWidth: Int,
+        frameHeight: Int,
+        targetSide: TargetSide
+    ): List<PoseDetection> =
+        poses.mapIndexedNotNull { index, landmarks ->
+            val skeleton = mapPose(landmarks, frameWidth, frameHeight, targetSide) ?: return@mapIndexedNotNull null
+            val bbox = BoundingBox.fromSkeleton(skeleton) ?: return@mapIndexedNotNull null
+            PoseDetection(
+                skeleton = skeleton,
+                bbox = bbox,
+                confidence = poseConfidence(landmarks),
+                sourceRank = index
+            )
+        }
 
     fun mapPose(
         landmarks: List<NormalizedLandmark>,
@@ -86,6 +103,13 @@ class PoseMapper(private val minVisibility: Float = 0.35f) {
         return if (anchors.isEmpty()) 0f else anchors.map { it.x }.average().toFloat()
     }
 
+    private fun poseConfidence(landmarks: List<NormalizedLandmark>): Float {
+        val values = RequiredLandmarks.mapNotNull { index ->
+            landmarks.getOrNull(index)?.visibility()?.orElse(1.0f)
+        }
+        return if (values.isEmpty()) 1f else values.average().toFloat()
+    }
+
     companion object {
         private const val Nose = 0
         private const val LeftShoulder = 11
@@ -100,5 +124,16 @@ class PoseMapper(private val minVisibility: Float = 0.35f) {
         private const val RightKnee = 26
         private const val LeftAnkle = 27
         private const val RightAnkle = 28
+        private val RequiredLandmarks = listOf(
+            Nose,
+            LeftShoulder,
+            RightShoulder,
+            LeftHip,
+            RightHip,
+            LeftKnee,
+            RightKnee,
+            LeftAnkle,
+            RightAnkle
+        )
     }
 }

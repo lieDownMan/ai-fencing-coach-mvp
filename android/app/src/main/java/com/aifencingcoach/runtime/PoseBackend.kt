@@ -25,7 +25,8 @@ import kotlin.math.min
 
 data class PoseBackendResult(
     val targetSkeleton: Skeleton?,
-    val opponentSkeleton: Skeleton?
+    val opponentSkeleton: Skeleton?,
+    val detections: List<PoseDetection> = emptyList()
 )
 
 interface PoseBackend : AutoCloseable {
@@ -61,13 +62,13 @@ class MediaPipePoseBackend(context: Context) : PoseBackend {
             .build()
         val timestampMs = imageProxy.imageInfo.timestamp / 1_000_000
         val result = landmarker.detectForVideo(mpImage, processingOptions, timestampMs)
-        val selected = mapper.selectFencers(
+        val detections = mapper.mapDetections(
             poses = result.landmarks(),
             frameWidth = imageProxy.width,
             frameHeight = imageProxy.height,
             targetSide = targetSide
         )
-        return PoseBackendResult(selected.first, selected.second)
+        return PoseBackendResult(null, null, detections)
     }
 
     override fun close() {
@@ -111,15 +112,10 @@ class YoloPoseBackend(context: Context) : PoseBackend {
         val bitmap = imageProxy.toBitmapOrNull() ?: return PoseBackendResult(null, null)
         val prepared = prepareInput(bitmap)
         val detections = runInference(activeSession, prepared)
-        val skeletons = detections
             .sortedByDescending { it.score }
             .take(8)
-            .mapNotNull { it.toSkeleton(targetSide) }
-            .sortedBy { centerX(it) }
-        if (skeletons.isEmpty()) return PoseBackendResult(null, null)
-        val target = if (targetSide == TargetSide.LEFT) skeletons.first() else skeletons.last()
-        val opponent = skeletons.firstOrNull { it !== target }
-        return PoseBackendResult(target, opponent)
+            .mapIndexedNotNull { index, detection -> detection.toPoseDetection(targetSide, index) }
+        return PoseBackendResult(null, null, detections)
     }
 
     override fun close() {
@@ -298,18 +294,6 @@ class YoloPoseBackend(context: Context) : PoseBackend {
         }
     }
 
-    private fun centerX(skeleton: Skeleton): Float {
-        val points = listOfNotNull(
-            skeleton["left_hip"],
-            skeleton["right_hip"],
-            skeleton["left_shoulder"],
-            skeleton["right_shoulder"],
-            skeleton["left_ankle"],
-            skeleton["right_ankle"]
-        )
-        return if (points.isEmpty()) 0f else points.map { it.x }.average().toFloat()
-    }
-
     private data class LetterboxInput(
         val tensor: FloatArray,
         val scale: Float,
@@ -333,7 +317,7 @@ class YoloPoseBackend(context: Context) : PoseBackend {
         val score: Float,
         val keypoints: Array<YoloKeypoint>
     ) {
-        fun toSkeleton(targetSide: TargetSide): Skeleton? {
+        fun toPoseDetection(targetSide: TargetSide, sourceRank: Int): PoseDetection? {
             fun point(index: Int): Point2? {
                 val keypoint = keypoints.getOrNull(index) ?: return null
                 if (keypoint.confidence < KeypointThreshold) return null
@@ -377,7 +361,12 @@ class YoloPoseBackend(context: Context) : PoseBackend {
                 "right_ankle" to rightAnkle
             )
             if (backWrist != null) skeleton["back_wrist"] = backWrist
-            return skeleton
+            return PoseDetection(
+                skeleton = skeleton,
+                bbox = BoundingBox(x1, y1, x2, y2),
+                confidence = score,
+                sourceRank = sourceRank
+            )
         }
     }
 

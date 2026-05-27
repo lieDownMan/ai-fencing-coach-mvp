@@ -15,6 +15,8 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -38,6 +41,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -132,6 +136,7 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
     var trainingMode by remember { mutableStateOf(TrainingMode.FREE_BOUTING) }
     var poseBackend by remember { mutableStateOf(PoseBackendKind.MEDIAPIPE) }
     var voiceEnabled by remember { mutableStateOf(true) }
+    var analysisPaused by remember { mutableStateOf(false) }
     var frameState by remember { mutableStateOf(CoachFrameState()) }
     var resetToken by remember { mutableStateOf(0) }
 
@@ -144,24 +149,32 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
+        val displayedState = if (analysisPaused) {
+            frameState.copy(state = "PAUSED", cue = "Analysis paused")
+        } else {
+            frameState
+        }
         CameraPreview(
             pipeline = pipeline,
+            analysisPaused = analysisPaused,
             onFrameState = { state, cue ->
                 frameState = state
                 if (voiceEnabled && cue != null) onSpeak(cue.message)
             }
         )
-        SkeletonOverlay(state = frameState)
+        SkeletonOverlay(state = displayedState)
         HudPanel(
-            state = frameState,
+            state = displayedState,
             poseBackend = poseBackend,
             targetSide = targetSide,
             trainingMode = trainingMode,
             voiceEnabled = voiceEnabled,
+            analysisPaused = analysisPaused,
             onPoseBackend = { poseBackend = it },
             onTargetSide = { targetSide = it },
             onTrainingMode = { trainingMode = it },
             onVoiceEnabled = { voiceEnabled = it },
+            onAnalysisPaused = { analysisPaused = it },
             onReset = {
                 pipeline.reset()
                 resetToken += 1
@@ -173,11 +186,13 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
 @Composable
 private fun CameraPreview(
     pipeline: LiveCoachPipeline,
+    analysisPaused: Boolean,
     onFrameState: (CoachFrameState, FeedbackCue?) -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val mainExecutor = remember { ContextCompat.getMainExecutor(context) }
+    val pausedState = rememberUpdatedState(analysisPaused)
     val previewView = remember {
         PreviewView(context).apply {
             scaleType = PreviewView.ScaleType.FILL_CENTER
@@ -199,6 +214,7 @@ private fun CameraPreview(
                     .build()
                 analysis.setAnalyzer(analyzerExecutor) { imageProxy ->
                     try {
+                        if (pausedState.value) return@setAnalyzer
                         val (state, cue) = pipeline.process(imageProxy)
                         mainExecutor.execute { onFrameState(state, cue) }
                     } finally {
@@ -259,16 +275,19 @@ private fun SkeletonOverlay(state: CoachFrameState) {
 }
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun HudPanel(
     state: CoachFrameState,
     poseBackend: PoseBackendKind,
     targetSide: TargetSide,
     trainingMode: TrainingMode,
     voiceEnabled: Boolean,
+    analysisPaused: Boolean,
     onPoseBackend: (PoseBackendKind) -> Unit,
     onTargetSide: (TargetSide) -> Unit,
     onTrainingMode: (TrainingMode) -> Unit,
     onVoiceEnabled: (Boolean) -> Unit,
+    onAnalysisPaused: (Boolean) -> Unit,
     onReset: () -> Unit
 ) {
     Column(
@@ -284,6 +303,7 @@ private fun HudPanel(
         ) {
             Column(
                 modifier = Modifier
+                    .weight(1f)
                     .background(Color(0xAA101418), RoundedCornerShape(8.dp))
                     .padding(16.dp)
             ) {
@@ -299,34 +319,59 @@ private fun HudPanel(
                     color = Color(0xFFD7FF5F),
                     fontSize = 16.sp
                 )
+                if (state.tracking.warmupFramesRemaining > 0 && state.state == "ACTIVE") {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "warmup ${FenceNetWarmup - state.tracking.warmupFramesRemaining}/$FenceNetWarmup",
+                        color = Color(0xFFB6C2CC),
+                        fontSize = 13.sp
+                    )
+                }
+                CueStack(state = state)
             }
 
             Column(
                 modifier = Modifier
+                    .widthIn(min = 160.dp, max = 260.dp)
                     .background(Color(0xAA101418), RoundedCornerShape(8.dp))
                     .padding(12.dp),
                 horizontalAlignment = Alignment.End
             ) {
                 Text(
-                    text = "pose ${state.metrics.poseMs}ms  model ${state.metrics.classifierMs}ms  total ${state.metrics.totalMs}ms",
+                    text = "pose ${state.metrics.poseMs}ms  model ${state.metrics.classifierMs}ms",
                     color = Color.White,
                     fontSize = 13.sp
                 )
                 Text(
-                    text = "frame ${state.frameIndex}",
+                    text = "total ${state.metrics.totalMs}ms  fps ${state.metrics.fps.toInt()}",
+                    color = Color(0xFFB6C2CC),
+                    fontSize = 13.sp
+                )
+                Text(
+                    text = "target ${state.tracking.lockState.uppercase(Locale.US)}  poses ${state.tracking.detectionCount}",
+                    color = if (state.tracking.targetInterpolated) Color(0xFFFFC857) else Color(0xFFD7FF5F),
+                    fontSize = 13.sp
+                )
+                Text(
+                    text = "buffer ${state.tracking.bufferFill}/$FenceNetWarmup  drops ${state.metrics.droppedFrames}",
+                    color = Color(0xFFB6C2CC),
+                    fontSize = 13.sp
+                )
+                Text(
+                    text = "session ${formatSeconds(state.session.elapsedSeconds)}  inf ${state.session.inferenceCount}  cues ${state.session.cueCount}",
                     color = Color(0xFFB6C2CC),
                     fontSize = 13.sp
                 )
             }
         }
 
-        Row(
+        FlowRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Color(0xAA101418), RoundedCornerShape(8.dp))
                 .padding(10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             SegmentedGroup(
                 labels = TrainingMode.entries.map { it.label },
@@ -345,6 +390,12 @@ private fun HudPanel(
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 HudButton(
+                    text = if (analysisPaused) "Resume" else "Pause",
+                    selected = analysisPaused,
+                    onClick = { onAnalysisPaused(!analysisPaused) }
+                )
+                Spacer(Modifier.width(8.dp))
+                HudButton(
                     text = if (voiceEnabled) "Voice on" else "Voice off",
                     selected = voiceEnabled,
                     onClick = { onVoiceEnabled(!voiceEnabled) }
@@ -353,6 +404,31 @@ private fun HudPanel(
                 HudButton(text = "Reset", selected = false, onClick = onReset)
             }
         }
+    }
+}
+
+@Composable
+private fun CueStack(state: CoachFrameState) {
+    val cues = state.visualCues.take(3)
+    if (cues.isNotEmpty()) {
+        Spacer(Modifier.height(10.dp))
+        cues.forEachIndexed { index, cue ->
+            Text(
+                text = if (index == 0) cue.message else "Next: ${cue.message}",
+                color = if (index == 0) Color(0xFFFFE066) else Color(0xFFB6C2CC),
+                fontSize = if (index == 0) 15.sp else 13.sp,
+                fontWeight = if (index == 0) FontWeight.SemiBold else FontWeight.Normal
+            )
+        }
+    }
+
+    if (state.cueHistory.isNotEmpty()) {
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text = state.cueHistory.take(2).joinToString("  |  ") { it.label },
+            color = Color(0xFF8DA2B2),
+            fontSize = 12.sp
+        )
     }
 }
 
@@ -390,6 +466,14 @@ private fun HudButton(text: String, selected: Boolean, onClick: () -> Unit) {
 private fun ExecutorService.shutdownSafely() {
     shutdown()
 }
+
+private fun formatSeconds(totalSeconds: Long): String {
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return "%d:%02d".format(Locale.US, minutes, seconds)
+}
+
+private const val FenceNetWarmup = 28
 
 private val SkeletonEdges = listOf(
     "nose" to "front_shoulder",
