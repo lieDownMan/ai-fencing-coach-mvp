@@ -67,13 +67,14 @@ From Android Studio:
 
 - Live coach only.
 - No runtime backend.
+- App opens to a main menu for training mode, pose model, target side, voice, and user settings.
 - Pose backend selector in the HUD.
 - MediaPipe backend uses the MediaPipe Tasks pose landmarker.
 - YOLO backend runs `yolo_pose.onnx` through ONNX Runtime with local decoding/NMS.
 - Target tracker keeps the selected fencer locked through short pose dropouts.
 - FenceNet only receives active fencing frames; idle frames do not fill the model window.
 - HUD shows target lock, warmup progress, cue stack/history, FPS, latency, dropped-frame estimate, and session counts.
-- Controls include training mode, pose backend, target side, pause/resume, voice, finish, and reset.
+- Controls include training mode, pose backend, target side, pause/resume, voice, finish, reset, and menu.
 - Post-practice review summarizes time, active time, model checks, top action, repeated cues, and recent cue timeline.
 - Back camera by default.
 - Landscape orientation.
