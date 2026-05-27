@@ -20,6 +20,7 @@ class LiveCoachPipeline(
     private val rawSkeletons = ArrayDeque<Skeleton>()
     private val normalizedFrames = ArrayDeque<FloatArray>()
     private val cueHistory = ArrayDeque<CueHistoryItem>()
+    private val cueTimeline = ArrayDeque<CueHistoryItem>()
     private val classifier = FenceNetClassifier.createOrNull(appContext)
     private val poseBackend = createPoseBackend(appContext, poseBackendKind)
     private var frameIndex = 0L
@@ -39,6 +40,7 @@ class LiveCoachPipeline(
     private var lastImageTimestampNs: Long? = null
     private var lastFps = 0f
     private val actionCounts = linkedMapOf<String, Long>()
+    private val cueCounts = linkedMapOf<String, CueCountItem>()
 
     val ready: Boolean
         get() = poseBackend.ready && classifier != null
@@ -59,6 +61,7 @@ class LiveCoachPipeline(
         clearMotionBuffers()
         scheduler.reset()
         cueHistory.clear()
+        cueTimeline.clear()
         frameIndex = 0L
         lastInferenceFrame = 0L
         lastAction = "Idle"
@@ -75,8 +78,24 @@ class LiveCoachPipeline(
         lastImageTimestampNs = null
         lastFps = 0f
         actionCounts.clear()
+        cueCounts.clear()
         lastMetrics = PipelineMetrics()
     }
+
+    fun practiceReport(): PracticeReport =
+        buildPracticeReport(
+            trainingMode = trainingMode,
+            poseBackend = poseBackendKind,
+            targetSide = targetSide,
+            elapsedSeconds = elapsedSeconds(),
+            activeFrames = activeFrames,
+            fps = 30,
+            inferenceCount = inferenceCount,
+            actionCounts = actionCounts,
+            cueCounts = cueCounts,
+            cueTimeline = cueTimeline.toList(),
+            generatedAtFrame = frameIndex
+        )
 
     fun process(imageProxy: ImageProxy): Pair<CoachFrameState, FeedbackCue?> {
         val totalStart = System.nanoTime()
@@ -294,12 +313,22 @@ class LiveCoachPipeline(
         cueHistory.addLast(
             CueHistoryItem(
                 frameIndex = frameIndex,
+                errorKey = cue.errorKey,
                 label = cue.label,
                 message = cue.message,
                 priority = cue.priority
             )
         )
         while (cueHistory.size > MaxCueHistory) cueHistory.removeFirst()
+        cueTimeline.addLast(cueHistory.last())
+        while (cueTimeline.size > MaxCueTimeline) cueTimeline.removeFirst()
+        val previous = cueCounts[cue.errorKey]
+        cueCounts[cue.errorKey] = CueCountItem(
+            errorKey = cue.errorKey,
+            label = cue.label,
+            message = cue.message,
+            count = (previous?.count ?: 0L) + 1L
+        )
         cueCount += 1
     }
 
@@ -314,19 +343,21 @@ class LiveCoachPipeline(
     }
 
     private fun sessionStats(): SessionStats {
-        val elapsed = (System.nanoTime() - sessionStartedAtNs) / 1_000_000_000L
         val topAction = actionCounts
             .filterKeys { it != "Idle" }
             .maxByOrNull { it.value }
             ?.key ?: lastAction
         return SessionStats(
-            elapsedSeconds = elapsed,
+            elapsedSeconds = elapsedSeconds(),
             activeFrames = activeFrames,
             inferenceCount = inferenceCount,
             cueCount = cueCount,
             topAction = topAction
         )
     }
+
+    private fun elapsedSeconds(): Long =
+        (System.nanoTime() - sessionStartedAtNs) / 1_000_000_000L
 
     override fun close() {
         classifier?.close()
@@ -335,6 +366,7 @@ class LiveCoachPipeline(
 
     companion object {
         private const val MaxCueHistory = 5
+        private const val MaxCueTimeline = 60
         private fun Long.nanosToMillis(): Long = this / 1_000_000
     }
 }

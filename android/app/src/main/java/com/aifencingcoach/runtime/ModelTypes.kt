@@ -128,9 +128,40 @@ data class SessionStats(
 
 data class CueHistoryItem(
     val frameIndex: Long,
+    val errorKey: String,
     val label: String,
     val message: String,
     val priority: String
+)
+
+data class ActionCountItem(
+    val action: String,
+    val count: Long,
+    val percent: Int
+)
+
+data class CueCountItem(
+    val errorKey: String,
+    val label: String,
+    val message: String,
+    val count: Long
+)
+
+data class PracticeReport(
+    val trainingMode: TrainingMode = TrainingMode.FREE_BOUTING,
+    val poseBackend: PoseBackendKind = PoseBackendKind.MEDIAPIPE,
+    val targetSide: TargetSide = TargetSide.LEFT,
+    val elapsedSeconds: Long = 0,
+    val activeSeconds: Long = 0,
+    val activePercent: Int = 0,
+    val inferenceCount: Long = 0,
+    val cueCount: Long = 0,
+    val topAction: String = "Idle",
+    val actionCounts: List<ActionCountItem> = emptyList(),
+    val topCues: List<CueCountItem> = emptyList(),
+    val cueTimeline: List<CueHistoryItem> = emptyList(),
+    val primaryTakeaway: String = "Build a longer active sample.",
+    val generatedAtFrame: Long = 0
 )
 
 data class CoachFrameState(

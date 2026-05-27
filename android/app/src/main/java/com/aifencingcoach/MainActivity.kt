@@ -59,6 +59,7 @@ import com.aifencingcoach.runtime.CoachFrameState
 import com.aifencingcoach.runtime.FeedbackCue
 import com.aifencingcoach.runtime.LiveCoachPipeline
 import com.aifencingcoach.runtime.PoseBackendKind
+import com.aifencingcoach.runtime.PracticeReport
 import com.aifencingcoach.runtime.Skeleton
 import com.aifencingcoach.runtime.TargetSide
 import com.aifencingcoach.runtime.TrainingMode
@@ -138,6 +139,7 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
     var voiceEnabled by remember { mutableStateOf(true) }
     var analysisPaused by remember { mutableStateOf(false) }
     var frameState by remember { mutableStateOf(CoachFrameState()) }
+    var reviewReport by remember { mutableStateOf<PracticeReport?>(null) }
     var resetToken by remember { mutableStateOf(0) }
 
     val pipeline = remember(poseBackend, targetSide, trainingMode, resetToken) {
@@ -149,14 +151,15 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        val displayedState = if (analysisPaused) {
-            frameState.copy(state = "PAUSED", cue = "Analysis paused")
-        } else {
-            frameState
+        val isReviewing = reviewReport != null
+        val displayedState = when {
+            isReviewing -> frameState.copy(state = "REVIEW", cue = "Practice complete")
+            analysisPaused -> frameState.copy(state = "PAUSED", cue = "Analysis paused")
+            else -> frameState
         }
         CameraPreview(
             pipeline = pipeline,
-            analysisPaused = analysisPaused,
+            analysisPaused = analysisPaused || isReviewing,
             onFrameState = { state, cue ->
                 frameState = state
                 if (voiceEnabled && cue != null) onSpeak(cue.message)
@@ -175,11 +178,31 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             onTrainingMode = { trainingMode = it },
             onVoiceEnabled = { voiceEnabled = it },
             onAnalysisPaused = { analysisPaused = it },
+            onFinishPractice = {
+                reviewReport = pipeline.practiceReport()
+                analysisPaused = true
+            },
             onReset = {
                 pipeline.reset()
                 resetToken += 1
             }
         )
+        reviewReport?.let { report ->
+            PostPracticeReview(
+                report = report,
+                onResume = {
+                    reviewReport = null
+                    analysisPaused = false
+                },
+                onNewSession = {
+                    reviewReport = null
+                    analysisPaused = false
+                    frameState = CoachFrameState()
+                    pipeline.reset()
+                    resetToken += 1
+                }
+            )
+        }
     }
 }
 
@@ -288,6 +311,7 @@ private fun HudPanel(
     onTrainingMode: (TrainingMode) -> Unit,
     onVoiceEnabled: (Boolean) -> Unit,
     onAnalysisPaused: (Boolean) -> Unit,
+    onFinishPractice: () -> Unit,
     onReset: () -> Unit
 ) {
     Column(
@@ -401,8 +425,194 @@ private fun HudPanel(
                     onClick = { onVoiceEnabled(!voiceEnabled) }
                 )
                 Spacer(Modifier.width(8.dp))
+                HudButton(text = "Finish", selected = false, onClick = onFinishPractice)
+                Spacer(Modifier.width(8.dp))
                 HudButton(text = "Reset", selected = false, onClick = onReset)
             }
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun PostPracticeReview(
+    report: PracticeReport,
+    onResume: () -> Unit,
+    onNewSession: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xDD05080B))
+            .padding(22.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .background(Color(0xF0141A20), RoundedCornerShape(8.dp))
+                .padding(18.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Practice Review",
+                        color = Color.White,
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "${report.trainingMode.label}  |  ${report.poseBackend.label}  |  ${report.targetSide.label}",
+                        color = Color(0xFFD7FF5F),
+                        fontSize = 14.sp
+                    )
+                }
+                Row {
+                    HudButton(text = "Resume", selected = false, onClick = onResume)
+                    Spacer(Modifier.width(8.dp))
+                    HudButton(text = "New", selected = true, onClick = onNewSession)
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+            Text(
+                text = report.primaryTakeaway,
+                color = Color(0xFFFFE066),
+                fontSize = 20.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(14.dp))
+
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                MetricBlock("time", formatSeconds(report.elapsedSeconds))
+                MetricBlock("active", "${report.activeSeconds}s ${report.activePercent}%")
+                MetricBlock("checks", report.inferenceCount.toString())
+                MetricBlock("cues", report.cueCount.toString())
+                MetricBlock("top", report.topAction)
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Actions",
+                        color = Color.White,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    if (report.actionCounts.isEmpty()) {
+                        Text("No model actions yet", color = Color(0xFFB6C2CC), fontSize = 13.sp)
+                    } else {
+                        report.actionCounts.take(5).forEach { item ->
+                            ActionRow(item.action, item.count, item.percent)
+                        }
+                    }
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Cues",
+                        color = Color.White,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    if (report.topCues.isEmpty()) {
+                        Text("No repeated cues yet", color = Color(0xFFB6C2CC), fontSize = 13.sp)
+                    } else {
+                        report.topCues.take(5).forEach { cue ->
+                            Text(
+                                text = "${cue.count}x  ${cue.label}",
+                                color = Color(0xFFFFE066),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = cue.message,
+                                color = Color(0xFFB6C2CC),
+                                fontSize = 12.sp
+                            )
+                            Spacer(Modifier.height(7.dp))
+                        }
+                    }
+                }
+            }
+
+            if (report.cueTimeline.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = "Timeline",
+                    color = Color.White,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.height(6.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    report.cueTimeline.take(8).forEach { item ->
+                        Text(
+                            text = "${item.frameIndex}: ${item.label}",
+                            color = Color(0xFFB6C2CC),
+                            fontSize = 12.sp,
+                            modifier = Modifier
+                                .background(Color(0xFF263039), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 8.dp, vertical = 5.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MetricBlock(label: String, value: String) {
+    Column(
+        modifier = Modifier
+            .background(Color(0xFF263039), RoundedCornerShape(6.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        Text(text = label, color = Color(0xFF8DA2B2), fontSize = 11.sp)
+        Text(text = value, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun ActionRow(action: String, count: Long, percent: Int) {
+    Column(modifier = Modifier.padding(bottom = 8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(text = action, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(text = "$count  $percent%", color = Color(0xFFB6C2CC), fontSize = 13.sp)
+        }
+        Spacer(Modifier.height(4.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(7.dp)
+                .background(Color(0xFF263039), RoundedCornerShape(4.dp))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth((percent / 100f).coerceIn(0.02f, 1f))
+                    .height(7.dp)
+                    .background(Color(0xFFD7FF5F), RoundedCornerShape(4.dp))
+            )
         }
     }
 }

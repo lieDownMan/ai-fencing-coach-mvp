@@ -11,6 +11,7 @@ CameraX frame
 -> SpatialNormalizer + FenceNet ONNX
 -> Kotlin heuristics + feedback scheduler
 -> overlay + Android TextToSpeech cue
+-> post-practice review
 ```
 
 ## Setup
@@ -72,7 +73,8 @@ From Android Studio:
 - Target tracker keeps the selected fencer locked through short pose dropouts.
 - FenceNet only receives active fencing frames; idle frames do not fill the model window.
 - HUD shows target lock, warmup progress, cue stack/history, FPS, latency, dropped-frame estimate, and session counts.
-- Controls include training mode, pose backend, target side, pause/resume, voice, and reset.
+- Controls include training mode, pose backend, target side, pause/resume, voice, finish, and reset.
+- Post-practice review summarizes time, active time, model checks, top action, repeated cues, and recent cue timeline.
 - Back camera by default.
 - Landscape orientation.
 - One selected target fencer plus optional opponent context.
