@@ -13,7 +13,7 @@ import androidx.camera.core.ImageProxy
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
-import com.google.mediapipe.framework.image.MediaImageBuilder
+import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.ImageProcessingOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
@@ -55,13 +55,17 @@ class MediaPipePoseBackend(context: Context) : PoseBackend {
         targetSide: TargetSide
     ): PoseBackendResult {
         val landmarker = poseLandmarker ?: return PoseBackendResult(null, null)
-        val mediaImage = imageProxy.image ?: return PoseBackendResult(null, null)
-        val mpImage = MediaImageBuilder(mediaImage).build()
+        val bitmap = imageProxy.toBitmapOrNull() ?: return PoseBackendResult(null, null)
+        val mpImage = BitmapImageBuilder(bitmap).build()
         val processingOptions = ImageProcessingOptions.builder()
             .setRotationDegrees(imageProxy.imageInfo.rotationDegrees)
             .build()
         val timestampMs = imageProxy.imageInfo.timestamp / 1_000_000
-        val result = landmarker.detectForVideo(mpImage, processingOptions, timestampMs)
+        val result = try {
+            landmarker.detectForVideo(mpImage, processingOptions, timestampMs)
+        } finally {
+            bitmap.recycle()
+        }
         val detections = mapper.mapDetections(
             poses = result.landmarks(),
             frameWidth = imageProxy.width,
@@ -234,66 +238,6 @@ class YoloPoseBackend(context: Context) : PoseBackend {
         return intersection / (areaA + areaB - intersection).coerceAtLeast(1e-6f)
     }
 
-    private fun ImageProxy.toBitmapOrNull(): Bitmap? {
-        if (format != ImageFormat.YUV_420_888 || planes.size < 3) return null
-        val nv21 = yuv420ToNv21(this)
-        val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
-        val out = ByteArrayOutputStream()
-        yuvImage.compressToJpeg(Rect(0, 0, width, height), 90, out)
-        return BitmapFactory.decodeByteArray(out.toByteArray(), 0, out.size())
-    }
-
-    private fun yuv420ToNv21(image: ImageProxy): ByteArray {
-        val yPlane = image.planes[0]
-        val uPlane = image.planes[1]
-        val vPlane = image.planes[2]
-        val out = ByteArray(image.width * image.height * 3 / 2)
-        copyPlane(yPlane, image.width, image.height, out, 0, 1)
-        copyInterleavedChroma(vPlane, uPlane, image.width, image.height, out, image.width * image.height)
-        return out
-    }
-
-    private fun copyPlane(
-        plane: ImageProxy.PlaneProxy,
-        width: Int,
-        height: Int,
-        out: ByteArray,
-        offset: Int,
-        pixelStrideOut: Int
-    ) {
-        val buffer = plane.buffer.duplicate()
-        val rowStride = plane.rowStride
-        val pixelStride = plane.pixelStride
-        var outputIndex = offset
-        for (row in 0 until height) {
-            for (col in 0 until width) {
-                out[outputIndex] = buffer.get(row * rowStride + col * pixelStride)
-                outputIndex += pixelStrideOut
-            }
-        }
-    }
-
-    private fun copyInterleavedChroma(
-        vPlane: ImageProxy.PlaneProxy,
-        uPlane: ImageProxy.PlaneProxy,
-        width: Int,
-        height: Int,
-        out: ByteArray,
-        offset: Int
-    ) {
-        val chromaWidth = width / 2
-        val chromaHeight = height / 2
-        val vBuffer = vPlane.buffer.duplicate()
-        val uBuffer = uPlane.buffer.duplicate()
-        var outputIndex = offset
-        for (row in 0 until chromaHeight) {
-            for (col in 0 until chromaWidth) {
-                out[outputIndex++] = vBuffer.get(row * vPlane.rowStride + col * vPlane.pixelStride)
-                out[outputIndex++] = uBuffer.get(row * uPlane.rowStride + col * uPlane.pixelStride)
-            }
-        }
-    }
-
     private data class LetterboxInput(
         val tensor: FloatArray,
         val scale: Float,
@@ -389,3 +333,63 @@ fun createPoseBackend(context: Context, kind: PoseBackendKind): PoseBackend =
         PoseBackendKind.MEDIAPIPE -> MediaPipePoseBackend(context)
         PoseBackendKind.YOLO -> YoloPoseBackend(context.applicationContext)
     }
+
+private fun ImageProxy.toBitmapOrNull(): Bitmap? {
+    if (format != ImageFormat.YUV_420_888 || planes.size < 3) return null
+    val nv21 = yuv420ToNv21(this)
+    val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
+    val out = ByteArrayOutputStream()
+    yuvImage.compressToJpeg(Rect(0, 0, width, height), 90, out)
+    return BitmapFactory.decodeByteArray(out.toByteArray(), 0, out.size())
+}
+
+private fun yuv420ToNv21(image: ImageProxy): ByteArray {
+    val yPlane = image.planes[0]
+    val uPlane = image.planes[1]
+    val vPlane = image.planes[2]
+    val out = ByteArray(image.width * image.height * 3 / 2)
+    copyPlane(yPlane, image.width, image.height, out, 0, 1)
+    copyInterleavedChroma(vPlane, uPlane, image.width, image.height, out, image.width * image.height)
+    return out
+}
+
+private fun copyPlane(
+    plane: ImageProxy.PlaneProxy,
+    width: Int,
+    height: Int,
+    out: ByteArray,
+    offset: Int,
+    pixelStrideOut: Int
+) {
+    val buffer = plane.buffer.duplicate()
+    val rowStride = plane.rowStride
+    val pixelStride = plane.pixelStride
+    var outputIndex = offset
+    for (row in 0 until height) {
+        for (col in 0 until width) {
+            out[outputIndex] = buffer.get(row * rowStride + col * pixelStride)
+            outputIndex += pixelStrideOut
+        }
+    }
+}
+
+private fun copyInterleavedChroma(
+    vPlane: ImageProxy.PlaneProxy,
+    uPlane: ImageProxy.PlaneProxy,
+    width: Int,
+    height: Int,
+    out: ByteArray,
+    offset: Int
+) {
+    val chromaWidth = width / 2
+    val chromaHeight = height / 2
+    val vBuffer = vPlane.buffer.duplicate()
+    val uBuffer = uPlane.buffer.duplicate()
+    var outputIndex = offset
+    for (row in 0 until chromaHeight) {
+        for (col in 0 until chromaWidth) {
+            out[outputIndex++] = vBuffer.get(row * vPlane.rowStride + col * vPlane.pixelStride)
+            out[outputIndex++] = uBuffer.get(row * uPlane.rowStride + col * uPlane.pixelStride)
+        }
+    }
+}
