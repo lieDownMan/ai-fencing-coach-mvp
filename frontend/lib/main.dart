@@ -1,8 +1,8 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
-import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -11,6 +11,7 @@ import 'heuristics/heuristics_engine.dart';
 import 'heuristics/fencenet_channel.dart';
 import 'pose/pose_service.dart';
 import 'pose/pose_painter.dart';
+import 'pose/yolo_pose_service.dart';
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -139,9 +140,11 @@ class _MainScreenState extends State<MainScreen>
   List<String> _focusErrors = [];
   List<String> _muteErrors = [];
   bool _onlySelected = false;
+  CameraLensDirection _cameraLensDirection = CameraLensDirection.back;
 
   // Pose & inference
-  final PoseService _poseService = PoseService();
+  final YoloPoseService _yoloPoseService = YoloPoseService();
+  bool _yoloPoseLoaded = false;
   final FenceNetChannel _fenceNet = FenceNetChannel();
   bool _fenceNetLoaded = false;
 
@@ -198,6 +201,7 @@ class _MainScreenState extends State<MainScreen>
     _initTts();
     _initCamera();
     _initFenceNet();
+    _initYoloPose();
     WakelockPlus.enable();
   }
 
@@ -206,7 +210,6 @@ class _MainScreenState extends State<MainScreen>
     _tabController.dispose();
     _flashController.dispose();
     _cameraController?.dispose();
-    _poseService.dispose();
     _fenceNet; // no dispose needed for channel
     _tts.stop();
     WakelockPlus.disable();
@@ -217,7 +220,39 @@ class _MainScreenState extends State<MainScreen>
 
   Future<void> _initTts() async {
     _tts = FlutterTts();
-    await _tts.setLanguage('zh-TW');
+
+    if (Platform.isIOS) {
+      // Force voice output to play even if the physical silent switch is enabled
+      await _tts.setIosAudioCategory(
+        IosTextToSpeechAudioCategory.playback,
+        [
+          IosTextToSpeechAudioCategoryOptions.defaultToSpeaker,
+          IosTextToSpeechAudioCategoryOptions.mixWithOthers,
+        ],
+        IosTextToSpeechAudioMode.defaultMode,
+      );
+    }
+
+    // Fallback chain for voice languages
+    bool hasZhTw = false;
+    try {
+      hasZhTw = await _tts.isLanguageAvailable('zh-TW');
+    } catch (_) {}
+
+    if (hasZhTw) {
+      await _tts.setLanguage('zh-TW');
+    } else {
+      bool hasZhCn = false;
+      try {
+        hasZhCn = await _tts.isLanguageAvailable('zh-CN');
+      } catch (_) {}
+      if (hasZhCn) {
+        await _tts.setLanguage('zh-CN');
+      } else {
+        await _tts.setLanguage('en-US');
+      }
+    }
+
     await _tts.setSpeechRate(0.5);
     await _tts.setVolume(1.0);
     _tts.setStartHandler(() => _isSpeaking = true);
@@ -236,15 +271,12 @@ class _MainScreenState extends State<MainScreen>
   // ── Camera ─────────────────────────────────────────────────────────────────
 
   Future<void> _initCamera() async {
-    //final status = await Permission.camera.request();
-    //if (!status.isGranted) return;
-
     if (_cameras.isEmpty) return;
 
-    // Prefer back camera
+    // Prefer selected lens direction
     CameraDescription cam = _cameras.first;
     for (final c in _cameras) {
-      if (c.lensDirection == CameraLensDirection.back) {
+      if (c.lensDirection == _cameraLensDirection) {
         cam = c;
         break;
       }
@@ -267,12 +299,65 @@ class _MainScreenState extends State<MainScreen>
     }
   }
 
+  Future<void> _switchCamera(CameraLensDirection direction) async {
+    if (_cameras.isEmpty) return;
+
+    CameraDescription? targetCam;
+    for (final c in _cameras) {
+      if (c.lensDirection == direction) {
+        targetCam = c;
+        break;
+      }
+    }
+
+    targetCam ??= _cameras.first;
+
+    if (_cameraController != null) {
+      try {
+        await _cameraController!.stopImageStream();
+      } catch (e) {
+        debugPrint('Error stopping image stream: $e');
+      }
+      await _cameraController!.dispose();
+    }
+
+    setState(() {
+      _isCameraInitialized = false;
+      _cameraLensDirection = direction;
+    });
+
+    _cameraController = CameraController(
+      targetCam,
+      ResolutionPreset.medium,
+      enableAudio: false,
+      imageFormatGroup: ImageFormatGroup.bgra8888,
+    );
+
+    try {
+      await _cameraController!.initialize();
+      if (!mounted) return;
+      setState(() => _isCameraInitialized = true);
+      _cameraController!.startImageStream(_onCameraFrame);
+    } catch (e) {
+      debugPrint('Camera switch error: $e');
+    }
+  }
+
   // ── FenceNet ────────────────────────────────────────────────────────────────
 
   Future<void> _initFenceNet() async {
     final loaded = await _fenceNet.load();
     if (mounted) {
       setState(() => _fenceNetLoaded = loaded);
+    }
+  }
+
+  // ── YOLOv8-Pose ─────────────────────────────────────────────────────────────
+
+  Future<void> _initYoloPose() async {
+    final loaded = await _yoloPoseService.load();
+    if (mounted) {
+      setState(() => _yoloPoseLoaded = loaded);
     }
   }
 
@@ -283,19 +368,16 @@ class _MainScreenState extends State<MainScreen>
     _isProcessingFrame = true;
 
     try {
-      // Convert to InputImage for ML Kit
-      final inputImage = _cameraImageToInputImage(image);
-      if (inputImage == null) return;
+      if (!_yoloPoseLoaded) return;
 
-      final imgW = image.width.toDouble();
-      final imgH = image.height.toDouble();
-
-      // Run pose detection
-      final skeleton = await _poseService.processImage(
-        inputImage,
+      final plane = image.planes[0];
+      final skeleton = await _yoloPoseService.processImageBytes(
+        bytes: plane.bytes,
+        width: image.width,
+        height: image.height,
+        bytesPerRow: plane.bytesPerRow,
         targetSide: _targetSide,
-        imageWidth: imgW,
-        imageHeight: imgH,
+        isFrontCamera: _cameraController?.description.lensDirection == CameraLensDirection.front,
       );
 
       if (!mounted) return;
@@ -649,55 +731,68 @@ class _MainScreenState extends State<MainScreen>
   }
 
   Widget _buildCameraOverlay() {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        // Camera preview
-        RotatedBox(
-          quarterTurns: 1, // portrait mode
-          child: CameraPreview(_cameraController!),
-        ),
+    if (_cameraController == null || !_cameraController!.value.isInitialized) {
+      return Container();
+    }
 
-        // Skeleton overlay
-        if (_currentSkeleton != null)
-          RotatedBox(
-            quarterTurns: 1,
-            child: CustomPaint(
-              painter: PosePainter(
-                skeleton: _currentSkeleton!,
-                imageSize: Size(
-                  _cameraController!.value.previewSize?.height ?? 640,
-                  _cameraController!.value.previewSize?.width ?? 480,
+    final double aspectRatio = 1.0 / _cameraController!.value.aspectRatio;
+
+    return Center(
+      child: AspectRatio(
+        aspectRatio: aspectRatio,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // Camera preview
+            CameraPreview(_cameraController!),
+
+            // Skeleton overlay
+            if (_currentSkeleton != null)
+              CustomPaint(
+                painter: PosePainter(
+                  skeleton: _currentSkeleton!,
+                  imageSize: Size(
+                    _cameraController!.value.previewSize?.height ?? 480,
+                    _cameraController!.value.previewSize?.width ?? 640,
+                  ),
+                  triggeredError: _activeErrors.isNotEmpty ? _activeErrors.first : null,
+                  currentAction: _currentAction,
+                  isFrontCamera: _cameraController?.description.lensDirection == CameraLensDirection.front,
                 ),
-                triggeredError: _activeErrors.isNotEmpty ? _activeErrors.first : null,
-                currentAction: _currentAction,
+              ),
+
+            // Warning flash overlay
+            AnimatedBuilder(
+              animation: _flashAnimation,
+              builder: (context, _) => CustomPaint(
+                painter: WarningFlashPainter(opacity: _flashAnimation.value),
               ),
             ),
-          ),
 
-        // Warning flash overlay
-        AnimatedBuilder(
-          animation: _flashAnimation,
-          builder: (context, _) => CustomPaint(
-            painter: WarningFlashPainter(opacity: _flashAnimation.value),
-          ),
-        ),
+            // Action label pill (top center)
+            Positioned(
+              top: 12,
+              left: 0,
+              right: 0,
+              child: Center(child: _buildActionPill()),
+            ),
 
-        // Action label pill (top center)
-        Positioned(
-          top: 12,
-          left: 0,
-          right: 0,
-          child: Center(child: _buildActionPill()),
-        ),
+            // FenceNet status (top left)
+            Positioned(
+              top: 12,
+              left: 12,
+              child: _buildFenceNetBadge(),
+            ),
 
-        // FenceNet status (top left)
-        Positioned(
-          top: 12,
-          left: 12,
-          child: _buildFenceNetBadge(),
+            // Camera toggle button (top right)
+            Positioned(
+              top: 12,
+              right: 12,
+              child: _buildCameraToggleButton(),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 
@@ -734,22 +829,48 @@ class _MainScreenState extends State<MainScreen>
   }
 
   Widget _buildFenceNetBadge() {
+    final bool isAllLoaded = _fenceNetLoaded && _yoloPoseLoaded;
+    final String label = isAllLoaded
+        ? '🧠 CoreML'
+        : (!_yoloPoseLoaded ? '⚠️ No Pose Model' : '⚠️ No Action Model');
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: Colors.black.withAlpha(140),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: _fenceNetLoaded ? Colors.greenAccent.withAlpha(120) : Colors.orange.withAlpha(120),
+          color: isAllLoaded ? Colors.greenAccent.withAlpha(120) : Colors.orange.withAlpha(120),
         ),
       ),
       child: Text(
-        _fenceNetLoaded ? '🧠 CoreML' : '⚠️ No Model',
+        label,
         style: TextStyle(
-          color: _fenceNetLoaded ? Colors.greenAccent : Colors.orange,
+          color: isAllLoaded ? Colors.greenAccent : Colors.orange,
           fontSize: 10,
           fontWeight: FontWeight.w600,
         ),
+      ),
+    );
+  }
+
+  Widget _buildCameraToggleButton() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.black.withAlpha(140),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: IconButton(
+        icon: const Icon(
+          Icons.flip_camera_ios,
+          color: Colors.white,
+          size: 20,
+        ),
+        onPressed: () {
+          final nextDir = _cameraLensDirection == CameraLensDirection.back
+              ? CameraLensDirection.front
+              : CameraLensDirection.back;
+          _switchCamera(nextDir);
+        },
       ),
     );
   }

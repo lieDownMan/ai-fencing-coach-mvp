@@ -16,8 +16,6 @@ dependencies:
   # Camera
   camera: ^0.12.0+1
 
-  # Google ML Kit Pose Detection (on-device)
-  google_mlkit_pose_detection: ^0.14.1
 
   # TFLite for FenceNet action classification
   tflite_flutter: ^0.11.0

@@ -41,12 +41,14 @@ class PosePainter extends CustomPainter {
   final Size imageSize;
   final String? triggeredError;
   final String currentAction;
+  final bool isFrontCamera;
 
   PosePainter({
     required this.skeleton,
     required this.imageSize,
     this.triggeredError,
     required this.currentAction,
+    this.isFrontCamera = false,
   });
 
   @override
@@ -100,7 +102,8 @@ class PosePainter extends CustomPainter {
   bool shouldRepaint(PosePainter oldDelegate) =>
       oldDelegate.skeleton != skeleton ||
       oldDelegate.triggeredError != triggeredError ||
-      oldDelegate.currentAction != currentAction;
+      oldDelegate.currentAction != currentAction ||
+      oldDelegate.isFrontCamera != isFrontCamera;
 }
 
 // ---------------------------------------------------------------------------

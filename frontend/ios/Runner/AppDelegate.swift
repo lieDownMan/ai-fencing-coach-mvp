@@ -14,5 +14,7 @@ import UIKit
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
     // Register FenceNet CoreML bridge
     FenceNetBridge.register(with: engineBridge.pluginRegistry.registrar(forPlugin: "FenceNetBridge")!)
+    // Register YOLOv8-Pose CoreML bridge
+    YoloPoseBridge.register(with: engineBridge.pluginRegistry.registrar(forPlugin: "YoloPoseBridge")!)
   }
 }
