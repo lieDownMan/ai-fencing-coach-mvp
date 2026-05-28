@@ -11,9 +11,17 @@ data class PlaybookEntry(
     val practice: String = ""
 ) {
     val message: String
-        get() = listOf(shortCue, diagnosis, practice)
-            .filter { it.isNotBlank() }
-            .joinToString(" ")
+        get() = buildString {
+            if (diagnosis.isNotBlank()) append(diagnosis)
+            if (shortCue.isNotBlank()) {
+                if (isNotEmpty()) append(" ")
+                append("教練提示：").append(shortCue)
+            }
+            if (practice.isNotBlank()) {
+                if (isNotEmpty()) append(" ")
+                append("練習建議：").append(practice)
+            }
+        }
 }
 
 private data class FeedbackState(

@@ -3,11 +3,13 @@ import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'heuristics/heuristics_engine.dart';
 import 'heuristics/fencenet_channel.dart';
+import 'postgame/postgame_analyzer.dart';
 import 'pose/pose_service.dart';
 import 'pose/pose_painter.dart';
 import 'pose/yolo_pose_service.dart';
@@ -67,35 +69,35 @@ class FencingCoachApp extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Error display labels (Chinese/English)
+// Error display labels
 // ---------------------------------------------------------------------------
 
 const Map<String, String> kErrorLabels = {
-  'lunge_overextension': '長刺過度前傾 (Lunge Overextension)',
-  'guard_dropped': '持劍手掉落 (Guard Dropped)',
-  'bounce_excessive': '步伐上下浮動 (Excessive Bounce)',
-  'foot_before_hand': '手腳順序錯誤 (Foot Before Hand)',
-  'over_parrying': '防守動作太大 (Over-Parrying)',
-  'stance_too_high': '預備姿勢沒蹲好 (Stance Too High)',
-  'incomplete_arm_extension': '手沒有伸直 (Incomplete Extension)',
-  'wide_step': '步伐太大 (Wide Step)',
-  'narrow_step': '步伐太小 (Narrow Step)',
-  'center_of_mass_in_front': '重心向前 (CoM Forward)',
-  'center_of_mass_leaning_backward': '重心向後 (CoM Backward)',
+  'lunge_overextension': 'Lunge Overextension',
+  'guard_dropped': 'Guard Dropped',
+  'bounce_excessive': 'Excessive Bounce',
+  'foot_before_hand': 'Foot Before Hand',
+  'over_parrying': 'Over-Parrying',
+  'stance_too_high': 'Stance Too High',
+  'incomplete_arm_extension': 'Incomplete Arm Extension',
+  'wide_step': 'Wide Step',
+  'narrow_step': 'Narrow Step',
+  'center_of_mass_in_front': 'Center of Mass Forward',
+  'center_of_mass_leaning_backward': 'Center of Mass Backward',
 };
 
 const Map<String, String> kErrorVoice = {
-  'lunge_overextension': '長刺過度前傾，注意不要彎太低',
-  'guard_dropped': '持劍手掉落，請抬高手腕',
-  'bounce_excessive': '步伐上下浮動，保持重心穩定',
-  'foot_before_hand': '腳比手先動，先出手再移步',
-  'over_parrying': '防守動作太大，縮小防守範圍',
-  'stance_too_high': '預備姿勢太高，請蹲低一點',
-  'incomplete_arm_extension': '手沒有伸直，刺出時請完全伸展手臂',
-  'wide_step': '步伐太大，縮小步距',
-  'narrow_step': '步伐太小，加大步距',
-  'center_of_mass_in_front': '重心偏前，保持重心平衡',
-  'center_of_mass_leaning_backward': '重心偏後，向前調整重心',
+  'lunge_overextension': 'Do not collapse the front knee.',
+  'guard_dropped': 'Guard up.',
+  'bounce_excessive': 'Stay level.',
+  'foot_before_hand': 'Hand first.',
+  'over_parrying': 'Keep the parry compact.',
+  'stance_too_high': 'Stay lower.',
+  'incomplete_arm_extension': 'Extend the arm.',
+  'wide_step': 'Shorten the step.',
+  'narrow_step': 'Widen the base.',
+  'center_of_mass_in_front': 'Keep weight centered.',
+  'center_of_mass_leaning_backward': 'Do not lean back.',
 };
 
 const Map<String, List<String>> kErrorSupportedModes = {
@@ -181,10 +183,18 @@ class _MainScreenState extends State<MainScreen>
   // Debug metrics
   final Map<String, bool> _heuristicTriggered = {};
 
+  // Postgame clip analysis
+  final ImagePicker _videoPicker = ImagePicker();
+  XFile? _postgameVideo;
+  bool _postgameAnalyzing = false;
+  double _postgameProgress = 0.0;
+  String _postgameStatus = 'No video selected';
+  PostgameReport? _postgameReport;
+
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _heuristics = HeuristicsEngine(
       targetSide: _targetSide,
       trainingMode: _trainingMode,
@@ -384,6 +394,7 @@ class _MainScreenState extends State<MainScreen>
   // ── Camera Frame Processing ─────────────────────────────────────────────────
 
   Future<void> _onCameraFrame(CameraImage image) async {
+    if (_postgameAnalyzing) return;
     if (_isProcessingFrame) return;
     _isProcessingFrame = true;
 
@@ -554,6 +565,70 @@ class _MainScreenState extends State<MainScreen>
     _resetLiveBuffers();
   }
 
+  Future<void> _pickPostgameVideo() async {
+    final video = await _videoPicker.pickVideo(source: ImageSource.gallery);
+    if (video == null) return;
+    setState(() {
+      _postgameVideo = video;
+      _postgameReport = null;
+      _postgameProgress = 0.0;
+      _postgameStatus = 'Video selected';
+    });
+  }
+
+  Future<void> _runPostgameAnalysis() async {
+    final video = _postgameVideo;
+    if (video == null || _postgameAnalyzing) return;
+
+    setState(() {
+      _postgameAnalyzing = true;
+      _postgameProgress = 0.0;
+      _postgameStatus = 'Preparing clip';
+    });
+
+    try {
+      final analyzer = PostgameAnalyzer(
+        poseService: _yoloPoseService,
+        fenceNet: _fenceNet,
+        supportedModes: kErrorSupportedModes,
+      );
+      final report = await analyzer.analyzeVideo(
+        path: video.path,
+        videoName: video.name,
+        config: PostgameAnalysisConfig(
+          targetSide: _targetSide,
+          trainingMode: _trainingMode,
+          focusErrors: List<String>.from(_focusErrors),
+          muteErrors: List<String>.from(_muteErrors),
+          onlySelected: _onlySelected,
+        ),
+        onProgress: (fraction, status) {
+          if (!mounted) return;
+          setState(() {
+            _postgameProgress = fraction.clamp(0.0, 1.0).toDouble();
+            _postgameStatus = status;
+          });
+        },
+      );
+      if (!mounted) return;
+      setState(() {
+        _postgameReport = report;
+        _postgameProgress = 1.0;
+        _postgameStatus = 'Analysis ready';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _postgameStatus = 'Analysis failed: $e';
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _postgameAnalyzing = false);
+      }
+      _yoloPoseService.resetTracking();
+    }
+  }
+
   // ──────────────────────────────────────────────────────────────────────────
   // BUILD
   // ──────────────────────────────────────────────────────────────────────────
@@ -578,6 +653,7 @@ class _MainScreenState extends State<MainScreen>
           indicatorWeight: 3,
           tabs: const [
             Tab(icon: Icon(Icons.videocam, size: 20), text: 'Live'),
+            Tab(icon: Icon(Icons.video_library, size: 20), text: 'Postgame'),
             Tab(icon: Icon(Icons.tune, size: 20), text: 'Settings'),
             Tab(icon: Icon(Icons.analytics, size: 20), text: 'Debug'),
           ],
@@ -588,6 +664,7 @@ class _MainScreenState extends State<MainScreen>
         physics: const NeverScrollableScrollPhysics(),
         children: [
           _buildLiveTab(),
+          _buildPostgameTab(),
           _buildSettingsTab(),
           _buildDebugTab(),
         ],
@@ -853,7 +930,7 @@ class _MainScreenState extends State<MainScreen>
               ),
               const SizedBox(height: 4),
               Text(
-                _coachState == 'IDLE' ? '等待偵測到擊劍手...' : '繼續保持！',
+                _coachState == 'IDLE' ? 'Waiting for movement...' : 'Tracking your form.',
                 style: const TextStyle(color: Colors.white30, fontSize: 12),
               ),
             ],
@@ -937,7 +1014,256 @@ class _MainScreenState extends State<MainScreen>
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // TAB 2: SETTINGS
+  // TAB 2: POSTGAME
+  // ──────────────────────────────────────────────────────────────────────────
+
+  Widget _buildPostgameTab() {
+    final report = _postgameReport;
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        _sectionHeader('Postgame Analysis'),
+        const SizedBox(height: 12),
+        _buildCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.video_file, color: Color(0xFFFF6600)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _postgameVideo?.name ?? 'No clip selected',
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: _postgameAnalyzing ? null : _pickPostgameVideo,
+                    icon: const Icon(Icons.folder_open),
+                    label: const Text('Choose Video'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1C2230),
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: _postgameVideo == null || _postgameAnalyzing
+                        ? null
+                        : _runPostgameAnalysis,
+                    icon: const Icon(Icons.analytics),
+                    label: const Text('Run Analysis'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFF6600),
+                      foregroundColor: Colors.black,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              LinearProgressIndicator(
+                value: _postgameAnalyzing || _postgameProgress > 0
+                    ? _postgameProgress.clamp(0.0, 1.0).toDouble()
+                    : null,
+                minHeight: 6,
+                color: const Color(0xFFFF6600),
+                backgroundColor: Colors.white10,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _postgameStatus,
+                style: TextStyle(
+                  color: _postgameStatus.startsWith('Analysis failed')
+                      ? Colors.redAccent
+                      : Colors.white54,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        if (report == null)
+          _buildCard(
+            child: const Text(
+              'Pick a recorded fencing clip to run the same pose, FenceNet, and heuristic checks used by the live coach.',
+              style: TextStyle(color: Colors.white54, height: 1.4),
+            ),
+          )
+        else
+          _buildPostgameReport(report),
+      ],
+    );
+  }
+
+  Widget _buildPostgameReport(PostgameReport report) {
+    final topErrors = report.topErrors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                report.primaryTakeaway(kErrorLabels),
+                style: const TextStyle(
+                  color: Color(0xFFFF6600),
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _metricChip('duration', _formatDuration(report.duration)),
+                  _metricChip('frames', '${report.framesAnalyzed}'),
+                  _metricChip('checks', '${report.modelChecks}'),
+                  _metricChip('top action', report.topAction),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        _buildCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Repeated Cues',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 10),
+              if (topErrors.isEmpty)
+                const Text('No posture cues detected.', style: TextStyle(color: Colors.white54))
+              else
+                ...topErrors.take(6).map((entry) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 34,
+                          alignment: Alignment.center,
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF3A0D12),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: Colors.redAccent.withAlpha(100)),
+                          ),
+                          child: Text(
+                            '${entry.value}x',
+                            style: const TextStyle(
+                              color: Colors.redAccent,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            kErrorLabels[entry.key] ?? entry.key,
+                            style: const TextStyle(color: Colors.white70, fontSize: 13),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        _buildCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Timeline',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 10),
+              if (report.timeline.isEmpty)
+                const Text(
+                  'No model windows were completed.',
+                  style: TextStyle(color: Colors.white54),
+                )
+              else
+                ...report.timeline.take(20).map((item) {
+                  final label = item.errors.isEmpty
+                      ? 'Clean window'
+                      : item.errors.map((key) => kErrorLabels[key] ?? key).join(', ');
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0D0D1A),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.white10),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _formatSeconds(item.timeSeconds),
+                          style: const TextStyle(
+                            color: Color(0xFF00D4FF),
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${item.action}  ${(item.confidence * 100).toStringAsFixed(0)}%',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                label,
+                                style: TextStyle(
+                                  color: item.errors.isEmpty
+                                      ? Colors.greenAccent
+                                      : Colors.orangeAccent,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // TAB 3: SETTINGS
   // ──────────────────────────────────────────────────────────────────────────
 
   Widget _buildSettingsTab() {
@@ -1099,7 +1425,7 @@ class _MainScreenState extends State<MainScreen>
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // TAB 3: DEBUG METRICS
+  // TAB 4: DEBUG METRICS
   // ──────────────────────────────────────────────────────────────────────────
 
   Widget _buildDebugTab() {
@@ -1207,6 +1533,49 @@ class _MainScreenState extends State<MainScreen>
   // ──────────────────────────────────────────────────────────────────────────
   // UI helpers
   // ──────────────────────────────────────────────────────────────────────────
+
+  Widget _metricChip(String label, String value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1C2230),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(color: Colors.white38, fontSize: 10),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDuration(Duration duration) {
+    final minutes = duration.inMinutes;
+    final seconds = duration.inSeconds % 60;
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  String _formatSeconds(double seconds) {
+    final whole = seconds.floor();
+    final minutes = whole ~/ 60;
+    final remainder = whole % 60;
+    return '$minutes:${remainder.toString().padLeft(2, '0')}';
+  }
 
   Widget _sectionHeader(String title) {
     return Text(

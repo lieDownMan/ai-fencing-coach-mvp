@@ -19,7 +19,7 @@ class PostgameVideoAnalyzer(private val context: Context) {
         trainingMode: TrainingMode,
         poseBackend: PoseBackendKind,
         onProgress: suspend (PostgameAnalysisProgress) -> Unit
-    ): PracticeReport = withContext(Dispatchers.Default) {
+    ): Pair<PracticeReport, Map<Long, CoachFrameState>> = withContext(Dispatchers.Default) {
         val retriever = MediaMetadataRetriever()
         val pipeline = LiveCoachPipeline(context, poseBackend, targetSide, trainingMode)
         try {
@@ -34,12 +34,15 @@ class PostgameVideoAnalyzer(private val context: Context) {
 
             var processedFrames = 0
             var timeUs = 0L
+            val frameStates = mutableMapOf<Long, CoachFrameState>()
+
             while (timeUs <= durationUs) {
                 val bitmap = retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST)
                 if (bitmap != null) {
                     val frame = bitmap.ensureArgb8888()
                     try {
-                        pipeline.processBitmap(frame, timestampNs = timeUs * 1_000L)
+                        val (state, _) = pipeline.processBitmap(frame, timestampNs = timeUs * 1_000L)
+                        frameStates[timeUs] = state
                     } finally {
                         frame.recycle()
                         if (frame !== bitmap) bitmap.recycle()
@@ -62,7 +65,8 @@ class PostgameVideoAnalyzer(private val context: Context) {
             }
 
             update(onProgress, 1f, "Analysis ready")
-            pipeline.practiceReport(elapsedSecondsOverride = maxOf(1L, durationMs / 1_000L))
+            val report = pipeline.practiceReport(elapsedSecondsOverride = maxOf(1L, durationMs / 1_000L))
+            Pair(report, frameStates)
         } finally {
             pipeline.close()
             retriever.release()

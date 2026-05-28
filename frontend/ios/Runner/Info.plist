@@ -30,6 +30,8 @@
 	<string>Camera access is needed to analyze fencing technique.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Microphone access is only used if voice features are enabled.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Photo library access is needed to select fencing clips for postgame analysis.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

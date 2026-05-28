@@ -81,10 +81,11 @@ private enum class AppScreen {
     REALTIME,
     POSTGAME,
     SETTINGS,
-    COACH
+    COACH,
+    HISTORY
 }
 
-private data class UserSettings(
+internal data class UserSettings(
     val name: String = "Fencer",
     val handedness: String = "right",
     val heightCm: String = "180",
@@ -92,7 +93,8 @@ private data class UserSettings(
     val useGeminiSummary: Boolean = false,
     val onlyFocusedErrors: Boolean = false,
     val emphasizedErrors: Set<String> = emptySet(),
-    val mutedErrors: Set<String> = emptySet()
+    val mutedErrors: Set<String> = emptySet(),
+    val maxVideoExportDuration: Int = 60
 )
 
 class MainActivity : ComponentActivity() {
@@ -180,10 +182,15 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
                 useGeminiSummary = prefs.getBoolean("use_gemini_summary", false),
                 onlyFocusedErrors = prefs.getBoolean("only_focused_errors", false),
                 emphasizedErrors = prefs.getStringSet("emphasized_errors", emptySet())?.toSet().orEmpty(),
-                mutedErrors = prefs.getStringSet("muted_errors", emptySet())?.toSet().orEmpty()
+                mutedErrors = prefs.getStringSet("muted_errors", emptySet())?.toSet().orEmpty(),
+                maxVideoExportDuration = prefs.getInt("max_video_export_duration", 60)
             )
         )
     }
+
+    val geminiAgent = remember { com.aifencingcoach.runtime.GeminiAgent() }
+    val sessionRepo = remember { com.aifencingcoach.runtime.database.SessionRepository(context) }
+    val scope = rememberCoroutineScope()
 
     fun saveSettings() {
         prefs.edit()
@@ -195,8 +202,31 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             .putBoolean("only_focused_errors", userSettings.onlyFocusedErrors)
             .putStringSet("emphasized_errors", userSettings.emphasizedErrors)
             .putStringSet("muted_errors", userSettings.mutedErrors)
+            .putInt("max_video_export_duration", userSettings.maxVideoExportDuration)
             .putBoolean("voice_enabled", voiceEnabled)
             .apply()
+    }
+
+    val saveAndProcessReport: (PracticeReport) -> Unit = { report ->
+        lastPracticeReport = report
+        scope.launch {
+            val sessionId = sessionRepo.savePracticeReport(report, report.cueTimeline)
+            if (userSettings.useGeminiSummary) {
+                try {
+                    val geminiSummary = geminiAgent.generateSummary(
+                        trainingMode = report.trainingMode.label,
+                        targetSide = report.targetSide.label,
+                        actionCounts = report.actionCounts,
+                        cuesFired = report.cueTimeline,
+                        userSettingsName = userSettings.name
+                    )
+                    sessionRepo.updateSummary(sessionId, geminiSummary)
+                    lastPracticeReport = report.copy(primaryTakeaway = geminiSummary)
+                } catch (e: Exception) {
+                    // Fallback to playbook summary if Gemini fails
+                }
+            }
+        }
     }
 
     when (appScreen) {
@@ -209,7 +239,8 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             lastPracticeReport = lastPracticeReport,
             onRealtime = { appScreen = AppScreen.REALTIME },
             onPostgame = { appScreen = AppScreen.POSTGAME },
-            onSettings = { appScreen = AppScreen.SETTINGS }
+            onSettings = { appScreen = AppScreen.SETTINGS },
+            onHistory = { appScreen = AppScreen.HISTORY }
         )
         AppScreen.REALTIME -> RealtimeSetupScreen(
             trainingMode = trainingMode,
@@ -234,7 +265,7 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             poseBackend = poseBackend,
             lastPracticeReport = lastPracticeReport,
             onSettings = { appScreen = AppScreen.SETTINGS },
-            onPracticeReport = { report -> lastPracticeReport = report },
+            onPracticeReport = saveAndProcessReport,
             onBack = {
                 saveSettings()
                 appScreen = AppScreen.HOME
@@ -271,10 +302,15 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
                 saveSettings()
                 appScreen = AppScreen.HOME
             },
-            onPracticeReport = { report ->
-                lastPracticeReport = report
-            },
+            onPracticeReport = saveAndProcessReport,
             onSpeak = onSpeak
+        )
+        AppScreen.HISTORY -> HistoryScreen(
+            sessionRepo = sessionRepo,
+            onBack = { appScreen = AppScreen.HOME },
+            onSessionSelected = { fullSession ->
+                // TODO: Load into a SessionDetailScreen
+            }
         )
     }
 }
@@ -290,7 +326,8 @@ private fun HomeScreen(
     lastPracticeReport: PracticeReport?,
     onRealtime: () -> Unit,
     onPostgame: () -> Unit,
-    onSettings: () -> Unit
+    onSettings: () -> Unit,
+    onHistory: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -320,6 +357,19 @@ private fun HomeScreen(
                 accent = AccentGold,
                 summary = postgameSummary(lastPracticeReport),
                 onClick = onPostgame,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            HomeOption(
+                title = "History",
+                accent = Color(0xFF64B5F6), // Blue accent for history
+                summary = "Past Sessions",
+                onClick = onHistory,
                 modifier = Modifier.weight(1f)
             )
             HomeOption(
@@ -492,6 +542,10 @@ private fun PostgameScreen(
     var analysisStatus by remember { mutableStateOf("Ready") }
     var analysisRunning by remember { mutableStateOf(false) }
     var analysisProgress by remember { mutableStateOf(0f) }
+    var lastFrameStates by remember { mutableStateOf<Map<Long, com.aifencingcoach.runtime.CoachFrameState>?>(null) }
+    var exportRunning by remember { mutableStateOf(false) }
+    var exportStatus by remember { mutableStateOf("") }
+    var reviewReport by remember { mutableStateOf<PracticeReport?>(null) }
     val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         selectedVideoUri = uri
         selectedVideo = uri?.lastPathSegment ?: uri?.toString()
@@ -561,7 +615,7 @@ private fun PostgameScreen(
                                 analysisProgress = 0f
                                 scope.launch {
                                     runCatching {
-                                        PostgameVideoAnalyzer(context).analyze(
+                                        val (report, states) = PostgameVideoAnalyzer(context).analyze(
                                             uri = uri,
                                             targetSide = targetSide,
                                             trainingMode = trainingMode,
@@ -571,8 +625,10 @@ private fun PostgameScreen(
                                                 analysisStatus = progress.status
                                             }
                                         )
-                                    }.onSuccess { report ->
+                                        Pair(report, states)
+                                    }.onSuccess { (report, states) ->
                                         onPracticeReport(report)
+                                        lastFrameStates = states
                                         analysisProgress = 1f
                                         analysisStatus = "Analysis ready"
                                     }.onFailure { error ->
@@ -598,6 +654,43 @@ private fun PostgameScreen(
                     color = AccentGreen,
                     trackColor = Color(0xFF263039)
                 )
+                if (lastFrameStates != null && selectedVideoUri != null) {
+                    Spacer(Modifier.height(12.dp))
+                    HudButton(
+                        text = if (exportRunning) "Exporting Video..." else "Export Annotated Video",
+                        selected = false,
+                        onClick = {
+                            if (!exportRunning) {
+                                exportRunning = true
+                                exportStatus = "Exporting..."
+                                scope.launch {
+                                    val annotator = com.aifencingcoach.runtime.VideoAnnotator(context)
+                                    // TODO: properly extract video dimensions if possible. 1920x1080 default
+                                    annotator.exportVideo(selectedVideoUri!!, lastFrameStates!!, 1080, 1920).collect { progress ->
+                                        when (progress) {
+                                            is com.aifencingcoach.runtime.ExportProgress.Completed -> {
+                                                exportStatus = "Export saved to Gallery!"
+                                                exportRunning = false
+                                            }
+                                            is com.aifencingcoach.runtime.ExportProgress.Error -> {
+                                                exportStatus = "Export failed: ${progress.exception.message}"
+                                                exportRunning = false
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    )
+                    if (exportStatus.isNotBlank()) {
+                        Text(
+                            text = exportStatus,
+                            color = if (exportRunning) AccentGold else AccentGreen,
+                            fontSize = BodyTextSize,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
             }
         }
 
@@ -954,16 +1047,10 @@ private fun CoachScreen(
         reviewReport?.let { report ->
             PostPracticeReview(
                 report = report,
-                onResume = {
+                userSettings = userSettings,
+                onBack = {
                     reviewReport = null
                     analysisPaused = false
-                },
-                onNewSession = {
-                    reviewReport = null
-                    analysisPaused = false
-                    frameState = CoachFrameState()
-                    pipeline.reset()
-                    resetToken += 1
                 }
             )
         }
@@ -1151,10 +1238,10 @@ private fun HudPanel(
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
-private fun PostPracticeReview(
+internal fun PostPracticeReview(
     report: PracticeReport,
-    onResume: () -> Unit,
-    onNewSession: () -> Unit
+    userSettings: UserSettings,
+    onBack: () -> Unit
 ) {
     Box(
         modifier = Modifier
@@ -1189,9 +1276,7 @@ private fun PostPracticeReview(
                     )
                 }
                 Row {
-                    HudButton(text = "Resume", selected = false, onClick = onResume)
-                    Spacer(Modifier.width(8.dp))
-                    HudButton(text = "New", selected = true, onClick = onNewSession)
+                    HudButton(text = "Done", selected = true, onClick = onBack)
                 }
             }
 
