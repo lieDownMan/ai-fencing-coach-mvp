@@ -65,20 +65,20 @@ From Android Studio:
 
 ## Current V1 Scope
 
-- Realtime live coach is the only fully connected Android runtime path.
+- Realtime live coach and selected-video Postgame analysis are the connected Android runtime paths.
 - No runtime backend.
 - App opens to a home screen with Realtime, Postgame, and User Settings.
 - Realtime has a compact setup screen that reads training mode, pose model, target side, voice, and feedback focus from User Settings before opening the camera.
 - The live coaching screen is camera-first: preview and skeleton overlay on top, current error/status and controls below.
 - Postgame reads clip-analysis and summary defaults from User Settings, runs selected videos through the on-device pose/FenceNet/heuristics pipeline, shows a processing progress bar, and displays the generated report.
 - User Settings is scrollable and includes user information, app defaults, Gemini/playbook summary preference, and per-error emphasize/mute checkboxes.
-- Pose backend selector in the HUD.
+- Pose backend, target side, training mode, voice, and feedback focus are configured in User Settings.
 - MediaPipe backend uses the MediaPipe Tasks pose landmarker.
 - YOLO backend runs `yolo_pose.onnx` through ONNX Runtime with local decoding/NMS.
 - Target tracker keeps the selected fencer locked through short pose dropouts.
 - FenceNet only receives active fencing frames; idle frames do not fill the model window.
 - HUD shows target lock, warmup progress, cue stack/history, FPS, latency, dropped-frame estimate, and session counts.
-- Controls include training mode, pose backend, target side, pause/resume, voice, finish, reset, and menu.
+- Live controls include pause/resume, voice, finish, reset, and menu.
 - Post-practice review summarizes time, active time, model checks, top action, repeated cues, and recent cue timeline.
 - Back camera by default.
 - Landscape orientation.

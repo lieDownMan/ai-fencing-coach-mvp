@@ -1,68 +1,74 @@
 {
-  "foot_before_hand": {
-    "error_name": "Foot before hand",
-    "short_cue": "Extend first, then step.",
-    "diagnosis": "The front foot is moving before the weapon arm starts the attack.",
-    "practice": "Practice slow step-lunge reps where the hand clearly leads the foot."
-  },
   "lunge_overextension": {
-    "error_name": "Overextended lunge",
-    "short_cue": "Keep the front knee stacked.",
-    "diagnosis": "The front knee angle suggests the lunge is collapsing past a strong support position.",
-    "practice": "Pause at the end of each lunge and check knee-over-ankle control."
-  },
-  "incomplete_arm_extension": {
-    "error_name": "Incomplete arm extension",
-    "short_cue": "Finish the arm.",
-    "diagnosis": "The attacking arm is not reaching a clear extension during the lunge.",
-    "practice": "Use extension-lunge drills with a target and freeze the finish."
+    "error_name": "\u9577\u523a\u904e\u5ea6\u524d\u50be",
+    "diagnosis": "\u91cd\u5fc3\u885d\u592a\u5feb\uff0c\u524d\u8173\u767c\u529b\u4e0d\u5920\uff0c\u5bb9\u6613\u50b7\u819d\u84cb\u4e14\u7121\u6cd5\u5feb\u901f\u6536\u6b65\u3002",
+    "short_cue": "\u6ce8\u610f\u524d\u8173\u4e0d\u8981\u58d3\u819d\u84cb\uff0c\u9577\u523a\u6253\u523090\u5ea6\u5c31\u597d",
+    "practice": "\u9577\u523a\uff08lunge\uff09\u91cd\u8907\u7df4\u7fd2"
   },
   "guard_dropped": {
-    "error_name": "Guard dropped",
-    "short_cue": "Keep your guard up.",
-    "diagnosis": "The front wrist is dropping below the shoulder line for too long.",
-    "practice": "Shadow footwork while keeping the bell/hand in the same visual lane."
-  },
-  "stance_too_high": {
-    "error_name": "Stance too high",
-    "short_cue": "Stay lower in guard.",
-    "diagnosis": "The front knee is too straight for a stable en-garde position.",
-    "practice": "Hold en-garde for short intervals and reset when the knees straighten."
+    "error_name": "\u6301\u528d\u624b\u6389\u843d",
+    "diagnosis": "\u653b\u64ca\u6216\u9632\u5b88\u6642\u624b\u653e\u592a\u4f4e\uff0c\u528d\u5c16\u6c92\u6709\u5a01\u8105\u5c0d\u624b\uff0c\u4e14\u6709\u6548\u90e8\u4f4d\u5b8c\u5168\u66b4\u9732\u7d66\u5c0d\u624b\u3002",
+    "short_cue": "\u624b\u62ac\u8d77\u4f86\uff0c\u528d\u5c16\u6307\u8457\u5c0d\u624b",
+    "practice": ""
   },
   "bounce_excessive": {
-    "error_name": "Excessive bounce",
-    "short_cue": "Quiet the bounce.",
-    "diagnosis": "The pelvis is moving up and down more than needed during footwork.",
-    "practice": "Practice advance-retreat with a quiet head and steady hip height."
+    "error_name": "\u6b65\u4f10\u4e0a\u4e0b\u6d6e\u52d5",
+    "diagnosis": "\u5728\u8d70\u8173\u6b65\u7684\u6642\u5019\u5927\u817f\u808c\u529b\u6216\u662f\u63a7\u5236\u529b\u4e0d\u8db3\u5c0e\u81f4\u8eab\u9ad4\u91cd\u5fc3\u4e0d\u7a69\uff0c\u5f71\u97ff\u653b\u64ca\u523a\u9ede",
+    "short_cue": "\u91cd\u5fc3\u58d3\u4f4e\u8e72\u597d\uff0c\u4e0d\u8981\u4e0a\u4e0b\u79fb\u52d5!",
+    "practice": "\u9023\u7e8c\u524d\u9032\u3001\u5f8c\u9000\u4ee5\u7a69\u5b9a\u8173\u6b65"
   },
-  "center_of_mass_in_front": {
-    "error_name": "Weight too far forward",
-    "short_cue": "Bring weight back.",
-    "diagnosis": "The body center is drifting too close to the front foot.",
-    "practice": "Reset to balanced en-garde after each step."
-  },
-  "center_of_mass_leaning_backward": {
-    "error_name": "Weight too far back",
-    "short_cue": "Center your weight.",
-    "diagnosis": "The body center is drifting too close to the back foot.",
-    "practice": "Use mirror footwork and keep the hips centered between the feet."
+  "foot_before_hand": {
+    "error_name": "\u624b\u8173\u9806\u5e8f\u932f\u8aa4",
+    "diagnosis": "\u8173\u5148\u52d5\u4e86\uff0c\u528d\u5c16\u9084\u6c92\u51fa\u53bb\uff0c\u9019\u6a23\u6703\u5148\u628a\u81ea\u5df1\u7684\u8eab\u9ad4\u9001\u51fa\u53bb\u7d66\u5c0d\u65b9\u6253\uff0c\u5bb9\u6613\u88ab\u5f97\u5206\u3002",
+    "short_cue": "\u624b\u8981\u5148\u4f38",
+    "practice": "\u9577\u523a\uff08lunge\uff09\u524d\u9032\u9577\u523a\uff08step lunge\uff09\u91cd\u8907\u7df4\u7fd2"
   },
   "over_parrying": {
-    "error_name": "Over-parrying",
-    "short_cue": "Make the parry smaller.",
-    "diagnosis": "The front wrist is traveling wider than needed for a compact defensive action.",
-    "practice": "Practice small parry-recover reps without letting the hand drift."
+    "error_name": "\u9632\u5b88\u52d5\u4f5c\u592a\u5927\u4e14\u592a\u983b\u7e41",
+    "diagnosis": "\u64a5\u64cb\uff08Parry\uff09\u7684\u52d5\u4f5c\u8d85\u904e\u8eab\u9ad4\u8f2a\u5ed3\u592a\u591a\uff0c\u5c0e\u81f4\u9632\u5b88\u5f8c\u9732\u51fa\u592a\u591a\u6709\u6548\u90e8\u4f4d\u3002\u5c0d\u624b\u5f88\u5bb9\u6613\u505a\u4e00\u500b\u7c21\u55ae\u7684\u8f49\u79fb\u523a\uff08Disengage\uff09\u64ca\u4e2d\u4f60\uff0c\u4e14\u52d5\u4f5c\u592a\u5927\u6703\u5c0e\u81f4\u56de\u9632\u901f\u5ea6\u8b8a\u6162\u3002",
+    "short_cue": "\u9632\u5b88\u5c0f\u4e00\u9ede\uff0c\u4e0d\u8981\u4e82\u6488\u528d\uff0c\u7528\u624b\u6307\u982d\u63a7\u5236\u528d\u5c16\u4e0d\u8981\u7528\u6574\u500b\u624b\u8155",
+    "practice": "\u91cd\u8907\u9632\u5b88\uff08Parry\uff09\u7df4\u7fd2"
+  },
+  "stance_too_high": {
+    "error_name": "\u9810\u5099\u59ff\u52e2\u6c92\u8e72\u597d",
+    "diagnosis": "\u91cd\u5fc3\u592a\u9ad8\u6703\u5c0e\u81f4\u555f\u52d5\u901f\u5ea6\u8b8a\u6162\uff0c\u7121\u6cd5\u77ac\u9593\u7206\u767c\uff0c\u4e5f\u5bb9\u6613\u5728\u5feb\u901f\u79fb\u52d5\u4e2d\u5931\u53bb\u5e73\u8861\u3002",
+    "short_cue": "\u91cd\u5fc3\u58d3\u4f4e\uff0c\u8e72\u597d\uff01",
+    "practice": "\u9810\u5099\u59ff\u52e2\uff08en guard\uff09\u7df4\u7fd2"
+  },
+  "wide_disengage": {
+    "error_name": "\u63db\u5074\u52d5\u4f5c\u592a\u5927",
+    "diagnosis": "\u7e5e\u528d\u5e45\u5ea6\u904e\u5927\u6703\u6d6a\u8cbb\u653b\u64ca\u6642\u9593\uff0c\u4e0d\u50c5\u5bb9\u6613\u88ab\u5c0d\u624b\u76f4\u63a5\u53cd\u64ca\uff0c\u4e5f\u5bb9\u6613\u8b93\u81ea\u5df1\u7684\u528d\u5c16\u504f\u96e2\u6709\u6548\u90e8\u4f4d\u3002",
+    "short_cue": "\u63db\u5074\u5c0f\u4e00\u9ede\uff01\u7528\u624b\u6307\u982d\u63a7\u5236\u528d\u5c16\uff0c\u4e0d\u8981\u52d5\u5230\u6574\u652f\u624b\u81c2\u548c\u624b\u8098\uff01",
+    "practice": "\u91cd\u8907\u63db\u5074\u7df4\u7fd2"
+  },
+  "incomplete_arm_extension": {
+    "error_name": "\u523a\u7684\u6642\u5019\u624b\u6c92\u6709\u4f38\u76f4",
+    "diagnosis": "\u624b\u81c2\u6c92\u6709\u5b8c\u5168\u4f38\u76f4\u6703\u8b93\u4f60\u5e73\u767d\u640d\u5931\u653b\u64ca\u8ddd\u96e2\uff0c\u5c0e\u81f4\u539f\u672c\u80fd\u64ca\u4e2d\u7684\u653b\u64ca\u843d\u7a7a\u3002",
+    "short_cue": "\u523a\u7684\u6642\u5019\u624b\u4f38\u76f4\uff01",
+    "practice": "\u91cd\u8907\u9577\u523a\uff08lunge\uff09\u7df4\u7fd2"
   },
   "wide_step": {
-    "error_name": "Step too wide",
-    "short_cue": "Shorten the step.",
-    "diagnosis": "The foot distance is wider than the shoulder-width reference.",
-    "practice": "Mark a comfortable step length and keep repeated steps inside it."
+    "error_name": "\u6b65\u4f10\u592a\u5927",
+    "diagnosis": "\u96d9\u8173\u9593\u8ddd\u904e\u5927\u5f71\u97ff\u79fb\u52d5\u548c\u52d5\u4f5c\u767c\u52d5",
+    "short_cue": "\u8173\u6253\u592a\u958b",
+    "practice": ""
   },
   "narrow_step": {
-    "error_name": "Step too narrow",
-    "short_cue": "Widen your base.",
-    "diagnosis": "The foot distance is too narrow for stable fencing footwork.",
-    "practice": "Reset the feet to a shoulder-aware guard before moving again."
+    "error_name": "\u6b65\u4f10\u592a\u5c0f",
+    "diagnosis": "\u96d9\u8173\u9593\u8ddd\u904e\u5c0f\u6703\u5f71\u97ff\u79fb\u52d5\u548c\u52d5\u4f5c\u767c\u52d5",
+    "short_cue": "\u8173\u6253\u592a\u7a84",
+    "practice": ""
+  },
+  "center_of_mass_in_front": {
+    "error_name": "\u91cd\u5fc3\u5411\u524d\u79fb\u52d5",
+    "diagnosis": "\u59ff\u52e2\u4e0d\u6a19\u6e96\uff0c\u6703\u7121\u6cd5\u6709\u6b63\u78ba\u8fc5\u901f\u78ba\u5be6\u7684\u767c\u529b\u904e\u7a0b",
+    "short_cue": "\u91cd\u5fc3\u592a\u9760\u524d",
+    "practice": "\u63d0\u4f9b\u8eab\u9ad4\u61c9\u6709\u57fa\u6e96\u7d66\u9078\u624b\u53c3\u8003"
+  },
+  "center_of_mass_leaning_backward": {
+    "error_name": "\u91cd\u5fc3\u5411\u5f8c\u50be\u659c",
+    "diagnosis": "\u59ff\u52e2\u4e0d\u6a19\u6e96\uff0c\u6703\u7121\u6cd5\u6709\u6b63\u78ba\u8fc5\u901f\u78ba\u5be6\u7684\u767c\u529b\u904e\u7a0b",
+    "short_cue": "\u91cd\u5fc3\u592a\u9760\u5f8c",
+    "practice": "\u63d0\u4f9b\u8eab\u9ad4\u61c9\u6709\u57fa\u6e96\u7d66\u9078\u624b\u53c3\u8003"
   }
 }

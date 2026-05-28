@@ -93,7 +93,10 @@ data class FeedbackCue(
     val message: String,
     val priority: String,
     val score: Float,
-    val triggered: Boolean
+    val triggered: Boolean,
+    val shortCue: String = message,
+    val diagnosis: String = "",
+    val practice: String = ""
 )
 
 data class FeedbackDecision(

@@ -238,10 +238,6 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             onBack = {
                 saveSettings()
                 appScreen = AppScreen.HOME
-            },
-            onStartRealtime = {
-                saveSettings()
-                appScreen = AppScreen.REALTIME
             }
         )
         AppScreen.SETTINGS -> UserSettingsScreen(
@@ -301,7 +297,7 @@ private fun HomeScreen(
             .fillMaxSize()
             .background(PageBackground)
             .padding(ScreenPadding),
-        verticalArrangement = Arrangement.SpaceBetween
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         ScreenHeader(
             title = "AI Fencing Coach",
@@ -410,6 +406,14 @@ private fun RealtimeSetupScreen(
             subtitle = "${userSettings.name.ifBlank { "Fencer" }} | ${trainingMode.label} | ${poseBackend.label} | target ${targetSide.label}",
             onBack = onBack
         )
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            HudButton(text = "Start Camera", selected = true, onClick = onStart)
+            HudButton(text = "User Settings", selected = false, onClick = onSettings)
+        }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -466,18 +470,6 @@ private fun RealtimeSetupScreen(
                 fontSize = BodyTextSize
             )
         }
-
-        FlowRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(PanelColor, RoundedCornerShape(8.dp))
-                .padding(10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            HudButton(text = "User Settings", selected = false, onClick = onSettings)
-            HudButton(text = "Start Camera", selected = true, onClick = onStart)
-        }
     }
 }
 
@@ -491,8 +483,7 @@ private fun PostgameScreen(
     lastPracticeReport: PracticeReport?,
     onSettings: () -> Unit,
     onPracticeReport: (PracticeReport) -> Unit,
-    onBack: () -> Unit,
-    onStartRealtime: () -> Unit
+    onBack: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -613,8 +604,6 @@ private fun PostgameScreen(
         MenuPanel("Latest Session", Modifier.fillMaxWidth()) {
             if (lastPracticeReport == null) {
                 Text("No practice report yet", color = MutedText, fontSize = BodyTextSize)
-                Spacer(Modifier.height(10.dp))
-                HudButton(text = "Start Realtime", selected = true, onClick = onStartRealtime)
             } else {
                 PracticeReportSummary(report = lastPracticeReport)
             }
@@ -830,13 +819,21 @@ private fun PracticeReportSummary(report: PracticeReport) {
     }
     if (report.topCues.isNotEmpty()) {
         Spacer(Modifier.height(14.dp))
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            report.topCues.take(6).forEach { cue ->
-                StatusPill("${cue.count}x ${cue.label}", AccentGold)
+        report.topCues.take(3).forEach { cue ->
+            Text(
+                text = "${cue.count}x ${cue.label}",
+                color = AccentGold,
+                fontSize = BodyTextSize,
+                fontWeight = FontWeight.SemiBold
+            )
+            if (cue.message.isNotBlank()) {
+                Text(
+                    text = cue.message,
+                    color = MutedText,
+                    fontSize = 11.sp
+                )
             }
+            Spacer(Modifier.height(6.dp))
         }
     }
 }
@@ -927,7 +924,7 @@ private fun CoachScreen(
                     analysisPaused = analysisPaused || isReviewing,
                     onFrameState = { state, cue ->
                         frameState = state
-                        if (voiceEnabled && cue != null) onSpeak(cue.message)
+                        if (voiceEnabled && cue != null) onSpeak(cue.shortCue.ifBlank { cue.message })
                     }
                 )
                 SkeletonOverlay(state = displayedState)
@@ -1091,7 +1088,7 @@ private fun HudPanel(
             Text(
                 text = state.cue.ifBlank { if (state.ready) "No active error" else "Model assets missing" },
                 color = Color.White,
-                fontSize = 15.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(4.dp))
@@ -1343,9 +1340,9 @@ private fun CueStack(state: CoachFrameState) {
         Spacer(Modifier.height(10.dp))
         cues.forEachIndexed { index, cue ->
             Text(
-                text = if (index == 0) cue.message else "Next: ${cue.message}",
+                text = if (index == 0) "${cue.label}: ${cue.message}" else "Next: ${cue.label}: ${cue.shortCue}",
                 color = if (index == 0) Color(0xFFFFE066) else Color(0xFFB6C2CC),
-                fontSize = if (index == 0) 15.sp else 13.sp,
+                fontSize = if (index == 0) 11.sp else 10.sp,
                 fontWeight = if (index == 0) FontWeight.SemiBold else FontWeight.Normal
             )
         }

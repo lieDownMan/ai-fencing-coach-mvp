@@ -5,14 +5,24 @@ import org.json.JSONObject
 
 data class PlaybookEntry(
     val label: String,
-    val message: String,
-    val weight: Float
-)
+    val shortCue: String,
+    val weight: Float,
+    val diagnosis: String = "",
+    val practice: String = ""
+) {
+    val message: String
+        get() = listOf(shortCue, diagnosis, practice)
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
+}
 
 private data class FeedbackState(
     val errorKey: String,
     val label: String,
     val message: String,
+    val shortCue: String,
+    val diagnosis: String,
+    val practice: String,
     val baseWeight: Float,
     var skippedCount: Int = 0,
     var activeCount: Int = 0,
@@ -103,11 +113,18 @@ class FeedbackScheduler(
 
     private fun stateFor(errorKey: String): FeedbackState {
         states[errorKey]?.let { return it }
-        val entry = playbook[errorKey] ?: PlaybookEntry(errorKey, errorKey, DefaultWeights[errorKey] ?: 5f)
+        val entry = playbook[errorKey] ?: PlaybookEntry(
+            label = errorKey,
+            shortCue = errorKey,
+            weight = DefaultWeights[errorKey] ?: 5f
+        )
         val state = FeedbackState(
             errorKey = errorKey,
             label = entry.label,
             message = entry.message,
+            shortCue = entry.shortCue,
+            diagnosis = entry.diagnosis,
+            practice = entry.practice,
             baseWeight = entry.weight
         )
         states[errorKey] = state
@@ -159,7 +176,10 @@ class FeedbackScheduler(
         message = state.message,
         priority = priority,
         score = score,
-        triggered = triggered
+        triggered = triggered,
+        shortCue = state.shortCue,
+        diagnosis = state.diagnosis,
+        practice = state.practice
     )
 
     companion object {
@@ -224,7 +244,9 @@ class FeedbackScheduler(
                     val obj = root.getJSONObject(key)
                     PlaybookEntry(
                         label = obj.optString("error_name", key),
-                        message = obj.optString("short_cue", key),
+                        shortCue = obj.optString("short_cue", key),
+                        diagnosis = obj.optString("diagnosis", ""),
+                        practice = obj.optString("practice", ""),
                         weight = DefaultWeights[key] ?: 5f
                     )
                 }
