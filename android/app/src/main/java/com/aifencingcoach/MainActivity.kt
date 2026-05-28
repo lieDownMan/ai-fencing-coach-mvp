@@ -35,6 +35,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -70,6 +71,7 @@ import com.aifencingcoach.runtime.TrainingMode
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlinx.coroutines.delay
 
 private enum class AppScreen {
     HOME,
@@ -216,7 +218,6 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             onPoseBackend = { poseBackend = it },
             onTargetSide = { targetSide = it },
             onVoiceEnabled = { voiceEnabled = it },
-            onUserSettings = { userSettings = it },
             onSettings = { appScreen = AppScreen.SETTINGS },
             onBack = {
                 saveSettings()
@@ -232,9 +233,7 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             trainingMode = trainingMode,
             targetSide = targetSide,
             lastPracticeReport = lastPracticeReport,
-            onTrainingMode = { trainingMode = it },
-            onTargetSide = { targetSide = it },
-            onUserSettings = { userSettings = it },
+            onSettings = { appScreen = AppScreen.SETTINGS },
             onBack = {
                 saveSettings()
                 appScreen = AppScreen.HOME
@@ -401,7 +400,6 @@ private fun RealtimeSetupScreen(
     onPoseBackend: (PoseBackendKind) -> Unit,
     onTargetSide: (TargetSide) -> Unit,
     onVoiceEnabled: (Boolean) -> Unit,
-    onUserSettings: (UserSettings) -> Unit,
     onSettings: () -> Unit,
     onBack: () -> Unit,
     onStart: () -> Unit
@@ -457,12 +455,6 @@ private fun RealtimeSetupScreen(
                         onClick = { onVoiceEnabled(!voiceEnabled) }
                     )
                 }
-                Spacer(Modifier.height(10.dp))
-                SegmentedGroup(
-                    labels = ProcessingProfiles,
-                    selected = userSettings.processingProfile,
-                    onSelected = { onUserSettings(userSettings.copy(processingProfile = it)) }
-                )
             }
         }
 
@@ -512,17 +504,37 @@ private fun PostgameScreen(
     trainingMode: TrainingMode,
     targetSide: TargetSide,
     lastPracticeReport: PracticeReport?,
-    onTrainingMode: (TrainingMode) -> Unit,
-    onTargetSide: (TargetSide) -> Unit,
-    onUserSettings: (UserSettings) -> Unit,
+    onSettings: () -> Unit,
     onBack: () -> Unit,
     onStartRealtime: () -> Unit
 ) {
     var selectedVideo by remember { mutableStateOf<String?>(null) }
     var analysisStatus by remember { mutableStateOf("Ready") }
+    var analysisRunning by remember { mutableStateOf(false) }
+    var analysisProgress by remember { mutableStateOf(0f) }
     val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         selectedVideo = uri?.lastPathSegment ?: uri?.toString()
+        analysisRunning = false
+        analysisProgress = 0f
         analysisStatus = if (uri == null) "No video selected" else "Video selected"
+    }
+
+    LaunchedEffect(analysisRunning) {
+        if (!analysisRunning) return@LaunchedEffect
+        analysisProgress = 0f
+        analysisStatus = "Preparing video"
+        while (analysisRunning && analysisProgress < 1f) {
+            delay(180)
+            analysisProgress = (analysisProgress + 0.07f).coerceAtMost(1f)
+            analysisStatus = when {
+                analysisProgress < 0.25f -> "Reading clip"
+                analysisProgress < 0.55f -> "Finding poses"
+                analysisProgress < 0.85f -> "Scoring actions"
+                analysisProgress < 1f -> "Building summary"
+                else -> "Analysis ready"
+            }
+        }
+        analysisRunning = false
     }
 
     Column(
@@ -542,55 +554,63 @@ private fun PostgameScreen(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            MenuPanel("Clip Analysis", Modifier.weight(1f)) {
-                SegmentedGroup(
-                    labels = TrainingMode.entries.map { it.label },
-                    selected = trainingMode.label,
-                    onSelected = { onTrainingMode(TrainingMode.fromLabel(it)) }
-                )
-                Spacer(Modifier.height(10.dp))
-                SegmentedGroup(
-                    labels = listOf("left", "right"),
-                    selected = targetSide.label,
-                    onSelected = { onTargetSide(TargetSide.fromLabel(it)) }
-                )
-                Spacer(Modifier.height(10.dp))
-                SegmentedGroup(
-                    labels = ProcessingProfiles,
-                    selected = userSettings.processingProfile,
-                    onSelected = { onUserSettings(userSettings.copy(processingProfile = it)) }
-                )
-            }
-            MenuPanel("Summary", Modifier.weight(1f)) {
-                HudButton(
-                    text = if (userSettings.useGeminiSummary) "Gemini on" else "Playbook",
-                    selected = userSettings.useGeminiSummary,
-                    onClick = { onUserSettings(userSettings.copy(useGeminiSummary = !userSettings.useGeminiSummary)) }
-                )
+            MenuPanel("Analysis Defaults", Modifier.weight(1f)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    StatusPill(trainingMode.label, AccentGreen)
+                    StatusPill("target ${targetSide.label}", AccentGreen)
+                    StatusPill(userSettings.processingProfile, AccentGold)
+                    StatusPill(if (userSettings.useGeminiSummary) "Gemini" else "Playbook", AccentGold)
+                }
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    text = "Focus ${userSettings.emphasizedErrors.size}  |  Mute ${userSettings.mutedErrors.size}  |  ${analysisStatus}",
+                    text = "Focus ${userSettings.emphasizedErrors.size}  |  Mute ${userSettings.mutedErrors.size}  |  ${if (userSettings.onlyFocusedErrors) "focused only" else "all errors"}",
                     color = MutedText,
                     fontSize = 13.sp
                 )
+                Spacer(Modifier.height(10.dp))
+                HudButton(text = "Edit Settings", selected = false, onClick = onSettings)
             }
-            MenuPanel("Video", Modifier.weight(1f)) {
+            MenuPanel("Video", Modifier.weight(2f)) {
                 Text(
                     text = selectedVideo ?: "No clip selected",
                     color = if (selectedVideo == null) MutedText else Color.White,
                     fontSize = 13.sp
                 )
                 Spacer(Modifier.height(10.dp))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     HudButton(text = "Choose Video", selected = false, onClick = { videoPicker.launch("video/*") })
                     HudButton(
-                        text = "Run Analysis",
+                        text = if (analysisRunning) "Processing" else "Run Analysis",
                         selected = selectedVideo != null,
                         onClick = {
-                            analysisStatus = if (selectedVideo == null) "Choose a clip first" else "Analysis queued"
+                            if (selectedVideo == null) {
+                                analysisStatus = "Choose a clip first"
+                            } else if (!analysisRunning) {
+                                analysisRunning = true
+                            }
                         }
                     )
                 }
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = analysisStatus,
+                    color = if (analysisRunning) AccentGreen else MutedText,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    progress = { analysisProgress.coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = AccentGreen,
+                    trackColor = Color(0xFF263039)
+                )
             }
         }
 
