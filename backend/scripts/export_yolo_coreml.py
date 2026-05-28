@@ -4,12 +4,16 @@ Usage:
     PYTHONPATH=. venv/bin/python backend/scripts/export_yolo_coreml.py
 """
 
-import sys
 import shutil
+import sys
+import os
 from pathlib import Path
-from ultralytics import YOLO
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+os.environ.setdefault("YOLO_CONFIG_DIR", str(REPO_ROOT / ".ultralytics"))
+
+from ultralytics import YOLO
+
 YOLO_PT = REPO_ROOT / "yolov8n-pose.pt"
 DEST_DIR = REPO_ROOT / "frontend" / "ios" / "Runner"
 
@@ -30,7 +34,7 @@ def main():
         print(f"Error: Export failed, output not found at {exported_path}")
         sys.exit(1)
 
-    print(f"    ✓ Exported successfully to {exported_path}")
+    print(f"    Exported successfully to {exported_path}")
 
     # Copy to iOS Runner folder
     dest_path = DEST_DIR / "yolov8n_pose.mlpackage"
@@ -43,7 +47,7 @@ def main():
             dest_path.unlink()
 
     shutil.copytree(exported_path, dest_path)
-    print("✅ All done!")
+    print("All done!")
 
 if __name__ == "__main__":
     main()

@@ -1,24 +1,25 @@
-/// YOLOv8-Pose processing service — converts MethodChannel parsed keypoints to fencing skeleton maps.
+/// YOLOv8-Pose service for the Flutter app.
 ///
-/// COCO Keypoints index mapping (17 keypoints):
-///   0: nose
-///   5: left shoulder,   6: right shoulder
-///   7: left elbow,      8: right elbow
-///   9: left wrist,     10: right wrist
-///  11: left hip,       12: right hip
-///  13: left knee,      14: right knee
-///  15: left ankle,     16: right ankle
+/// This mirrors the main-branch Python contract:
+/// YOLO COCO keypoints -> fencing skeleton keys -> side-based target tracking.
 
 library;
 
+import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' show Offset;
+
 import 'package:flutter/services.dart';
+
 import 'pose_service.dart';
 
 class YoloPoseService {
   static const MethodChannel _channel = MethodChannel('fencing_coach/yolo_pose');
-  
+
+  final _TargetTracker _tracker = _TargetTracker();
   bool _isLoaded = false;
+  String? _configuredTargetSide;
+
   bool get isLoaded => _isLoaded;
 
   Future<bool> load() async {
@@ -26,13 +27,18 @@ class YoloPoseService {
       final result = await _channel.invokeMethod<bool>('load');
       _isLoaded = result == true;
       return _isLoaded;
-    } catch (e) {
+    } catch (_) {
       _isLoaded = false;
       return false;
     }
   }
 
-  /// Process raw camera image bytes and return the resolved FencingSkeleton.
+  void resetTracking() {
+    _tracker.reset();
+    _configuredTargetSide = null;
+  }
+
+  /// Process a camera frame and return the selected fencer skeleton.
   Future<FencingSkeleton?> processImageBytes({
     required Uint8List bytes,
     required int width,
@@ -42,9 +48,14 @@ class YoloPoseService {
     required bool isFrontCamera,
   }) async {
     if (!_isLoaded) return null;
-    
+
+    if (_configuredTargetSide != targetSide) {
+      _tracker.reset();
+      _configuredTargetSide = targetSide;
+    }
+
     try {
-      final List<dynamic>? rawKeypoints = await _channel.invokeMethod<List<dynamic>>(
+      final raw = await _channel.invokeMethod<List<dynamic>>(
         'detectPose',
         {
           'bytes': bytes,
@@ -54,133 +65,318 @@ class YoloPoseService {
         },
       );
 
-      if (rawKeypoints == null || rawKeypoints.isEmpty) return null;
-
-      // Map dynamic list to Keypoint map
-      final Map<int, _Keypoint> keypoints = {};
-      for (final item in rawKeypoints) {
-        final Map map = item as Map;
-        final idx = map['index'] as int;
-        keypoints[idx] = _Keypoint(
-          x: (map['x'] as num).toDouble(),
-          y: (map['y'] as num).toDouble(),
-          confidence: (map['confidence'] as num).toDouble(),
-        );
-      }
-
-      return _buildFencingSkeleton(keypoints, targetSide, isFrontCamera);
-    } catch (e) {
+      final detections = _parseDetections(raw, isFrontCamera);
+      return _tracker.process(detections, targetSide)?.skeleton;
+    } catch (_) {
       return null;
     }
   }
 
-  FencingSkeleton? _buildFencingSkeleton(
-    Map<int, _Keypoint> keypoints,
-    String targetSide,
+  List<_PoseDetection> _parseDetections(
+    List<dynamic>? raw,
     bool isFrontCamera,
   ) {
-    // Width and height of normalized space is 1.0 (since Swift returns coordinates relative to [0, 1])
-    const double imgW = 1.0;
-    const double imgH = 1.0;
+    if (raw == null || raw.isEmpty) return const [];
 
-    Offset? _lm(int idx) {
+    // Backward compatibility for the older bridge shape that returned only a
+    // keypoint list: [{"index": 0, "x": ..., "y": ..., "confidence": ...}].
+    final first = raw.first;
+    if (first is Map && first.containsKey('index')) {
+      final detection = _detectionFromKeypointItems(
+        keypointItems: raw,
+        confidence: 1.0,
+        sourceRank: 0,
+        isFrontCamera: isFrontCamera,
+      );
+      return detection == null ? const [] : [detection];
+    }
+
+    final detections = <_PoseDetection>[];
+    for (final item in raw) {
+      if (item is! Map) continue;
+      final keypointItems = item['keypoints'];
+      if (keypointItems is! List) continue;
+
+      final detection = _detectionFromKeypointItems(
+        keypointItems: keypointItems,
+        confidence: (item['confidence'] as num?)?.toDouble() ?? 0.0,
+        sourceRank: (item['sourceRank'] as num?)?.toInt() ?? detections.length,
+        isFrontCamera: isFrontCamera,
+      );
+      if (detection != null) detections.add(detection);
+    }
+
+    detections.sort((a, b) => b.area.compareTo(a.area));
+    return detections;
+  }
+
+  _PoseDetection? _detectionFromKeypointItems({
+    required List<dynamic> keypointItems,
+    required double confidence,
+    required int sourceRank,
+    required bool isFrontCamera,
+  }) {
+    final keypoints = <int, _Keypoint>{};
+    for (final item in keypointItems) {
+      if (item is! Map) continue;
+      final idx = (item['index'] as num?)?.toInt();
+      if (idx == null) continue;
+      keypoints[idx] = _Keypoint(
+        x: (item['x'] as num?)?.toDouble() ?? 0.0,
+        y: (item['y'] as num?)?.toDouble() ?? 0.0,
+        confidence: (item['confidence'] as num?)?.toDouble() ?? 0.0,
+      );
+    }
+
+    final skeleton = _buildFencingSkeleton(keypoints, isFrontCamera);
+    if (skeleton == null) return null;
+    final bbox = _BoundingBox.fromSkeleton(skeleton);
+    if (bbox == null) return null;
+
+    return _PoseDetection(
+      skeleton: skeleton,
+      bbox: bbox,
+      confidence: confidence,
+      sourceRank: sourceRank,
+    );
+  }
+
+  FencingSkeleton? _buildFencingSkeleton(
+    Map<int, _Keypoint> keypoints,
+    bool isFrontCamera,
+  ) {
+    const imgW = 1.0;
+    const imgH = 1.0;
+
+    Offset? lm(int idx) {
       final kp = keypoints[idx];
-      if (kp == null) return null;
-      if (kp.confidence < 0.3) return null;
-      
-      // Perform rotation mapping from 1.0x1.0 landscape (from sensor bytes) to portrait
-      final rawX = kp.x;
-      final rawY = kp.y;
+      if (kp == null || kp.confidence < 0.35) return null;
+
+      final rawX = kp.x.clamp(0.0, 1.0).toDouble();
+      final rawY = kp.y.clamp(0.0, 1.0).toDouble();
 
       if (isFrontCamera) {
-        // Front camera (270 degrees rotation + mirrored)
-        final x = imgH - rawY; // 1.0 - rawY
-        final y = imgW - rawX; // 1.0 - rawX
-        return Offset(x, y);
-      } else {
-        // Back camera (90 degrees rotation)
-        final x = imgH - rawY; // 1.0 - rawY
-        final y = rawX;
-        return Offset(x, y);
+        return Offset(imgH - rawY, imgW - rawX);
+      }
+      return Offset(imgH - rawY, rawX);
+    }
+
+    final nose = lm(0);
+    final leftShoulder = lm(5);
+    final rightShoulder = lm(6);
+    final leftElbow = lm(7);
+    final rightElbow = lm(8);
+    final leftWrist = lm(9);
+    final rightWrist = lm(10);
+    final leftHip = lm(11);
+    final rightHip = lm(12);
+    final leftKnee = lm(13);
+    final rightKnee = lm(14);
+    final leftAnkle = lm(15);
+    final rightAnkle = lm(16);
+
+    // Main-branch YOLO assumes the front/sword side is the COCO right side.
+    final frontWrist = rightWrist;
+    final frontElbow = rightElbow;
+    final frontShoulder = rightShoulder;
+    final frontAnkle = rightAnkle;
+    final backWrist = leftWrist;
+
+    if (nose == null ||
+        frontWrist == null ||
+        frontElbow == null ||
+        frontShoulder == null ||
+        frontAnkle == null ||
+        leftHip == null ||
+        rightHip == null ||
+        leftKnee == null ||
+        rightKnee == null ||
+        leftAnkle == null ||
+        rightAnkle == null) {
+      return null;
+    }
+
+    final joints = <String, Offset>{
+      'nose': nose,
+      'front_wrist': frontWrist,
+      'front_elbow': frontElbow,
+      'front_shoulder': frontShoulder,
+      'front_ankle': frontAnkle,
+      'left_hip': leftHip,
+      'right_hip': rightHip,
+      'left_knee': leftKnee,
+      'right_knee': rightKnee,
+      'left_ankle': leftAnkle,
+      'right_ankle': rightAnkle,
+      'left_shoulder': leftShoulder ?? frontShoulder,
+      'right_shoulder': rightShoulder,
+      'left_elbow': leftElbow ?? frontElbow,
+      'right_elbow': rightElbow,
+      'left_wrist': leftWrist ?? frontWrist,
+      'right_wrist': rightWrist,
+    };
+    if (backWrist != null) joints['back_wrist'] = backWrist;
+
+    final scale = (frontAnkle.dy - nose.dy).abs();
+
+    return FencingSkeleton(
+      joints: joints,
+      nose: nose,
+      scale: scale < 1e-6 ? null : scale,
+      imageWidth: imgW,
+      imageHeight: imgH,
+    );
+  }
+}
+
+class _TargetTracker {
+  String targetSide = 'left';
+  _BoundingBox? _lockedFallbackBBox;
+  FencingSkeleton? _lastKnownSkeleton;
+  _BoundingBox? _lastKnownBBox;
+  int _missingFramesCount = 0;
+
+  static const int _maxMissingFrames = 5;
+  static const double _maxPositionJump = 1.75;
+
+  void reset() {
+    _lockedFallbackBBox = null;
+    _lastKnownSkeleton = null;
+    _lastKnownBBox = null;
+    _missingFramesCount = 0;
+  }
+
+  _PoseDetection? process(List<_PoseDetection> detections, String side) {
+    if (targetSide != side) {
+      targetSide = side;
+      reset();
+    }
+
+    final valid = detections.where((d) => d.area > 0).toList();
+    if (valid.isEmpty) return _handleMissingTarget();
+
+    if (_lockedFallbackBBox == null) {
+      final initial = _pickInitialTarget(valid);
+      _lockedFallbackBBox = initial.bbox;
+    }
+
+    final target = _matchByPosition(valid) ?? _pickInitialTarget(valid);
+    _rememberTarget(target);
+    return target;
+  }
+
+  _PoseDetection _pickInitialTarget(List<_PoseDetection> detections) {
+    if (targetSide == 'left') {
+      return detections.reduce(
+        (best, d) => d.bbox.centerX < best.bbox.centerX ? d : best,
+      );
+    }
+    return detections.reduce(
+      (best, d) => d.bbox.centerX > best.bbox.centerX ? d : best,
+    );
+  }
+
+  _PoseDetection? _matchByPosition(List<_PoseDetection> detections) {
+    final reference = _lastKnownBBox ?? _lockedFallbackBBox;
+    if (reference == null) return null;
+
+    _PoseDetection? best;
+    double bestScore = double.infinity;
+    for (final detection in detections) {
+      final score = _positionScore(detection, reference);
+      if (score < bestScore) {
+        best = detection;
+        bestScore = score;
       }
     }
 
-    // Extract all joints
-    final nose = _lm(0);
-    final leftShoulder = _lm(5);
-    final rightShoulder = _lm(6);
-    final leftElbow = _lm(7);
-    final rightElbow = _lm(8);
-    final leftWrist = _lm(9);
-    final rightWrist = _lm(10);
-    final leftHip = _lm(11);
-    final rightHip = _lm(12);
-    final leftKnee = _lm(13);
-    final rightKnee = _lm(14);
-    final leftAnkle = _lm(15);
-    final rightAnkle = _lm(16);
+    return bestScore <= _maxPositionJump ? best : null;
+  }
 
-    // Map to fencing-relative skeleton
-    // For a 'left' fencer (facing right on screen):
-    //   front_wrist = right wrist (sword arm)
-    //   front_elbow = right elbow
-    //   front_shoulder = right shoulder
-    //   front hip/knee/ankle = LEFT (leading) leg
-    Offset? frontWrist, frontElbow, frontShoulder;
-    if (targetSide == 'left') {
-      frontWrist = rightWrist;
-      frontElbow = rightElbow;
-      frontShoulder = rightShoulder;
-    } else {
-      frontWrist = leftWrist;
-      frontElbow = leftElbow;
-      frontShoulder = leftShoulder;
+  double _positionScore(_PoseDetection detection, _BoundingBox reference) {
+    final dx = detection.bbox.centerX - reference.centerX;
+    final dy = detection.bbox.centerY - reference.centerY;
+    final diagonal = reference.diagonal.clamp(1e-6, double.infinity).toDouble();
+    final centerDistance = math.sqrt(dx * dx + dy * dy) / diagonal;
+    final areaRatio = detection.area /
+        reference.area.clamp(1e-6, double.infinity).toDouble();
+    return centerDistance + 0.25 * math.log(areaRatio).abs();
+  }
+
+  void _rememberTarget(_PoseDetection target) {
+    _lastKnownSkeleton = target.skeleton;
+    _lastKnownBBox = target.bbox;
+    _lockedFallbackBBox = target.bbox;
+    _missingFramesCount = 0;
+  }
+
+  _PoseDetection? _handleMissingTarget() {
+    final skeleton = _lastKnownSkeleton;
+    final bbox = _lastKnownBBox;
+    if (skeleton != null && bbox != null && _missingFramesCount < _maxMissingFrames) {
+      _missingFramesCount += 1;
+      return _PoseDetection(
+        skeleton: skeleton,
+        bbox: bbox,
+        confidence: 0.0,
+        sourceRank: -1,
+      );
     }
+    return null;
+  }
+}
 
-    // Build the skeleton map
-    final skelMap = <String, Offset>{};
-    void add(String key, Offset? v) {
-      if (v != null) skelMap[key] = v;
-    }
+class _PoseDetection {
+  final FencingSkeleton skeleton;
+  final _BoundingBox bbox;
+  final double confidence;
+  final int sourceRank;
 
-    add('nose', nose);
-    add('front_wrist', frontWrist);
-    add('front_elbow', frontElbow);
-    add('front_shoulder', frontShoulder);
-    add('left_hip', leftHip);
-    add('right_hip', rightHip);
-    add('left_knee', leftKnee);
-    add('right_knee', rightKnee);
-    add('left_ankle', leftAnkle);
-    add('right_ankle', rightAnkle);
-    // Extra joints for drawing
-    add('left_shoulder', leftShoulder);
-    add('right_shoulder', rightShoulder);
-    add('left_elbow', leftElbow);
-    add('right_elbow', rightElbow);
-    add('left_wrist', leftWrist);
-    add('right_wrist', rightWrist);
+  const _PoseDetection({
+    required this.skeleton,
+    required this.bbox,
+    required this.confidence,
+    required this.sourceRank,
+  });
 
-    // Need at least hips to be useful
-    if (leftHip == null && rightHip == null) return null;
+  double get area => bbox.area;
+}
 
-    // Compute nose→front_ankle scale for normalization
-    Offset? frontAnkle =
-        targetSide == 'left' ? leftAnkle : rightAnkle;
-    double? scale;
-    if (nose != null && frontAnkle != null) {
-      scale = (frontAnkle.dy - nose.dy).abs();
-      if (scale < 1e-6) scale = null;
-    }
+class _BoundingBox {
+  final double x1;
+  final double y1;
+  final double x2;
+  final double y2;
 
-    return FencingSkeleton(
-      joints: skelMap,
-      nose: nose,
-      scale: scale,
-      imageWidth: imgH,  // Rotated width (1.0)
-      imageHeight: imgW, // Rotated height (1.0)
+  const _BoundingBox({
+    required this.x1,
+    required this.y1,
+    required this.x2,
+    required this.y2,
+  });
+
+  factory _BoundingBox.fromPoints(Iterable<Offset> points) {
+    final xs = points.map((p) => p.dx).toList();
+    final ys = points.map((p) => p.dy).toList();
+    return _BoundingBox(
+      x1: xs.reduce(math.min),
+      y1: ys.reduce(math.min),
+      x2: xs.reduce(math.max),
+      y2: ys.reduce(math.max),
     );
   }
+
+  static _BoundingBox? fromSkeleton(FencingSkeleton skeleton) {
+    if (skeleton.joints.isEmpty) return null;
+    return _BoundingBox.fromPoints(skeleton.joints.values);
+  }
+
+  double get width => (x2 - x1).clamp(0.0, double.infinity).toDouble();
+  double get height => (y2 - y1).clamp(0.0, double.infinity).toDouble();
+  double get area => width * height;
+  double get centerX => (x1 + x2) / 2.0;
+  double get centerY => (y1 + y2) / 2.0;
+  double get diagonal => math.sqrt(width * width + height * height);
 }
 
 class _Keypoint {
@@ -188,7 +384,7 @@ class _Keypoint {
   final double y;
   final double confidence;
 
-  _Keypoint({
+  const _Keypoint({
     required this.x,
     required this.y,
     required this.confidence,

@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -171,8 +170,9 @@ class _MainScreenState extends State<MainScreen>
 
   // TTS
   late FlutterTts _tts;
+  bool _ttsReady = false;
   bool _isSpeaking = false;
-  DateTime _lastSpokenTime = DateTime.now();
+  DateTime _lastSpokenTime = DateTime.fromMillisecondsSinceEpoch(0);
 
   // Flash animation
   late AnimationController _flashController;
@@ -221,57 +221,75 @@ class _MainScreenState extends State<MainScreen>
   Future<void> _initTts() async {
     _tts = FlutterTts();
 
-    if (Platform.isIOS) {
-      // Force voice output to play even if the physical silent switch is enabled
-      await _tts.setIosAudioCategory(
-        IosTextToSpeechAudioCategory.playback,
-        [
-          IosTextToSpeechAudioCategoryOptions.defaultToSpeaker,
-          IosTextToSpeechAudioCategoryOptions.mixWithOthers,
-        ],
-        IosTextToSpeechAudioMode.defaultMode,
-      );
-    }
-
-    // Fallback chain for voice languages
-    bool hasZhTw = false;
     try {
-      hasZhTw = await _tts.isLanguageAvailable('zh-TW');
-    } catch (_) {}
-
-    if (hasZhTw) {
-      await _tts.setLanguage('zh-TW');
-    } else {
-      bool hasZhCn = false;
-      try {
-        hasZhCn = await _tts.isLanguageAvailable('zh-CN');
-      } catch (_) {}
-      if (hasZhCn) {
-        await _tts.setLanguage('zh-CN');
-      } else {
-        await _tts.setLanguage('en-US');
+      if (Platform.isIOS) {
+        // Keep spoken cues audible even when the iPhone silent switch is on.
+        await _tts.setIosAudioCategory(
+          IosTextToSpeechAudioCategory.playback,
+          [
+            IosTextToSpeechAudioCategoryOptions.defaultToSpeaker,
+          ],
+          IosTextToSpeechAudioMode.defaultMode,
+        );
       }
-    }
 
-    await _tts.setSpeechRate(0.5);
-    await _tts.setVolume(1.0);
-    _tts.setStartHandler(() => _isSpeaking = true);
-    _tts.setCompletionHandler(() => _isSpeaking = false);
-    _tts.setCancelHandler(() => _isSpeaking = false);
+      bool hasZhTw = false;
+      try {
+        hasZhTw = await _tts.isLanguageAvailable('zh-TW');
+      } catch (_) {}
+
+      if (hasZhTw) {
+        await _tts.setLanguage('zh-TW');
+      } else {
+        bool hasZhCn = false;
+        try {
+          hasZhCn = await _tts.isLanguageAvailable('zh-CN');
+        } catch (_) {}
+        if (hasZhCn) {
+          await _tts.setLanguage('zh-CN');
+        } else {
+          await _tts.setLanguage('en-US');
+        }
+      }
+
+      await _tts.setSpeechRate(0.5);
+      await _tts.setVolume(1.0);
+      await _tts.awaitSpeakCompletion(false);
+      _tts.setStartHandler(() => _isSpeaking = true);
+      _tts.setCompletionHandler(() => _isSpeaking = false);
+      _tts.setCancelHandler(() => _isSpeaking = false);
+      _tts.setErrorHandler((_) => _isSpeaking = false);
+      _ttsReady = true;
+    } catch (e) {
+      debugPrint('TTS init error: $e');
+      _ttsReady = false;
+    }
   }
 
   Future<void> _speak(String text) async {
-    if (!_voiceEnabled || _isSpeaking) return;
+    final cue = text.trim();
+    if (!_voiceEnabled || !_ttsReady || _isSpeaking || cue.isEmpty) return;
     final now = DateTime.now();
     if (now.difference(_lastSpokenTime).inSeconds < 4) return;
     _lastSpokenTime = now;
-    await _tts.speak(text);
+    _isSpeaking = true;
+    try {
+      await _tts.speak(cue);
+    } catch (e) {
+      debugPrint('TTS speak error: $e');
+      _isSpeaking = false;
+    }
   }
 
   // ── Camera ─────────────────────────────────────────────────────────────────
 
   Future<void> _initCamera() async {
     if (_cameras.isEmpty) return;
+    final cameraPermission = await Permission.camera.request();
+    if (!cameraPermission.isGranted) {
+      debugPrint('Camera permission denied');
+      return;
+    }
 
     // Prefer selected lens direction
     CameraDescription cam = _cameras.first;
@@ -292,6 +310,7 @@ class _MainScreenState extends State<MainScreen>
     try {
       await _cameraController!.initialize();
       if (!mounted) return;
+      _resetLiveBuffers();
       setState(() => _isCameraInitialized = true);
       _cameraController!.startImageStream(_onCameraFrame);
     } catch (e) {
@@ -336,6 +355,7 @@ class _MainScreenState extends State<MainScreen>
     try {
       await _cameraController!.initialize();
       if (!mounted) return;
+      _resetLiveBuffers();
       setState(() => _isCameraInitialized = true);
       _cameraController!.startImageStream(_onCameraFrame);
     } catch (e) {
@@ -511,99 +531,27 @@ class _MainScreenState extends State<MainScreen>
     return input;
   }
 
-  // ── Convert CameraImage → InputImage ───────────────────────────────────────
-
-  InputImage? _cameraImageToInputImage(CameraImage image) {
-    final camera = _cameraController?.description;
-    if (camera == null) return null;
-
-    final rotation = _rotationFromCamera(camera.sensorOrientation);
-
-    // iOS uses bgra8888
-    if (image.format.group == ImageFormatGroup.bgra8888) {
-      return InputImage.fromBytes(
-        bytes: image.planes[0].bytes,
-        metadata: InputImageMetadata(
-          size: Size(image.width.toDouble(), image.height.toDouble()),
-          rotation: rotation,
-          format: InputImageFormat.bgra8888,
-          bytesPerRow: image.planes[0].bytesPerRow,
-        ),
-      );
-    }
-
-    // Android: yuv_420_888 / nv21
-    final nv21Bytes = _yuv420toNV21(image);
-    if (nv21Bytes == null) return null;
-    return InputImage.fromBytes(
-      bytes: nv21Bytes,
-      metadata: InputImageMetadata(
-        size: Size(image.width.toDouble(), image.height.toDouble()),
-        rotation: rotation,
-        format: InputImageFormat.nv21,
-        bytesPerRow: image.width,
-      ),
-    );
-  }
-
-  InputImageRotation _rotationFromCamera(int sensorOrientation) {
-    switch (sensorOrientation) {
-      case 0:
-        return InputImageRotation.rotation0deg;
-      case 90:
-        return InputImageRotation.rotation90deg;
-      case 180:
-        return InputImageRotation.rotation180deg;
-      case 270:
-        return InputImageRotation.rotation270deg;
-      default:
-        return InputImageRotation.rotation0deg;
-    }
-  }
-
-  Uint8List? _yuv420toNV21(CameraImage image) {
-    try {
-      final yPlane = image.planes[0];
-      final uPlane = image.planes[1];
-      final vPlane = image.planes[2];
-      final int w = image.width;
-      final int h = image.height;
-      final nv21 = Uint8List(w * h + 2 * (w ~/ 2) * (h ~/ 2));
-      // Copy Y plane row by row
-      for (int i = 0; i < h; i++) {
-        nv21.setRange(
-            i * w, (i + 1) * w, yPlane.bytes, i * yPlane.bytesPerRow);
-      }
-      // Interleave V, U (NV21 = Y + VU interleaved)
-      final vPixelStride = vPlane.bytesPerPixel ?? 1;
-      final uPixelStride = uPlane.bytesPerPixel ?? 1;
-      int offset = w * h;
-      for (int i = 0; i < h ~/ 2; i++) {
-        for (int j = 0; j < w ~/ 2; j++) {
-          nv21[offset++] =
-              vPlane.bytes[i * vPlane.bytesPerRow + j * vPixelStride];
-          nv21[offset++] =
-              uPlane.bytes[i * uPlane.bytesPerRow + j * uPixelStride];
-        }
-      }
-      return nv21;
-    } catch (_) {
-      return null;
-    }
-  }
-
   // ── Settings helpers ────────────────────────────────────────────────────────
+
+  void _resetLiveBuffers() {
+    _yoloPoseService.resetTracking();
+    _refNose = null;
+    _refScale = null;
+    _classifierBuffer.clear();
+    _skeletonBuffer.clear();
+    _activeErrors = [];
+    _currentSkeleton = null;
+    _currentAction = 'Idle';
+    _actionConfidence = 0.0;
+    _coachState = 'IDLE';
+  }
 
   void _rebuildHeuristics() {
     _heuristics = HeuristicsEngine(
       targetSide: _targetSide,
       trainingMode: _trainingMode,
     );
-    // Reset normalization reference when side changes
-    _refNose = null;
-    _refScale = null;
-    _classifierBuffer.clear();
-    _skeletonBuffer.clear();
+    _resetLiveBuffers();
   }
 
   // ──────────────────────────────────────────────────────────────────────────
