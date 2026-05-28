@@ -11,6 +11,7 @@ import 'heuristics/fencenet_channel.dart';
 import 'pose/pose_service.dart';
 import 'pose/pose_painter.dart';
 import 'pose/yolo_pose_service.dart';
+import 'pose/activity_gatekeeper.dart';
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -165,6 +166,7 @@ class _MainScreenState extends State<MainScreen>
   String _currentAction = 'Idle';
   double _actionConfidence = 0.0;
   List<String> _activeErrors = [];
+  late ActivityGatekeeper _gatekeeper;
   String _coachState = 'IDLE'; // 'ACTIVE' | 'IDLE'
   int _frameCount = 0;
 
@@ -189,6 +191,7 @@ class _MainScreenState extends State<MainScreen>
       targetSide: _targetSide,
       trainingMode: _trainingMode,
     );
+    _gatekeeper = ActivityGatekeeper(fps: 30);
 
     _flashController = AnimationController(
       duration: const Duration(milliseconds: 600),
@@ -430,17 +433,18 @@ class _MainScreenState extends State<MainScreen>
         }
 
         // Update coachState
-        final hasPelvis = skeleton.joints.containsKey('left_hip') ||
-            skeleton.joints.containsKey('right_hip');
-        final newState = hasPelvis ? 'ACTIVE' : 'IDLE';
+        final isActive = _gatekeeper.update(_currentSkeleton, _targetSide);
+        final newState = isActive ? 'ACTIVE' : 'IDLE';
         if (newState != _coachState) {
           setState(() => _coachState = newState);
         }
       } else {
-        if (_coachState != 'IDLE') {
+        final isActive = _gatekeeper.update(null, _targetSide);
+        final newState = isActive ? 'ACTIVE' : 'IDLE';
+        if (newState != _coachState) {
           setState(() {
-            _coachState = 'IDLE';
-            _currentSkeleton = null;
+            _coachState = newState;
+            if (newState == 'IDLE') _currentSkeleton = null;
           });
         }
       }
@@ -463,8 +467,6 @@ class _MainScreenState extends State<MainScreen>
         });
       }
     }
-
-    if (action == 'Idle') return;
 
     // ── Heuristic evaluation ─────────────────────────────────────────────────
     final errors = _heuristics.evaluateWindow(
@@ -493,6 +495,10 @@ class _MainScreenState extends State<MainScreen>
     // Update metrics map
     for (final key in kErrorLabels.keys) {
       _heuristicTriggered[key] = filtered.contains(key);
+    }
+
+    if (filtered.isNotEmpty) {
+      debugPrint('Triggered heuristics: $filtered');
     }
 
     if (mounted) {
@@ -544,6 +550,7 @@ class _MainScreenState extends State<MainScreen>
     _currentAction = 'Idle';
     _actionConfidence = 0.0;
     _coachState = 'IDLE';
+    _gatekeeper.reset();
   }
 
   void _rebuildHeuristics() {
@@ -824,14 +831,13 @@ class _MainScreenState extends State<MainScreen>
   }
 
   Widget _buildFeedbackPanel() {
+    Widget content;
     if (_activeErrors.isEmpty) {
-      return Container(
-        color: const Color(0xFF0D0D1A),
-        child: Center(
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
+      content = Center(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
               Container(
                 width: 56,
                 height: 56,
@@ -855,18 +861,15 @@ class _MainScreenState extends State<MainScreen>
               const SizedBox(height: 4),
               Text(
                 _coachState == 'IDLE' ? '等待偵測到擊劍手...' : '繼續保持！',
-                style: const TextStyle(color: Colors.white30, fontSize: 12),
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+                textAlign: TextAlign.center,
               ),
             ],
           ),
         ),
-      ),
-    );
-  }
-
-    return Container(
-      color: const Color(0xFF0D0D1A),
-      child: ListView.builder(
+      );
+    } else {
+      content = ListView.builder(
         padding: const EdgeInsets.all(12),
         itemCount: _activeErrors.length,
         itemBuilder: (ctx, idx) {
@@ -934,6 +937,30 @@ class _MainScreenState extends State<MainScreen>
             ),
           );
         },
+      );
+    }
+
+    return Container(
+      color: const Color(0xFF0D0D1A),
+      child: Column(
+        children: [
+          Expanded(child: content),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(8),
+            color: Colors.black.withAlpha(100),
+            child: Text(
+              '[Debug: ${_gatekeeper.state}]\n'
+              'Knee Angle: ${_gatekeeper.lastReasons['knee_angle']?.toStringAsFixed(1) ?? 'N/A'} (Needs < 176)\n'
+              'Turned Back: ${_gatekeeper.lastReasons['turned_back']}\n'
+              'Moving: ${_gatekeeper.lastReasons['moving']}\n'
+              'Step Ratio: ${_heuristics.lastStepRatio?.toStringAsFixed(2) ?? 'N/A'} | '
+              'Step Width: ${_heuristics.lastStepWidth?.toStringAsFixed(3) ?? 'N/A'}',
+              style: const TextStyle(color: Colors.white54, fontSize: 10),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ],
       ),
     );
   }
