@@ -3,6 +3,7 @@ package com.aifencingcoach
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import androidx.activity.ComponentActivity
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,7 +32,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -46,6 +47,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -64,6 +66,7 @@ import com.aifencingcoach.runtime.CoachFrameState
 import com.aifencingcoach.runtime.FeedbackCue
 import com.aifencingcoach.runtime.LiveCoachPipeline
 import com.aifencingcoach.runtime.PoseBackendKind
+import com.aifencingcoach.runtime.PostgameVideoAnalyzer
 import com.aifencingcoach.runtime.PracticeReport
 import com.aifencingcoach.runtime.Skeleton
 import com.aifencingcoach.runtime.TargetSide
@@ -71,7 +74,7 @@ import com.aifencingcoach.runtime.TrainingMode
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private enum class AppScreen {
     HOME,
@@ -214,10 +217,6 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             targetSide = targetSide,
             voiceEnabled = voiceEnabled,
             userSettings = userSettings,
-            onTrainingMode = { trainingMode = it },
-            onPoseBackend = { poseBackend = it },
-            onTargetSide = { targetSide = it },
-            onVoiceEnabled = { voiceEnabled = it },
             onSettings = { appScreen = AppScreen.SETTINGS },
             onBack = {
                 saveSettings()
@@ -232,8 +231,10 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             userSettings = userSettings,
             trainingMode = trainingMode,
             targetSide = targetSide,
+            poseBackend = poseBackend,
             lastPracticeReport = lastPracticeReport,
             onSettings = { appScreen = AppScreen.SETTINGS },
+            onPracticeReport = { report -> lastPracticeReport = report },
             onBack = {
                 saveSettings()
                 appScreen = AppScreen.HOME
@@ -266,9 +267,6 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             poseBackend = poseBackend,
             voiceEnabled = voiceEnabled,
             userSettings = userSettings,
-            onTargetSide = { targetSide = it },
-            onTrainingMode = { trainingMode = it },
-            onPoseBackend = { poseBackend = it },
             onVoiceEnabled = {
                 voiceEnabled = it
                 prefs.edit().putBoolean("voice_enabled", it).apply()
@@ -302,7 +300,7 @@ private fun HomeScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(PageBackground)
-            .padding(22.dp),
+            .padding(ScreenPadding),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
         ScreenHeader(
@@ -341,7 +339,7 @@ private fun HomeScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(PanelColor, RoundedCornerShape(8.dp))
-                .padding(12.dp),
+                .padding(10.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -366,7 +364,7 @@ private fun HomeOption(
 ) {
     Button(
         onClick = onClick,
-        modifier = modifier.height(190.dp),
+        modifier = modifier.height(136.dp),
         shape = RoundedCornerShape(8.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = PanelColor,
@@ -379,11 +377,11 @@ private fun HomeOption(
             horizontalAlignment = Alignment.Start
         ) {
             Column {
-                Text(title, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                Text(title, fontSize = 19.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
-                Text(summary, color = MutedText, fontSize = 13.sp)
+                Text(summary, color = MutedText, fontSize = BodyTextSize)
             }
-            Text("Open", color = accent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text("Open", color = accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -396,10 +394,6 @@ private fun RealtimeSetupScreen(
     targetSide: TargetSide,
     voiceEnabled: Boolean,
     userSettings: UserSettings,
-    onTrainingMode: (TrainingMode) -> Unit,
-    onPoseBackend: (PoseBackendKind) -> Unit,
-    onTargetSide: (TargetSide) -> Unit,
-    onVoiceEnabled: (Boolean) -> Unit,
     onSettings: () -> Unit,
     onBack: () -> Unit,
     onStart: () -> Unit
@@ -408,53 +402,43 @@ private fun RealtimeSetupScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(PageBackground)
-            .padding(22.dp),
+            .padding(ScreenPadding),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
         ScreenHeader(
             title = "Realtime",
-            subtitle = "${userSettings.name.ifBlank { "Fencer" }}  |  ${trainingMode.label}  |  ${poseBackend.label}",
+            subtitle = "${userSettings.name.ifBlank { "Fencer" }} | ${trainingMode.label} | ${poseBackend.label} | target ${targetSide.label}",
             onBack = onBack
         )
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            MenuPanel("Training", Modifier.weight(1f)) {
-                SegmentedGroup(
-                    labels = TrainingMode.entries.map { it.label },
-                    selected = trainingMode.label,
-                    onSelected = { onTrainingMode(TrainingMode.fromLabel(it)) }
-                )
-                Spacer(Modifier.height(10.dp))
-                Text(modeSummary(trainingMode), color = MutedText, fontSize = 13.sp)
-            }
-            MenuPanel("Pose Model", Modifier.weight(1f)) {
-                SegmentedGroup(
-                    labels = PoseBackendKind.entries.map { it.label },
-                    selected = poseBackend.label,
-                    onSelected = { onPoseBackend(PoseBackendKind.fromLabel(it)) }
-                )
-                Spacer(Modifier.height(10.dp))
-                Text(modelSummary(poseBackend), color = MutedText, fontSize = 13.sp)
-            }
-            MenuPanel("Session", Modifier.weight(1f)) {
+            MenuPanel("Current Setup", Modifier.weight(1f)) {
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    SegmentedGroup(
-                        labels = listOf("left", "right"),
-                        selected = targetSide.label,
-                        onSelected = { onTargetSide(TargetSide.fromLabel(it)) }
-                    )
-                    HudButton(
-                        text = if (voiceEnabled) "Voice on" else "Voice off",
-                        selected = voiceEnabled,
-                        onClick = { onVoiceEnabled(!voiceEnabled) }
-                    )
+                    StatusPill(trainingMode.label, AccentGreen)
+                    StatusPill(poseBackend.label, AccentGreen)
+                    StatusPill("target ${targetSide.label}", AccentGreen)
+                    StatusPill(if (voiceEnabled) "voice on" else "voice off", if (voiceEnabled) AccentGreen else MutedText)
                 }
+                Spacer(Modifier.height(8.dp))
+                Text(settingsSummary(userSettings), color = MutedText, fontSize = BodyTextSize)
+            }
+            MenuPanel("Feedback", Modifier.weight(1f)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    StatusPill("${userSettings.emphasizedErrors.size} emphasized", AccentGold)
+                    StatusPill("${userSettings.mutedErrors.size} muted", AccentCoral)
+                    StatusPill(if (userSettings.onlyFocusedErrors) "focused only" else "all cues", MutedText)
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(modeSummary(trainingMode), color = MutedText, fontSize = BodyTextSize)
             }
         }
 
@@ -479,7 +463,7 @@ private fun RealtimeSetupScreen(
             Text(
                 text = "${userSettings.emphasizedErrors.size} emphasized  |  ${userSettings.mutedErrors.size} muted  |  ${if (userSettings.onlyFocusedErrors) "focused only" else "all cues"}",
                 color = MutedText,
-                fontSize = 13.sp
+                fontSize = BodyTextSize
             )
         }
 
@@ -487,7 +471,7 @@ private fun RealtimeSetupScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(PanelColor, RoundedCornerShape(8.dp))
-                .padding(12.dp),
+                .padding(10.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -503,46 +487,35 @@ private fun PostgameScreen(
     userSettings: UserSettings,
     trainingMode: TrainingMode,
     targetSide: TargetSide,
+    poseBackend: PoseBackendKind,
     lastPracticeReport: PracticeReport?,
     onSettings: () -> Unit,
+    onPracticeReport: (PracticeReport) -> Unit,
     onBack: () -> Unit,
     onStartRealtime: () -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var selectedVideoUri by remember { mutableStateOf<Uri?>(null) }
     var selectedVideo by remember { mutableStateOf<String?>(null) }
     var analysisStatus by remember { mutableStateOf("Ready") }
     var analysisRunning by remember { mutableStateOf(false) }
     var analysisProgress by remember { mutableStateOf(0f) }
     val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        selectedVideoUri = uri
         selectedVideo = uri?.lastPathSegment ?: uri?.toString()
         analysisRunning = false
         analysisProgress = 0f
         analysisStatus = if (uri == null) "No video selected" else "Video selected"
     }
 
-    LaunchedEffect(analysisRunning) {
-        if (!analysisRunning) return@LaunchedEffect
-        analysisProgress = 0f
-        analysisStatus = "Preparing video"
-        while (analysisRunning && analysisProgress < 1f) {
-            delay(180)
-            analysisProgress = (analysisProgress + 0.07f).coerceAtMost(1f)
-            analysisStatus = when {
-                analysisProgress < 0.25f -> "Reading clip"
-                analysisProgress < 0.55f -> "Finding poses"
-                analysisProgress < 0.85f -> "Scoring actions"
-                analysisProgress < 1f -> "Building summary"
-                else -> "Analysis ready"
-            }
-        }
-        analysisRunning = false
-    }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(PageBackground)
-            .padding(22.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+            .verticalScroll(rememberScrollState())
+            .padding(ScreenPadding),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         ScreenHeader(
             title = "Postgame",
@@ -552,7 +525,7 @@ private fun PostgameScreen(
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             MenuPanel("Analysis Defaults", Modifier.weight(1f)) {
                 FlowRow(
@@ -568,7 +541,7 @@ private fun PostgameScreen(
                 Text(
                     text = "Focus ${userSettings.emphasizedErrors.size}  |  Mute ${userSettings.mutedErrors.size}  |  ${if (userSettings.onlyFocusedErrors) "focused only" else "all errors"}",
                     color = MutedText,
-                    fontSize = 13.sp
+                    fontSize = BodyTextSize
                 )
                 Spacer(Modifier.height(10.dp))
                 HudButton(text = "Edit Settings", selected = false, onClick = onSettings)
@@ -577,7 +550,7 @@ private fun PostgameScreen(
                 Text(
                     text = selectedVideo ?: "No clip selected",
                     color = if (selectedVideo == null) MutedText else Color.White,
-                    fontSize = 13.sp
+                    fontSize = BodyTextSize
                 )
                 Spacer(Modifier.height(10.dp))
                 FlowRow(
@@ -587,12 +560,35 @@ private fun PostgameScreen(
                     HudButton(text = "Choose Video", selected = false, onClick = { videoPicker.launch("video/*") })
                     HudButton(
                         text = if (analysisRunning) "Processing" else "Run Analysis",
-                        selected = selectedVideo != null,
+                        selected = selectedVideoUri != null,
                         onClick = {
-                            if (selectedVideo == null) {
+                            val uri = selectedVideoUri
+                            if (uri == null) {
                                 analysisStatus = "Choose a clip first"
                             } else if (!analysisRunning) {
                                 analysisRunning = true
+                                analysisProgress = 0f
+                                scope.launch {
+                                    runCatching {
+                                        PostgameVideoAnalyzer(context).analyze(
+                                            uri = uri,
+                                            targetSide = targetSide,
+                                            trainingMode = trainingMode,
+                                            poseBackend = poseBackend,
+                                            onProgress = { progress ->
+                                                analysisProgress = progress.fraction
+                                                analysisStatus = progress.status
+                                            }
+                                        )
+                                    }.onSuccess { report ->
+                                        onPracticeReport(report)
+                                        analysisProgress = 1f
+                                        analysisStatus = "Analysis ready"
+                                    }.onFailure { error ->
+                                        analysisStatus = "Analysis failed: ${error.message ?: "unknown error"}"
+                                    }
+                                    analysisRunning = false
+                                }
                             }
                         }
                     )
@@ -601,7 +597,7 @@ private fun PostgameScreen(
                 Text(
                     text = analysisStatus,
                     color = if (analysisRunning) AccentGreen else MutedText,
-                    fontSize = 13.sp,
+                    fontSize = BodyTextSize,
                     fontWeight = FontWeight.SemiBold
                 )
                 Spacer(Modifier.height(8.dp))
@@ -616,7 +612,7 @@ private fun PostgameScreen(
 
         MenuPanel("Latest Session", Modifier.fillMaxWidth()) {
             if (lastPracticeReport == null) {
-                Text("No practice report yet", color = MutedText, fontSize = 14.sp)
+                Text("No practice report yet", color = MutedText, fontSize = BodyTextSize)
                 Spacer(Modifier.height(10.dp))
                 HudButton(text = "Start Realtime", selected = true, onClick = onStartRealtime)
             } else {
@@ -646,8 +642,8 @@ private fun UserSettingsScreen(
             .fillMaxSize()
             .background(PageBackground)
             .verticalScroll(rememberScrollState())
-            .padding(22.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+            .padding(ScreenPadding),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         ScreenHeader(
             title = "User Settings",
@@ -769,12 +765,12 @@ private fun MenuPanel(
     Column(
         modifier = modifier
             .background(PanelColor, RoundedCornerShape(8.dp))
-            .padding(14.dp)
+            .padding(10.dp)
     ) {
         Text(
             text = title,
             color = Color.White,
-            fontSize = 18.sp,
+            fontSize = 15.sp,
             fontWeight = FontWeight.Bold
         )
         Spacer(Modifier.height(10.dp))
@@ -794,9 +790,9 @@ private fun ScreenHeader(
         verticalAlignment = Alignment.Top
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            Text(title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
-            Text(subtitle, color = AccentGreen, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         }
         if (onBack != null) {
             HudButton(text = "Home", selected = false, onClick = onBack)
@@ -809,7 +805,7 @@ private fun StatusPill(text: String, color: Color) {
     Text(
         text = text,
         color = color,
-        fontSize = 13.sp,
+        fontSize = 11.sp,
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier
             .background(Color(0xFF222B31), RoundedCornerShape(6.dp))
@@ -820,7 +816,7 @@ private fun StatusPill(text: String, color: Color) {
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 private fun PracticeReportSummary(report: PracticeReport) {
-    Text(report.primaryTakeaway, color = AccentGold, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+    Text(report.primaryTakeaway, color = AccentGold, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
     Spacer(Modifier.height(12.dp))
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -853,7 +849,7 @@ private fun CheckboxLine(
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Checkbox(checked = checked, onCheckedChange = onCheckedChange)
-        Text(label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text(label, color = Color.White, fontSize = BodyTextSize, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -873,7 +869,7 @@ private fun ErrorPreferenceRow(
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(option.label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(option.label, color = Color.White, fontSize = BodyTextSize, fontWeight = FontWeight.SemiBold)
             Text(option.key, color = MutedText, fontSize = 11.sp)
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -894,9 +890,6 @@ private fun CoachScreen(
     poseBackend: PoseBackendKind,
     voiceEnabled: Boolean,
     userSettings: UserSettings,
-    onTargetSide: (TargetSide) -> Unit,
-    onTrainingMode: (TrainingMode) -> Unit,
-    onPoseBackend: (PoseBackendKind) -> Unit,
     onVoiceEnabled: (Boolean) -> Unit,
     onBackToMenu: () -> Unit,
     onPracticeReport: (PracticeReport) -> Unit,
@@ -915,47 +908,52 @@ private fun CoachScreen(
         onDispose { pipeline.close() }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        val isReviewing = reviewReport != null
-        val displayedState = when {
-            isReviewing -> frameState.copy(state = "REVIEW", cue = "Practice complete")
-            analysisPaused -> frameState.copy(state = "PAUSED", cue = "Analysis paused")
-            else -> frameState
-        }
-        CameraPreview(
-            pipeline = pipeline,
-            analysisPaused = analysisPaused || isReviewing,
-            onFrameState = { state, cue ->
-                frameState = state
-                if (voiceEnabled && cue != null) onSpeak(cue.message)
+    val isReviewing = reviewReport != null
+    val displayedState = when {
+        isReviewing -> frameState.copy(state = "REVIEW", cue = "Practice complete")
+        analysisPaused -> frameState.copy(state = "PAUSED", cue = "Analysis paused")
+        else -> frameState
+    }
+
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) {
+                CameraPreview(
+                    pipeline = pipeline,
+                    analysisPaused = analysisPaused || isReviewing,
+                    onFrameState = { state, cue ->
+                        frameState = state
+                        if (voiceEnabled && cue != null) onSpeak(cue.message)
+                    }
+                )
+                SkeletonOverlay(state = displayedState)
             }
-        )
-        SkeletonOverlay(state = displayedState)
-        HudPanel(
-            state = displayedState,
-            poseBackend = poseBackend,
-            targetSide = targetSide,
-            trainingMode = trainingMode,
-            voiceEnabled = voiceEnabled,
-            analysisPaused = analysisPaused,
-            userSettings = userSettings,
-            onPoseBackend = onPoseBackend,
-            onTargetSide = onTargetSide,
-            onTrainingMode = onTrainingMode,
-            onVoiceEnabled = onVoiceEnabled,
-            onAnalysisPaused = { analysisPaused = it },
-            onFinishPractice = {
-                val report = pipeline.practiceReport()
-                reviewReport = report
-                onPracticeReport(report)
-                analysisPaused = true
-            },
-            onReset = {
-                pipeline.reset()
-                resetToken += 1
-            },
-            onBackToMenu = onBackToMenu
-        )
+            HudPanel(
+                state = displayedState,
+                targetSide = targetSide,
+                trainingMode = trainingMode,
+                voiceEnabled = voiceEnabled,
+                analysisPaused = analysisPaused,
+                userSettings = userSettings,
+                onVoiceEnabled = onVoiceEnabled,
+                onAnalysisPaused = { analysisPaused = it },
+                onFinishPractice = {
+                    val report = pipeline.practiceReport()
+                    reviewReport = report
+                    onPracticeReport(report)
+                    analysisPaused = true
+                },
+                onReset = {
+                    pipeline.reset()
+                    resetToken += 1
+                },
+                onBackToMenu = onBackToMenu
+            )
+        }
         reviewReport?.let { report ->
             PostPracticeReview(
                 report = report,
@@ -1070,143 +1068,86 @@ private fun SkeletonOverlay(state: CoachFrameState) {
 @OptIn(ExperimentalLayoutApi::class)
 private fun HudPanel(
     state: CoachFrameState,
-    poseBackend: PoseBackendKind,
     targetSide: TargetSide,
     trainingMode: TrainingMode,
     voiceEnabled: Boolean,
     analysisPaused: Boolean,
     userSettings: UserSettings,
-    onPoseBackend: (PoseBackendKind) -> Unit,
-    onTargetSide: (TargetSide) -> Unit,
-    onTrainingMode: (TrainingMode) -> Unit,
     onVoiceEnabled: (Boolean) -> Unit,
     onAnalysisPaused: (Boolean) -> Unit,
     onFinishPractice: () -> Unit,
     onReset: () -> Unit,
     onBackToMenu: () -> Unit
 ) {
-    Column(
+    Row(
         modifier = Modifier
-            .fillMaxSize()
-            .padding(18.dp),
-        verticalArrangement = Arrangement.SpaceBetween
+            .fillMaxWidth()
+            .background(Color(0xF0101418))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Top
-        ) {
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .background(Color(0xAA101418), RoundedCornerShape(8.dp))
-                    .padding(16.dp)
-            ) {
+        Column(modifier = Modifier.weight(1.25f)) {
+            Text(
+                text = state.cue.ifBlank { if (state.ready) "No active error" else "Model assets missing" },
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "${state.state} | ${state.action} ${(state.confidence * 100f).toInt()}% | ${state.poseBackend.label}",
+                color = AccentGreen,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            if (state.tracking.warmupFramesRemaining > 0 && state.state == "ACTIVE") {
                 Text(
-                    text = state.cue.ifBlank { if (state.ready) "Find stance" else "Model assets missing" },
-                    color = Color.White,
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.Bold
+                    text = "warmup ${FenceNetWarmup - state.tracking.warmupFramesRemaining}/$FenceNetWarmup",
+                    color = MutedText,
+                    fontSize = 11.sp
                 )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = "${state.poseBackend.label}  |  ${state.state}  |  ${state.action} ${(state.confidence * 100f).toInt()}%",
-                    color = Color(0xFFD7FF5F),
-                    fontSize = 16.sp
-                )
-                Text(
-                    text = "${userSettings.name.ifBlank { "Fencer" }}  |  ${userSettings.handedness}  |  ${userSettings.heightCm.ifBlank { "180" }}cm",
-                    color = Color(0xFFB6C2CC),
-                    fontSize = 13.sp
-                )
-                if (state.tracking.warmupFramesRemaining > 0 && state.state == "ACTIVE") {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = "warmup ${FenceNetWarmup - state.tracking.warmupFramesRemaining}/$FenceNetWarmup",
-                        color = Color(0xFFB6C2CC),
-                        fontSize = 13.sp
-                    )
-                }
-                CueStack(state = state)
             }
+            CueStack(state = state)
+        }
 
-            Column(
-                modifier = Modifier
-                    .widthIn(min = 160.dp, max = 260.dp)
-                    .background(Color(0xAA101418), RoundedCornerShape(8.dp))
-                    .padding(12.dp),
-                horizontalAlignment = Alignment.End
-            ) {
-                Text(
-                    text = "pose ${state.metrics.poseMs}ms  model ${state.metrics.classifierMs}ms",
-                    color = Color.White,
-                    fontSize = 13.sp
-                )
-                Text(
-                    text = "total ${state.metrics.totalMs}ms  fps ${state.metrics.fps.toInt()}",
-                    color = Color(0xFFB6C2CC),
-                    fontSize = 13.sp
-                )
-                Text(
-                    text = "target ${state.tracking.lockState.uppercase(Locale.US)}  poses ${state.tracking.detectionCount}",
-                    color = if (state.tracking.targetInterpolated) Color(0xFFFFC857) else Color(0xFFD7FF5F),
-                    fontSize = 13.sp
-                )
-                Text(
-                    text = "buffer ${state.tracking.bufferFill}/$FenceNetWarmup  drops ${state.metrics.droppedFrames}",
-                    color = Color(0xFFB6C2CC),
-                    fontSize = 13.sp
-                )
-                Text(
-                    text = "session ${formatSeconds(state.session.elapsedSeconds)}  inf ${state.session.inferenceCount}  cues ${state.session.cueCount}",
-                    color = Color(0xFFB6C2CC),
-                    fontSize = 13.sp
-                )
-            }
+        Column(modifier = Modifier.weight(0.9f)) {
+            Text(
+                text = "${userSettings.name.ifBlank { "Fencer" }} | ${trainingMode.label} | target ${targetSide.label}",
+                color = Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = "pose ${state.metrics.poseMs}ms | model ${state.metrics.classifierMs}ms | total ${state.metrics.totalMs}ms | fps ${state.metrics.fps.toInt()}",
+                color = MutedText,
+                fontSize = 11.sp
+            )
+            Text(
+                text = "lock ${state.tracking.lockState} | buffer ${state.tracking.bufferFill}/$FenceNetWarmup | cues ${state.session.cueCount}",
+                color = if (state.tracking.targetInterpolated) AccentGold else MutedText,
+                fontSize = 11.sp
+            )
         }
 
         FlowRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color(0xAA101418), RoundedCornerShape(8.dp))
-                .padding(10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier.weight(0.95f),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            SegmentedGroup(
-                labels = TrainingMode.entries.map { it.label },
-                selected = trainingMode.label,
-                onSelected = { onTrainingMode(TrainingMode.fromLabel(it)) }
+            HudButton(
+                text = if (analysisPaused) "Resume" else "Pause",
+                selected = analysisPaused,
+                onClick = { onAnalysisPaused(!analysisPaused) }
             )
-            SegmentedGroup(
-                labels = PoseBackendKind.entries.map { it.label },
-                selected = poseBackend.label,
-                onSelected = { onPoseBackend(PoseBackendKind.fromLabel(it)) }
+            HudButton(
+                text = if (voiceEnabled) "Voice" else "Silent",
+                selected = voiceEnabled,
+                onClick = { onVoiceEnabled(!voiceEnabled) }
             )
-            SegmentedGroup(
-                labels = listOf("left", "right"),
-                selected = targetSide.label,
-                onSelected = { onTargetSide(TargetSide.fromLabel(it)) }
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                HudButton(
-                    text = if (analysisPaused) "Resume" else "Pause",
-                    selected = analysisPaused,
-                    onClick = { onAnalysisPaused(!analysisPaused) }
-                )
-                Spacer(Modifier.width(8.dp))
-                HudButton(
-                    text = if (voiceEnabled) "Voice on" else "Voice off",
-                    selected = voiceEnabled,
-                    onClick = { onVoiceEnabled(!voiceEnabled) }
-                )
-                Spacer(Modifier.width(8.dp))
-                HudButton(text = "Finish", selected = false, onClick = onFinishPractice)
-                Spacer(Modifier.width(8.dp))
-                HudButton(text = "Reset", selected = false, onClick = onReset)
-                Spacer(Modifier.width(8.dp))
-                HudButton(text = "Menu", selected = false, onClick = onBackToMenu)
-            }
+            HudButton(text = "Finish", selected = false, onClick = onFinishPractice)
+            HudButton(text = "Reset", selected = false, onClick = onReset)
+            HudButton(text = "Home", selected = false, onClick = onBackToMenu)
         }
     }
 }
@@ -1222,14 +1163,14 @@ private fun PostPracticeReview(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xDD05080B))
-            .padding(22.dp),
+            .padding(ScreenPadding),
         contentAlignment = Alignment.Center
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth(0.9f)
                 .background(Color(0xF0141A20), RoundedCornerShape(8.dp))
-                .padding(18.dp)
+                .padding(12.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1240,14 +1181,14 @@ private fun PostPracticeReview(
                     Text(
                         text = "Practice Review",
                         color = Color.White,
-                        fontSize = 26.sp,
+                        fontSize = 20.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
                         text = "${report.trainingMode.label}  |  ${report.poseBackend.label}  |  ${report.targetSide.label}",
                         color = Color(0xFFD7FF5F),
-                        fontSize = 14.sp
+                        fontSize = BodyTextSize
                     )
                 }
                 Row {
@@ -1261,7 +1202,7 @@ private fun PostPracticeReview(
             Text(
                 text = report.primaryTakeaway,
                 color = Color(0xFFFFE066),
-                fontSize = 20.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold
             )
             Spacer(Modifier.height(14.dp))
@@ -1286,12 +1227,12 @@ private fun PostPracticeReview(
                     Text(
                         text = "Actions",
                         color = Color.White,
-                        fontSize = 17.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                     Spacer(Modifier.height(8.dp))
                     if (report.actionCounts.isEmpty()) {
-                        Text("No model actions yet", color = Color(0xFFB6C2CC), fontSize = 13.sp)
+                        Text("No model actions yet", color = Color(0xFFB6C2CC), fontSize = BodyTextSize)
                     } else {
                         report.actionCounts.take(5).forEach { item ->
                             ActionRow(item.action, item.count, item.percent)
@@ -1302,18 +1243,18 @@ private fun PostPracticeReview(
                     Text(
                         text = "Cues",
                         color = Color.White,
-                        fontSize = 17.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                     Spacer(Modifier.height(8.dp))
                     if (report.topCues.isEmpty()) {
-                        Text("No repeated cues yet", color = Color(0xFFB6C2CC), fontSize = 13.sp)
+                        Text("No repeated cues yet", color = Color(0xFFB6C2CC), fontSize = BodyTextSize)
                     } else {
                         report.topCues.take(5).forEach { cue ->
                             Text(
                                 text = "${cue.count}x  ${cue.label}",
                                 color = Color(0xFFFFE066),
-                                fontSize = 14.sp,
+                                fontSize = BodyTextSize,
                                 fontWeight = FontWeight.SemiBold
                             )
                             Text(
@@ -1332,7 +1273,7 @@ private fun PostPracticeReview(
                 Text(
                     text = "Timeline",
                     color = Color.White,
-                    fontSize = 17.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold
                 )
                 Spacer(Modifier.height(6.dp))
@@ -1364,7 +1305,7 @@ private fun MetricBlock(label: String, value: String) {
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
         Text(text = label, color = Color(0xFF8DA2B2), fontSize = 11.sp)
-        Text(text = value, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Text(text = value, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -1375,8 +1316,8 @@ private fun ActionRow(action: String, count: Long, percent: Int) {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(text = action, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            Text(text = "$count  $percent%", color = Color(0xFFB6C2CC), fontSize = 13.sp)
+            Text(text = action, color = Color.White, fontSize = BodyTextSize, fontWeight = FontWeight.SemiBold)
+            Text(text = "$count  $percent%", color = Color(0xFFB6C2CC), fontSize = 11.sp)
         }
         Spacer(Modifier.height(4.dp))
         Box(
@@ -1442,12 +1383,13 @@ private fun HudButton(text: String, selected: Boolean, onClick: () -> Unit) {
     Button(
         onClick = onClick,
         shape = RoundedCornerShape(6.dp),
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 5.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = if (selected) Color(0xFFD7FF5F) else Color(0xFF263039),
             contentColor = if (selected) Color(0xFF101418) else Color.White
         )
     ) {
-        Text(text = text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text(text = text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -1525,6 +1467,8 @@ private val MutedText = Color(0xFFB6C2CC)
 private val AccentGreen = Color(0xFFD7FF5F)
 private val AccentGold = Color(0xFFFFD166)
 private val AccentCoral = Color(0xFFFF7D6E)
+private val ScreenPadding = 14.dp
+private val BodyTextSize = 12.sp
 
 private const val FenceNetWarmup = 28
 

@@ -1,6 +1,7 @@
 package com.aifencingcoach.runtime
 
 import android.content.Context
+import android.graphics.Bitmap
 import androidx.camera.core.ImageProxy
 import java.util.ArrayDeque
 import kotlin.system.measureNanoTime
@@ -82,12 +83,12 @@ class LiveCoachPipeline(
         lastMetrics = PipelineMetrics()
     }
 
-    fun practiceReport(): PracticeReport =
+    fun practiceReport(elapsedSecondsOverride: Long? = null): PracticeReport =
         buildPracticeReport(
             trainingMode = trainingMode,
             poseBackend = poseBackendKind,
             targetSide = targetSide,
-            elapsedSeconds = elapsedSeconds(),
+            elapsedSeconds = elapsedSecondsOverride ?: elapsedSeconds(),
             activeFrames = activeFrames,
             fps = 30,
             inferenceCount = inferenceCount,
@@ -97,11 +98,34 @@ class LiveCoachPipeline(
             generatedAtFrame = frameIndex
         )
 
-    fun process(imageProxy: ImageProxy): Pair<CoachFrameState, FeedbackCue?> {
+    fun process(imageProxy: ImageProxy): Pair<CoachFrameState, FeedbackCue?> =
+        processFrame(
+            width = imageProxy.width,
+            height = imageProxy.height,
+            timestampNs = imageProxy.imageInfo.timestamp,
+            detectPose = { poseBackend.detect(imageProxy, targetSide) }
+        )
+
+    fun processBitmap(
+        bitmap: Bitmap,
+        timestampNs: Long,
+        rotationDegrees: Int = 0
+    ): Pair<CoachFrameState, FeedbackCue?> =
+        processFrame(
+            width = bitmap.width,
+            height = bitmap.height,
+            timestampNs = timestampNs,
+            detectPose = { poseBackend.detectBitmap(bitmap, targetSide, rotationDegrees, timestampNs) }
+        )
+
+    private fun processFrame(
+        width: Int,
+        height: Int,
+        timestampNs: Long,
+        detectPose: () -> PoseBackendResult
+    ): Pair<CoachFrameState, FeedbackCue?> {
         val totalStart = System.nanoTime()
-        val width = imageProxy.width
-        val height = imageProxy.height
-        updateFrameCadence(imageProxy.imageInfo.timestamp)
+        updateFrameCadence(timestampNs)
 
         if (!ready || classifier == null) {
             frameIndex += 1
@@ -157,7 +181,7 @@ class LiveCoachPipeline(
         }
 
         poseMs = measureNanoTime {
-            val result = poseBackend.detect(imageProxy, targetSide)
+            val result = detectPose()
             val tracking = targetTracker.process(result.detections, frameIndex, targetSide)
             targetSkeleton = tracking.targetSkeleton ?: result.targetSkeleton
             opponentSkeleton = tracking.opponentSkeleton ?: result.opponentSkeleton
@@ -201,7 +225,7 @@ class LiveCoachPipeline(
                     }
                     decision = scheduler.update(
                         activeErrorKeys = activeErrors,
-                        nowSeconds = System.nanoTime() / 1_000_000_000.0
+                        nowSeconds = timestampNs / 1_000_000_000.0
                     )
                     lastVisualCues = decision.visualCues
                     rememberCue(decision.voiceCue ?: decision.visualCues.firstOrNull())

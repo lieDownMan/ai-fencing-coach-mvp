@@ -38,6 +38,13 @@ interface PoseBackend : AutoCloseable {
         imageProxy: ImageProxy,
         targetSide: TargetSide
     ): PoseBackendResult
+
+    fun detectBitmap(
+        bitmap: Bitmap,
+        targetSide: TargetSide,
+        rotationDegrees: Int,
+        timestampNs: Long
+    ): PoseBackendResult
 }
 
 class MediaPipePoseBackend(context: Context) : PoseBackend {
@@ -54,22 +61,36 @@ class MediaPipePoseBackend(context: Context) : PoseBackend {
         imageProxy: ImageProxy,
         targetSide: TargetSide
     ): PoseBackendResult {
-        val landmarker = poseLandmarker ?: return PoseBackendResult(null, null)
         val bitmap = imageProxy.toBitmapOrNull() ?: return PoseBackendResult(null, null)
-        val mpImage = BitmapImageBuilder(bitmap).build()
-        val processingOptions = ImageProcessingOptions.builder()
-            .setRotationDegrees(imageProxy.imageInfo.rotationDegrees)
-            .build()
-        val timestampMs = imageProxy.imageInfo.timestamp / 1_000_000
-        val result = try {
-            landmarker.detectForVideo(mpImage, processingOptions, timestampMs)
+        return try {
+            detectBitmap(
+                bitmap = bitmap,
+                targetSide = targetSide,
+                rotationDegrees = imageProxy.imageInfo.rotationDegrees,
+                timestampNs = imageProxy.imageInfo.timestamp
+            )
         } finally {
             bitmap.recycle()
         }
+    }
+
+    override fun detectBitmap(
+        bitmap: Bitmap,
+        targetSide: TargetSide,
+        rotationDegrees: Int,
+        timestampNs: Long
+    ): PoseBackendResult {
+        val landmarker = poseLandmarker ?: return PoseBackendResult(null, null)
+        val mpImage = BitmapImageBuilder(bitmap).build()
+        val processingOptions = ImageProcessingOptions.builder()
+            .setRotationDegrees(rotationDegrees)
+            .build()
+        val timestampMs = timestampNs / 1_000_000
+        val result = landmarker.detectForVideo(mpImage, processingOptions, timestampMs)
         val detections = mapper.mapDetections(
             poses = result.landmarks(),
-            frameWidth = imageProxy.width,
-            frameHeight = imageProxy.height,
+            frameWidth = bitmap.width,
+            frameHeight = bitmap.height,
             targetSide = targetSide
         )
         return PoseBackendResult(null, null, detections)
@@ -112,8 +133,21 @@ class YoloPoseBackend(context: Context) : PoseBackend {
         imageProxy: ImageProxy,
         targetSide: TargetSide
     ): PoseBackendResult {
-        val activeSession = session ?: return PoseBackendResult(null, null)
         val bitmap = imageProxy.toBitmapOrNull() ?: return PoseBackendResult(null, null)
+        return try {
+            detectBitmap(bitmap, targetSide, imageProxy.imageInfo.rotationDegrees, imageProxy.imageInfo.timestamp)
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    override fun detectBitmap(
+        bitmap: Bitmap,
+        targetSide: TargetSide,
+        rotationDegrees: Int,
+        timestampNs: Long
+    ): PoseBackendResult {
+        val activeSession = session ?: return PoseBackendResult(null, null)
         val prepared = prepareInput(bitmap)
         val detections = runInference(activeSession, prepared)
             .sortedByDescending { it.score }
@@ -207,7 +241,6 @@ class YoloPoseBackend(context: Context) : PoseBackend {
             tensor[2 * planeSize + i] = Color.blue(color) / 255f
         }
         square.recycle()
-        bitmap.recycle()
         return LetterboxInput(tensor, scale, padX, padY, sourceWidth, sourceHeight)
     }
 

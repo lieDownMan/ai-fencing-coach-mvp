@@ -68,8 +68,9 @@ From Android Studio:
 - Realtime live coach is the only fully connected Android runtime path.
 - No runtime backend.
 - App opens to a home screen with Realtime, Postgame, and User Settings.
-- Realtime has a setup screen for training mode, pose model, target side, voice, and feedback focus before opening the camera.
-- Postgame reads clip-analysis and summary defaults from User Settings, shows a video-processing progress bar, and displays the latest live-session report; uploaded clip inference is not wired yet.
+- Realtime has a compact setup screen that reads training mode, pose model, target side, voice, and feedback focus from User Settings before opening the camera.
+- The live coaching screen is camera-first: preview and skeleton overlay on top, current error/status and controls below.
+- Postgame reads clip-analysis and summary defaults from User Settings, runs selected videos through the on-device pose/FenceNet/heuristics pipeline, shows a processing progress bar, and displays the generated report.
 - User Settings is scrollable and includes user information, app defaults, Gemini/playbook summary preference, and per-error emphasize/mute checkboxes.
 - Pose backend selector in the HUD.
 - MediaPipe backend uses the MediaPipe Tasks pose landmarker.
