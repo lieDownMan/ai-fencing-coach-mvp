@@ -1,11 +1,14 @@
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io' show File, Platform;
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:intl/intl.dart';
+import 'package:image_gallery_saver/image_gallery_saver.dart';
+import 'package:video_player/video_player.dart' as vp;
 
 import 'heuristics/heuristics_engine.dart';
 import 'heuristics/fencenet_channel.dart';
@@ -13,6 +16,9 @@ import 'postgame/postgame_analyzer.dart';
 import 'pose/pose_service.dart';
 import 'pose/pose_painter.dart';
 import 'pose/yolo_pose_service.dart';
+import 'database/database_helper.dart';
+import 'services/gemini_service.dart';
+import 'postgame/annotated_video_player.dart';
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -191,10 +197,21 @@ class _MainScreenState extends State<MainScreen>
   String _postgameStatus = 'No video selected';
   PostgameReport? _postgameReport;
 
+  // Database & Gemini
+  final DatabaseHelper _dbHelper = DatabaseHelper();
+  final GeminiService _geminiService = GeminiService();
+  bool _useGeminiSummary = true;
+  int? _lastSessionId;
+  String? _geminiSummaryText;
+
+  // History
+  List<SessionRecord> _sessions = [];
+  bool _sessionsLoading = false;
+
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
     _heuristics = HeuristicsEngine(
       targetSide: _targetSide,
       trainingMode: _trainingMode,
@@ -212,7 +229,19 @@ class _MainScreenState extends State<MainScreen>
     _initCamera();
     _initFenceNet();
     _initYoloPose();
+    _loadSessions();
     WakelockPlus.enable();
+  }
+
+  Future<void> _loadSessions() async {
+    setState(() => _sessionsLoading = true);
+    final sessions = await _dbHelper.getSessions();
+    if (mounted) {
+      setState(() {
+        _sessions = sessions;
+        _sessionsLoading = false;
+      });
+    }
   }
 
   @override
@@ -616,6 +645,40 @@ class _MainScreenState extends State<MainScreen>
         _postgameProgress = 1.0;
         _postgameStatus = 'Analysis ready';
       });
+
+      // Save to DB
+      final config = PostgameAnalysisConfig(
+        targetSide: _targetSide,
+        trainingMode: _trainingMode,
+        focusErrors: List<String>.from(_focusErrors),
+        muteErrors: List<String>.from(_muteErrors),
+        onlySelected: _onlySelected,
+      );
+      final sessionId = await _dbHelper.insertSession(
+        report: report,
+        config: config,
+      );
+      _lastSessionId = sessionId;
+
+      // Gemini summary
+      if (_useGeminiSummary && _geminiService.isEnabled) {
+        try {
+          final summary = await _geminiService.generateSummary(
+            trainingMode: _trainingMode,
+            targetSide: _targetSide,
+            actionCounts: report.actionCounts,
+            errorCounts: report.errorCounts,
+            errorLabels: kErrorLabels,
+            userName: 'Fencer',
+          );
+          await _dbHelper.updateSummary(sessionId, summary);
+          if (mounted) {
+            setState(() => _geminiSummaryText = summary);
+          }
+        } catch (_) {
+          // Fallback silently
+        }
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -626,6 +689,7 @@ class _MainScreenState extends State<MainScreen>
         setState(() => _postgameAnalyzing = false);
       }
       _yoloPoseService.resetTracking();
+      _loadSessions(); // Refresh history
     }
   }
 
@@ -654,6 +718,7 @@ class _MainScreenState extends State<MainScreen>
           tabs: const [
             Tab(icon: Icon(Icons.videocam, size: 20), text: 'Live'),
             Tab(icon: Icon(Icons.video_library, size: 20), text: 'Postgame'),
+            Tab(icon: Icon(Icons.history, size: 20), text: 'History'),
             Tab(icon: Icon(Icons.tune, size: 20), text: 'Settings'),
             Tab(icon: Icon(Icons.analytics, size: 20), text: 'Debug'),
           ],
@@ -665,6 +730,7 @@ class _MainScreenState extends State<MainScreen>
         children: [
           _buildLiveTab(),
           _buildPostgameTab(),
+          _buildHistoryTab(),
           _buildSettingsTab(),
           _buildDebugTab(),
         ],
@@ -1069,6 +1135,26 @@ class _MainScreenState extends State<MainScreen>
                       foregroundColor: Colors.black,
                     ),
                   ),
+                  if (_postgameReport != null && _postgameVideo != null)
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => AnnotatedVideoPlayerScreen(
+                              videoPath: _postgameVideo!.path,
+                              report: _postgameReport!,
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.play_circle_fill),
+                      label: const Text('Play Annotated Video'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blueAccent,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
                 ],
               ),
               const SizedBox(height: 14),
@@ -1117,13 +1203,23 @@ class _MainScreenState extends State<MainScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                report.primaryTakeaway(kErrorLabels),
+                _geminiSummaryText ?? report.primaryTakeaway(kErrorLabels),
                 style: const TextStyle(
                   color: Color(0xFFFF6600),
                   fontWeight: FontWeight.bold,
                   fontSize: 15,
                 ),
               ),
+              if (_geminiSummaryText != null) ...[
+                const SizedBox(height: 8),
+                const Row(
+                  children: [
+                    Icon(Icons.auto_awesome, color: Colors.blueAccent, size: 14),
+                    SizedBox(width: 4),
+                    Text('Gemini AI Summary', style: TextStyle(color: Colors.blueAccent, fontSize: 11)),
+                  ],
+                ),
+              ],
               const SizedBox(height: 14),
               Wrap(
                 spacing: 8,
@@ -1263,7 +1359,91 @@ class _MainScreenState extends State<MainScreen>
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // TAB 3: SETTINGS
+  // TAB 3: HISTORY
+  // ──────────────────────────────────────────────────────────────────────────
+
+  Widget _buildHistoryTab() {
+    if (_sessionsLoading) {
+      return const Center(child: CircularProgressIndicator(color: Color(0xFFFF6600)));
+    }
+    
+    if (_sessions.isEmpty) {
+      return const Center(
+        child: Text(
+          'No history yet.\nRun a postgame analysis to save a session.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.white54, height: 1.5),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: _sessions.length,
+      itemBuilder: (context, index) {
+        final session = _sessions[index];
+        final dateFormat = DateFormat('MMM d, yyyy • h:mm a');
+        final isSelected = _lastSessionId == session.id;
+        
+        return GestureDetector(
+          onTap: () {
+            setState(() {
+              _postgameVideo = XFile('history_dummy.mp4');
+              _postgameReport = session.toReport();
+              _postgameStatus = 'Loaded from history';
+              _lastSessionId = session.id;
+              _geminiSummaryText = session.llmSummary;
+              _tabController.animateTo(1); // Jump to Postgame tab
+            });
+          },
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF141420),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isSelected ? const Color(0xFFFF6600) : Colors.white10,
+                width: isSelected ? 2 : 1,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      dateFormat.format(session.date),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right, color: Colors.white54, size: 20),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    _metricChip('Mode', session.trainingMode),
+                    const SizedBox(width: 8),
+                    _metricChip('Side', session.targetSide),
+                    const SizedBox(width: 8),
+                    _metricChip('Action', session.topAction),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // TAB 4: SETTINGS
   // ──────────────────────────────────────────────────────────────────────────
 
   Widget _buildSettingsTab() {
@@ -1334,6 +1514,28 @@ class _MainScreenState extends State<MainScreen>
               activeThumbColor: const Color(0xFFFF6600),
               contentPadding: EdgeInsets.zero,
               onChanged: (val) => setState(() => _voiceEnabled = val),
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // Gemini switch
+          _buildCard(
+            child: SwitchListTile(
+              title: const Text('Gemini 總結 AI Summary'),
+              subtitle: Text(
+                _geminiService.isEnabled 
+                    ? '分析完成後產生 AI 建議 / Generate AI tips after analysis'
+                    : 'API Key 未設定，此功能無法使用 / API Key missing',
+                style: TextStyle(
+                  color: _geminiService.isEnabled ? Colors.white54 : Colors.redAccent,
+                ),
+              ),
+              value: _useGeminiSummary && _geminiService.isEnabled,
+              activeThumbColor: const Color(0xFFFF6600),
+              contentPadding: EdgeInsets.zero,
+              onChanged: _geminiService.isEnabled 
+                  ? (val) => setState(() => _useGeminiSummary = val)
+                  : null,
             ),
           ),
           const SizedBox(height: 16),
