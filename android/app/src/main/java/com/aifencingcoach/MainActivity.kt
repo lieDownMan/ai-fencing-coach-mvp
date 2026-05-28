@@ -15,12 +15,14 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,6 +34,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -69,14 +72,22 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 private enum class AppScreen {
-    MENU,
+    HOME,
+    REALTIME,
+    POSTGAME,
+    SETTINGS,
     COACH
 }
 
 private data class UserSettings(
     val name: String = "Fencer",
     val handedness: String = "right",
-    val heightCm: String = "180"
+    val heightCm: String = "180",
+    val processingProfile: String = "Balanced",
+    val useGeminiSummary: Boolean = false,
+    val onlyFocusedErrors: Boolean = false,
+    val emphasizedErrors: Set<String> = emptySet(),
+    val mutedErrors: Set<String> = emptySet()
 )
 
 class MainActivity : ComponentActivity() {
@@ -148,17 +159,23 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
     val prefs = remember {
         context.getSharedPreferences("ai_fencing_coach_settings", Context.MODE_PRIVATE)
     }
-    var appScreen by remember { mutableStateOf(AppScreen.MENU) }
+    var appScreen by remember { mutableStateOf(AppScreen.HOME) }
     var targetSide by remember { mutableStateOf(TargetSide.LEFT) }
     var trainingMode by remember { mutableStateOf(TrainingMode.FREE_BOUTING) }
     var poseBackend by remember { mutableStateOf(PoseBackendKind.MEDIAPIPE) }
     var voiceEnabled by remember { mutableStateOf(prefs.getBoolean("voice_enabled", true)) }
+    var lastPracticeReport by remember { mutableStateOf<PracticeReport?>(null) }
     var userSettings by remember {
         mutableStateOf(
             UserSettings(
                 name = prefs.getString("user_name", "Fencer") ?: "Fencer",
                 handedness = prefs.getString("handedness", "right") ?: "right",
-                heightCm = prefs.getString("height_cm", "180") ?: "180"
+                heightCm = prefs.getString("height_cm", "180") ?: "180",
+                processingProfile = prefs.getString("processing_profile", "Balanced") ?: "Balanced",
+                useGeminiSummary = prefs.getBoolean("use_gemini_summary", false),
+                onlyFocusedErrors = prefs.getBoolean("only_focused_errors", false),
+                emphasizedErrors = prefs.getStringSet("emphasized_errors", emptySet())?.toSet().orEmpty(),
+                mutedErrors = prefs.getStringSet("muted_errors", emptySet())?.toSet().orEmpty()
             )
         )
     }
@@ -168,12 +185,28 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             .putString("user_name", userSettings.name.ifBlank { "Fencer" })
             .putString("handedness", userSettings.handedness)
             .putString("height_cm", userSettings.heightCm.ifBlank { "180" })
+            .putString("processing_profile", userSettings.processingProfile)
+            .putBoolean("use_gemini_summary", userSettings.useGeminiSummary)
+            .putBoolean("only_focused_errors", userSettings.onlyFocusedErrors)
+            .putStringSet("emphasized_errors", userSettings.emphasizedErrors)
+            .putStringSet("muted_errors", userSettings.mutedErrors)
             .putBoolean("voice_enabled", voiceEnabled)
             .apply()
     }
 
     when (appScreen) {
-        AppScreen.MENU -> MainMenuScreen(
+        AppScreen.HOME -> HomeScreen(
+            trainingMode = trainingMode,
+            poseBackend = poseBackend,
+            targetSide = targetSide,
+            voiceEnabled = voiceEnabled,
+            userSettings = userSettings,
+            lastPracticeReport = lastPracticeReport,
+            onRealtime = { appScreen = AppScreen.REALTIME },
+            onPostgame = { appScreen = AppScreen.POSTGAME },
+            onSettings = { appScreen = AppScreen.SETTINGS }
+        )
+        AppScreen.REALTIME -> RealtimeSetupScreen(
             trainingMode = trainingMode,
             poseBackend = poseBackend,
             targetSide = targetSide,
@@ -184,9 +217,47 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             onTargetSide = { targetSide = it },
             onVoiceEnabled = { voiceEnabled = it },
             onUserSettings = { userSettings = it },
+            onSettings = { appScreen = AppScreen.SETTINGS },
+            onBack = {
+                saveSettings()
+                appScreen = AppScreen.HOME
+            },
             onStart = {
                 saveSettings()
                 appScreen = AppScreen.COACH
+            }
+        )
+        AppScreen.POSTGAME -> PostgameScreen(
+            userSettings = userSettings,
+            trainingMode = trainingMode,
+            targetSide = targetSide,
+            lastPracticeReport = lastPracticeReport,
+            onTrainingMode = { trainingMode = it },
+            onTargetSide = { targetSide = it },
+            onUserSettings = { userSettings = it },
+            onBack = {
+                saveSettings()
+                appScreen = AppScreen.HOME
+            },
+            onStartRealtime = {
+                saveSettings()
+                appScreen = AppScreen.REALTIME
+            }
+        )
+        AppScreen.SETTINGS -> UserSettingsScreen(
+            userSettings = userSettings,
+            trainingMode = trainingMode,
+            targetSide = targetSide,
+            voiceEnabled = voiceEnabled,
+            poseBackend = poseBackend,
+            onUserSettings = { userSettings = it },
+            onTrainingMode = { trainingMode = it },
+            onTargetSide = { targetSide = it },
+            onVoiceEnabled = { voiceEnabled = it },
+            onPoseBackend = { poseBackend = it },
+            onBack = {
+                saveSettings()
+                appScreen = AppScreen.HOME
             }
         )
         AppScreen.COACH -> CoachScreen(
@@ -205,7 +276,10 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             },
             onBackToMenu = {
                 saveSettings()
-                appScreen = AppScreen.MENU
+                appScreen = AppScreen.HOME
+            },
+            onPracticeReport = { report ->
+                lastPracticeReport = report
             },
             onSpeak = onSpeak
         )
@@ -214,7 +288,110 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
-private fun MainMenuScreen(
+private fun HomeScreen(
+    trainingMode: TrainingMode,
+    poseBackend: PoseBackendKind,
+    targetSide: TargetSide,
+    voiceEnabled: Boolean,
+    userSettings: UserSettings,
+    lastPracticeReport: PracticeReport?,
+    onRealtime: () -> Unit,
+    onPostgame: () -> Unit,
+    onSettings: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(PageBackground)
+            .padding(22.dp),
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        ScreenHeader(
+            title = "AI Fencing Coach",
+            subtitle = "${userSettings.name.ifBlank { "Fencer" }}  |  ${trainingMode.label}  |  ${poseBackend.label}  |  ${targetSide.label}"
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            HomeOption(
+                title = "Realtime",
+                accent = AccentGreen,
+                summary = liveSummary(trainingMode, poseBackend, voiceEnabled),
+                onClick = onRealtime,
+                modifier = Modifier.weight(1f)
+            )
+            HomeOption(
+                title = "Postgame",
+                accent = AccentGold,
+                summary = postgameSummary(lastPracticeReport),
+                onClick = onPostgame,
+                modifier = Modifier.weight(1f)
+            )
+            HomeOption(
+                title = "User Settings",
+                accent = AccentCoral,
+                summary = settingsSummary(userSettings),
+                onClick = onSettings,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        FlowRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(PanelColor, RoundedCornerShape(8.dp))
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            StatusPill("target ${targetSide.label}", AccentGreen)
+            StatusPill(if (voiceEnabled) "voice on" else "voice off", if (voiceEnabled) AccentGreen else MutedText)
+            StatusPill("${userSettings.emphasizedErrors.size} emphasized", AccentGold)
+            StatusPill("${userSettings.mutedErrors.size} muted", AccentCoral)
+            lastPracticeReport?.let {
+                StatusPill("last ${formatSeconds(it.elapsedSeconds)}", Color.White)
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeOption(
+    title: String,
+    accent: Color,
+    summary: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Button(
+        onClick = onClick,
+        modifier = modifier.height(190.dp),
+        shape = RoundedCornerShape(8.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = PanelColor,
+            contentColor = Color.White
+        )
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.Start
+        ) {
+            Column {
+                Text(title, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text(summary, color = MutedText, fontSize = 13.sp)
+            }
+            Text("Open", color = accent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun RealtimeSetupScreen(
     trainingMode: TrainingMode,
     poseBackend: PoseBackendKind,
     targetSide: TargetSide,
@@ -225,116 +402,341 @@ private fun MainMenuScreen(
     onTargetSide: (TargetSide) -> Unit,
     onVoiceEnabled: (Boolean) -> Unit,
     onUserSettings: (UserSettings) -> Unit,
+    onSettings: () -> Unit,
+    onBack: () -> Unit,
     onStart: () -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF101418))
+            .background(PageBackground)
             .padding(22.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        Column {
-            Text(
-                text = "AI Fencing Coach",
-                color = Color.White,
-                fontSize = 30.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = "${trainingMode.label}  |  ${poseBackend.label}  |  ${targetSide.label}",
-                color = Color(0xFFD7FF5F),
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
+        ScreenHeader(
+            title = "Realtime",
+            subtitle = "${userSettings.name.ifBlank { "Fencer" }}  |  ${trainingMode.label}  |  ${poseBackend.label}",
+            onBack = onBack
+        )
 
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            MenuPanel("Mode", Modifier.weight(1f)) {
+            MenuPanel("Training", Modifier.weight(1f)) {
                 SegmentedGroup(
                     labels = TrainingMode.entries.map { it.label },
                     selected = trainingMode.label,
                     onSelected = { onTrainingMode(TrainingMode.fromLabel(it)) }
                 )
                 Spacer(Modifier.height(10.dp))
-                Text(
-                    text = modeSummary(trainingMode),
-                    color = Color(0xFFB6C2CC),
-                    fontSize = 13.sp
-                )
+                Text(modeSummary(trainingMode), color = MutedText, fontSize = 13.sp)
             }
-
-            MenuPanel("Model", Modifier.weight(1f)) {
+            MenuPanel("Pose Model", Modifier.weight(1f)) {
                 SegmentedGroup(
                     labels = PoseBackendKind.entries.map { it.label },
                     selected = poseBackend.label,
                     onSelected = { onPoseBackend(PoseBackendKind.fromLabel(it)) }
                 )
                 Spacer(Modifier.height(10.dp))
-                Text(
-                    text = modelSummary(poseBackend),
-                    color = Color(0xFFB6C2CC),
-                    fontSize = 13.sp
-                )
+                Text(modelSummary(poseBackend), color = MutedText, fontSize = 13.sp)
             }
-
-            MenuPanel("User", Modifier.weight(1f)) {
-                OutlinedTextField(
-                    value = userSettings.name,
-                    onValueChange = { onUserSettings(userSettings.copy(name = it)) },
-                    label = { Text("Name", color = Color(0xFFB6C2CC)) },
-                    textStyle = androidx.compose.ui.text.TextStyle(color = Color.White),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(8.dp))
+            MenuPanel("Session", Modifier.weight(1f)) {
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     SegmentedGroup(
                         labels = listOf("left", "right"),
-                        selected = userSettings.handedness,
-                        onSelected = { onUserSettings(userSettings.copy(handedness = it)) }
+                        selected = targetSide.label,
+                        onSelected = { onTargetSide(TargetSide.fromLabel(it)) }
                     )
-                    OutlinedTextField(
-                        value = userSettings.heightCm,
-                        onValueChange = { value ->
-                            onUserSettings(userSettings.copy(heightCm = value.filter(Char::isDigit).take(3)))
-                        },
-                        label = { Text("Height cm", color = Color(0xFFB6C2CC)) },
-                        textStyle = androidx.compose.ui.text.TextStyle(color = Color.White),
-                        singleLine = true,
-                        modifier = Modifier.width(132.dp)
+                    HudButton(
+                        text = if (voiceEnabled) "Voice on" else "Voice off",
+                        selected = voiceEnabled,
+                        onClick = { onVoiceEnabled(!voiceEnabled) }
                     )
                 }
+                Spacer(Modifier.height(10.dp))
+                SegmentedGroup(
+                    labels = ProcessingProfiles,
+                    selected = userSettings.processingProfile,
+                    onSelected = { onUserSettings(userSettings.copy(processingProfile = it)) }
+                )
             }
+        }
+
+        MenuPanel("Feedback Focus") {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                availableErrorsForMode(trainingMode).take(5).forEach { option ->
+                    val color = when (option.key) {
+                        in userSettings.mutedErrors -> AccentCoral
+                        in userSettings.emphasizedErrors -> AccentGold
+                        else -> MutedText
+                    }
+                    StatusPill(option.label, color)
+                }
+                if (availableErrorsForMode(trainingMode).size > 5) {
+                    StatusPill("+${availableErrorsForMode(trainingMode).size - 5}", MutedText)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = "${userSettings.emphasizedErrors.size} emphasized  |  ${userSettings.mutedErrors.size} muted  |  ${if (userSettings.onlyFocusedErrors) "focused only" else "all cues"}",
+                color = MutedText,
+                fontSize = 13.sp
+            )
         }
 
         FlowRow(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xAA182028), RoundedCornerShape(8.dp))
+                .background(PanelColor, RoundedCornerShape(8.dp))
                 .padding(12.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            SegmentedGroup(
-                labels = listOf("left", "right"),
-                selected = targetSide.label,
-                onSelected = { onTargetSide(TargetSide.fromLabel(it)) }
-            )
-            HudButton(
-                text = if (voiceEnabled) "Voice on" else "Voice off",
-                selected = voiceEnabled,
-                onClick = { onVoiceEnabled(!voiceEnabled) }
-            )
-            HudButton(text = "Start", selected = true, onClick = onStart)
+            HudButton(text = "User Settings", selected = false, onClick = onSettings)
+            HudButton(text = "Start Camera", selected = true, onClick = onStart)
         }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun PostgameScreen(
+    userSettings: UserSettings,
+    trainingMode: TrainingMode,
+    targetSide: TargetSide,
+    lastPracticeReport: PracticeReport?,
+    onTrainingMode: (TrainingMode) -> Unit,
+    onTargetSide: (TargetSide) -> Unit,
+    onUserSettings: (UserSettings) -> Unit,
+    onBack: () -> Unit,
+    onStartRealtime: () -> Unit
+) {
+    var selectedVideo by remember { mutableStateOf<String?>(null) }
+    var analysisStatus by remember { mutableStateOf("Ready") }
+    val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        selectedVideo = uri?.lastPathSegment ?: uri?.toString()
+        analysisStatus = if (uri == null) "No video selected" else "Video selected"
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(PageBackground)
+            .padding(22.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        ScreenHeader(
+            title = "Postgame",
+            subtitle = "${userSettings.name.ifBlank { "Fencer" }}  |  ${trainingMode.label}  |  ${userSettings.processingProfile}",
+            onBack = onBack
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            MenuPanel("Clip Analysis", Modifier.weight(1f)) {
+                SegmentedGroup(
+                    labels = TrainingMode.entries.map { it.label },
+                    selected = trainingMode.label,
+                    onSelected = { onTrainingMode(TrainingMode.fromLabel(it)) }
+                )
+                Spacer(Modifier.height(10.dp))
+                SegmentedGroup(
+                    labels = listOf("left", "right"),
+                    selected = targetSide.label,
+                    onSelected = { onTargetSide(TargetSide.fromLabel(it)) }
+                )
+                Spacer(Modifier.height(10.dp))
+                SegmentedGroup(
+                    labels = ProcessingProfiles,
+                    selected = userSettings.processingProfile,
+                    onSelected = { onUserSettings(userSettings.copy(processingProfile = it)) }
+                )
+            }
+            MenuPanel("Summary", Modifier.weight(1f)) {
+                HudButton(
+                    text = if (userSettings.useGeminiSummary) "Gemini on" else "Playbook",
+                    selected = userSettings.useGeminiSummary,
+                    onClick = { onUserSettings(userSettings.copy(useGeminiSummary = !userSettings.useGeminiSummary)) }
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = "Focus ${userSettings.emphasizedErrors.size}  |  Mute ${userSettings.mutedErrors.size}  |  ${analysisStatus}",
+                    color = MutedText,
+                    fontSize = 13.sp
+                )
+            }
+            MenuPanel("Video", Modifier.weight(1f)) {
+                Text(
+                    text = selectedVideo ?: "No clip selected",
+                    color = if (selectedVideo == null) MutedText else Color.White,
+                    fontSize = 13.sp
+                )
+                Spacer(Modifier.height(10.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HudButton(text = "Choose Video", selected = false, onClick = { videoPicker.launch("video/*") })
+                    HudButton(
+                        text = "Run Analysis",
+                        selected = selectedVideo != null,
+                        onClick = {
+                            analysisStatus = if (selectedVideo == null) "Choose a clip first" else "Analysis queued"
+                        }
+                    )
+                }
+            }
+        }
+
+        MenuPanel("Latest Session", Modifier.fillMaxWidth()) {
+            if (lastPracticeReport == null) {
+                Text("No practice report yet", color = MutedText, fontSize = 14.sp)
+                Spacer(Modifier.height(10.dp))
+                HudButton(text = "Start Realtime", selected = true, onClick = onStartRealtime)
+            } else {
+                PracticeReportSummary(report = lastPracticeReport)
+            }
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun UserSettingsScreen(
+    userSettings: UserSettings,
+    trainingMode: TrainingMode,
+    targetSide: TargetSide,
+    voiceEnabled: Boolean,
+    poseBackend: PoseBackendKind,
+    onUserSettings: (UserSettings) -> Unit,
+    onTrainingMode: (TrainingMode) -> Unit,
+    onTargetSide: (TargetSide) -> Unit,
+    onVoiceEnabled: (Boolean) -> Unit,
+    onPoseBackend: (PoseBackendKind) -> Unit,
+    onBack: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(PageBackground)
+            .verticalScroll(rememberScrollState())
+            .padding(22.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        ScreenHeader(
+            title = "User Settings",
+            subtitle = "${userSettings.name.ifBlank { "Fencer" }}  |  ${trainingMode.label}",
+            onBack = onBack
+        )
+
+        MenuPanel("User Information", Modifier.fillMaxWidth()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = userSettings.name,
+                    onValueChange = { onUserSettings(userSettings.copy(name = it)) },
+                    label = { Text("Name", color = MutedText) },
+                    textStyle = androidx.compose.ui.text.TextStyle(color = Color.White),
+                    singleLine = true,
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = userSettings.heightCm,
+                    onValueChange = { value ->
+                        onUserSettings(userSettings.copy(heightCm = value.filter(Char::isDigit).take(3)))
+                    },
+                    label = { Text("Height cm", color = MutedText) },
+                    textStyle = androidx.compose.ui.text.TextStyle(color = Color.White),
+                    singleLine = true,
+                    modifier = Modifier.width(140.dp)
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SegmentedGroup(
+                    labels = listOf("left", "right"),
+                    selected = userSettings.handedness,
+                    onSelected = { onUserSettings(userSettings.copy(handedness = it)) }
+                )
+                SegmentedGroup(
+                    labels = TrainingMode.entries.map { it.label },
+                    selected = trainingMode.label,
+                    onSelected = { onTrainingMode(TrainingMode.fromLabel(it)) }
+                )
+                SegmentedGroup(
+                    labels = listOf("left", "right"),
+                    selected = targetSide.label,
+                    onSelected = { onTargetSide(TargetSide.fromLabel(it)) }
+                )
+            }
+        }
+
+        MenuPanel("App Defaults", Modifier.fillMaxWidth()) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SegmentedGroup(
+                    labels = PoseBackendKind.entries.map { it.label },
+                    selected = poseBackend.label,
+                    onSelected = { onPoseBackend(PoseBackendKind.fromLabel(it)) }
+                )
+                SegmentedGroup(
+                    labels = ProcessingProfiles,
+                    selected = userSettings.processingProfile,
+                    onSelected = { onUserSettings(userSettings.copy(processingProfile = it)) }
+                )
+                HudButton(
+                    text = if (voiceEnabled) "Voice on" else "Voice off",
+                    selected = voiceEnabled,
+                    onClick = { onVoiceEnabled(!voiceEnabled) }
+                )
+                HudButton(
+                    text = if (userSettings.useGeminiSummary) "Gemini on" else "Playbook",
+                    selected = userSettings.useGeminiSummary,
+                    onClick = { onUserSettings(userSettings.copy(useGeminiSummary = !userSettings.useGeminiSummary)) }
+                )
+            }
+        }
+
+        MenuPanel("Feedback Controls", Modifier.fillMaxWidth()) {
+            CheckboxLine(
+                label = "Only focused errors",
+                checked = userSettings.onlyFocusedErrors,
+                onCheckedChange = { onUserSettings(userSettings.copy(onlyFocusedErrors = it)) }
+            )
+            Spacer(Modifier.height(8.dp))
+            availableErrorsForMode(trainingMode).forEach { option ->
+                ErrorPreferenceRow(
+                    option = option,
+                    emphasized = option.key in userSettings.emphasizedErrors,
+                    muted = option.key in userSettings.mutedErrors,
+                    onEmphasized = { checked ->
+                        val emphasized = userSettings.emphasizedErrors.toggle(option.key, checked)
+                        val muted = if (checked) userSettings.mutedErrors - option.key else userSettings.mutedErrors
+                        onUserSettings(userSettings.copy(emphasizedErrors = emphasized, mutedErrors = muted))
+                    },
+                    onMuted = { checked ->
+                        val muted = userSettings.mutedErrors.toggle(option.key, checked)
+                        val emphasized = if (checked) userSettings.emphasizedErrors - option.key else userSettings.emphasizedErrors
+                        onUserSettings(userSettings.copy(emphasizedErrors = emphasized, mutedErrors = muted))
+                    }
+                )
+            }
+        }
+
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            HudButton(text = "Done", selected = true, onClick = onBack)
+        }
+        Spacer(Modifier.height(8.dp))
     }
 }
 
@@ -346,7 +748,7 @@ private fun MenuPanel(
 ) {
     Column(
         modifier = modifier
-            .background(Color(0xAA182028), RoundedCornerShape(8.dp))
+            .background(PanelColor, RoundedCornerShape(8.dp))
             .padding(14.dp)
     ) {
         Text(
@@ -357,6 +759,110 @@ private fun MenuPanel(
         )
         Spacer(Modifier.height(10.dp))
         content()
+    }
+}
+
+@Composable
+private fun ScreenHeader(
+    title: String,
+    subtitle: String,
+    onBack: (() -> Unit)? = null
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(6.dp))
+            Text(subtitle, color = AccentGreen, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        }
+        if (onBack != null) {
+            HudButton(text = "Home", selected = false, onClick = onBack)
+        }
+    }
+}
+
+@Composable
+private fun StatusPill(text: String, color: Color) {
+    Text(
+        text = text,
+        color = color,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier
+            .background(Color(0xFF222B31), RoundedCornerShape(6.dp))
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+    )
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun PracticeReportSummary(report: PracticeReport) {
+    Text(report.primaryTakeaway, color = AccentGold, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+    Spacer(Modifier.height(12.dp))
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        MetricBlock("time", formatSeconds(report.elapsedSeconds))
+        MetricBlock("active", "${report.activeSeconds}s ${report.activePercent}%")
+        MetricBlock("checks", report.inferenceCount.toString())
+        MetricBlock("cues", report.cueCount.toString())
+        MetricBlock("top", report.topAction)
+    }
+    if (report.topCues.isNotEmpty()) {
+        Spacer(Modifier.height(14.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            report.topCues.take(6).forEach { cue ->
+                StatusPill("${cue.count}x ${cue.label}", AccentGold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CheckboxLine(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(checked = checked, onCheckedChange = onCheckedChange)
+        Text(label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun ErrorPreferenceRow(
+    option: FeedbackErrorOption,
+    emphasized: Boolean,
+    muted: Boolean,
+    onEmphasized: (Boolean) -> Unit,
+    onMuted: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(option.label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(option.key, color = MutedText, fontSize = 11.sp)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(checked = emphasized, onCheckedChange = onEmphasized)
+            Text("Emphasize", color = AccentGold, fontSize = 12.sp)
+            Spacer(Modifier.width(12.dp))
+            Checkbox(checked = muted, onCheckedChange = onMuted)
+            Text("Mute", color = AccentCoral, fontSize = 12.sp)
+        }
     }
 }
 
@@ -373,6 +879,7 @@ private fun CoachScreen(
     onPoseBackend: (PoseBackendKind) -> Unit,
     onVoiceEnabled: (Boolean) -> Unit,
     onBackToMenu: () -> Unit,
+    onPracticeReport: (PracticeReport) -> Unit,
     onSpeak: (String) -> Unit
 ) {
     var analysisPaused by remember { mutableStateOf(false) }
@@ -418,7 +925,9 @@ private fun CoachScreen(
             onVoiceEnabled = onVoiceEnabled,
             onAnalysisPaused = { analysisPaused = it },
             onFinishPractice = {
-                reviewReport = pipeline.practiceReport()
+                val report = pipeline.practiceReport()
+                reviewReport = report
+                onPracticeReport(report)
                 analysisPaused = true
             },
             onReset = {
@@ -944,6 +1453,58 @@ private fun modelSummary(model: PoseBackendKind): String =
         PoseBackendKind.MEDIAPIPE -> "MediaPipe lite is the default low-latency pose model."
         PoseBackendKind.YOLO -> "YOLO pose runs from yolo_pose.onnx through ONNX Runtime."
     }
+
+private fun liveSummary(
+    mode: TrainingMode,
+    model: PoseBackendKind,
+    voiceEnabled: Boolean
+): String =
+    "${mode.label} with ${model.label}, target lock, skeleton overlay, cues, ${if (voiceEnabled) "voice" else "silent"}."
+
+private fun postgameSummary(report: PracticeReport?): String =
+    if (report == null) {
+        "Clip review setup, report view, history controls, and summary options."
+    } else {
+        "Latest: ${formatSeconds(report.elapsedSeconds)}, ${report.cueCount} cues, top ${report.topAction}."
+    }
+
+private fun settingsSummary(settings: UserSettings): String =
+    "${settings.handedness}, ${settings.heightCm.ifBlank { "180" }}cm, ${settings.emphasizedErrors.size} focus, ${settings.mutedErrors.size} muted."
+
+private data class FeedbackErrorOption(
+    val key: String,
+    val label: String,
+    val modes: Set<TrainingMode>
+)
+
+private fun availableErrorsForMode(mode: TrainingMode): List<FeedbackErrorOption> =
+    FeedbackErrorOptions.filter { mode in it.modes }
+
+private fun Set<String>.toggle(value: String, enabled: Boolean): Set<String> =
+    if (enabled) this + value else this - value
+
+private val ProcessingProfiles = listOf("Balanced", "Fast", "Full Quality")
+
+private val FeedbackErrorOptions = listOf(
+    FeedbackErrorOption("foot_before_hand", "Foot before hand", setOf(TrainingMode.TARGET_PRACTICE)),
+    FeedbackErrorOption("lunge_overextension", "Lunge overextension", setOf(TrainingMode.TARGET_PRACTICE)),
+    FeedbackErrorOption("incomplete_arm_extension", "Incomplete arm extension", setOf(TrainingMode.TARGET_PRACTICE)),
+    FeedbackErrorOption("guard_dropped", "Guard dropped", TrainingMode.entries.toSet()),
+    FeedbackErrorOption("stance_too_high", "Stance too high", TrainingMode.entries.toSet()),
+    FeedbackErrorOption("bounce_excessive", "Bounce excessive", TrainingMode.entries.toSet()),
+    FeedbackErrorOption("center_of_mass_in_front", "Center of mass in front", TrainingMode.entries.toSet()),
+    FeedbackErrorOption("center_of_mass_leaning_backward", "Center of mass leaning backward", TrainingMode.entries.toSet()),
+    FeedbackErrorOption("over_parrying", "Over parrying", TrainingMode.entries.toSet()),
+    FeedbackErrorOption("wide_step", "Wide step", TrainingMode.entries.toSet()),
+    FeedbackErrorOption("narrow_step", "Narrow step", TrainingMode.entries.toSet())
+)
+
+private val PageBackground = Color(0xFF0D1115)
+private val PanelColor = Color(0xEE182026)
+private val MutedText = Color(0xFFB6C2CC)
+private val AccentGreen = Color(0xFFD7FF5F)
+private val AccentGold = Color(0xFFFFD166)
+private val AccentCoral = Color(0xFFFF7D6E)
 
 private const val FenceNetWarmup = 28
 
