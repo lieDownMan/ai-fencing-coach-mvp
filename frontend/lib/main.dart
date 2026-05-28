@@ -828,9 +828,10 @@ class _MainScreenState extends State<MainScreen>
       return Container(
         color: const Color(0xFF0D0D1A),
         child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
               Container(
                 width: 56,
                 height: 56,
@@ -859,8 +860,9 @@ class _MainScreenState extends State<MainScreen>
             ],
           ),
         ),
-      );
-    }
+      ),
+    );
+  }
 
     return Container(
       color: const Color(0xFF0D0D1A),

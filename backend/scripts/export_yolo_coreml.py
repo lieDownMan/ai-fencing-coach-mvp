@@ -18,12 +18,9 @@ YOLO_PT = REPO_ROOT / "yolov8n-pose.pt"
 DEST_DIR = REPO_ROOT / "frontend" / "ios" / "Runner"
 
 def main():
-    if not YOLO_PT.exists():
-        print(f"Error: YOLO weights not found at {YOLO_PT}")
-        sys.exit(1)
-
-    print(f"[1/3] Loading YOLOv8-pose model from {YOLO_PT}...")
-    model = YOLO(str(YOLO_PT))
+    print(f"[1/3] Loading YOLOv8-pose model...")
+    # Passing the model name lets Ultralytics auto-download it if not found locally
+    model = YOLO("yolov8n-pose.pt")
 
     print(f"[2/3] Exporting to CoreML (nms=False, imgsz=640)...")
     # We set nms=False so the output contains the raw keypoint coordinates [1, 56, 8400]

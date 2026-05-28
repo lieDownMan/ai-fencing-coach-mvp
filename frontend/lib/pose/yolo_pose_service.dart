@@ -156,9 +156,13 @@ class YoloPoseService {
       final rawY = kp.y.clamp(0.0, 1.0).toDouble();
 
       if (isFrontCamera) {
-        return Offset(imgH - rawY, imgW - rawX);
+        // Current: (imgH - rawY, imgW - rawX)
+        // Rotated 90 CCW (y, 1 - x): (imgW - rawX, rawY)
+        return Offset(imgW - rawX, rawY);
       }
-      return Offset(imgH - rawY, rawX);
+      // Current: (imgH - rawY, rawX)
+      // Rotated 90 CCW (y, 1 - x): (rawX, rawY)
+      return Offset(rawX, rawY);
     }
 
     final nose = lm(0);
@@ -209,11 +213,11 @@ class YoloPoseService {
       'left_ankle': leftAnkle,
       'right_ankle': rightAnkle,
       'left_shoulder': leftShoulder ?? frontShoulder,
-      'right_shoulder': rightShoulder,
+      'right_shoulder': rightShoulder ?? frontShoulder,
       'left_elbow': leftElbow ?? frontElbow,
-      'right_elbow': rightElbow,
+      'right_elbow': rightElbow ?? frontElbow,
       'left_wrist': leftWrist ?? frontWrist,
-      'right_wrist': rightWrist,
+      'right_wrist': rightWrist ?? frontWrist,
     };
     if (backWrist != null) joints['back_wrist'] = backWrist;
 
