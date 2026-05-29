@@ -19,9 +19,11 @@ class PostgameVideoAnalyzer(private val context: Context) {
         trainingMode: TrainingMode,
         poseBackend: PoseBackendKind,
         onProgress: suspend (PostgameAnalysisProgress) -> Unit
-    ): PracticeReport = withContext(Dispatchers.Default) {
+    ): Pair<PracticeReport, Map<Long, CoachFrameState>> = withContext(Dispatchers.Default) {
         val retriever = MediaMetadataRetriever()
         val pipeline = LiveCoachPipeline(context, poseBackend, targetSide, trainingMode)
+        val frameStates = mutableMapOf<Long, CoachFrameState>()
+
         try {
             retriever.setDataSource(context, uri)
             val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
@@ -39,7 +41,8 @@ class PostgameVideoAnalyzer(private val context: Context) {
                 if (bitmap != null) {
                     val frame = bitmap.ensureArgb8888()
                     try {
-                        pipeline.processBitmap(frame, timestampNs = timeUs * 1_000L)
+                        val (state, _) = pipeline.processBitmap(frame, timestampNs = timeUs * 1_000L)
+                        frameStates[timeUs] = state
                     } finally {
                         frame.recycle()
                         if (frame !== bitmap) bitmap.recycle()
@@ -62,7 +65,10 @@ class PostgameVideoAnalyzer(private val context: Context) {
             }
 
             update(onProgress, 1f, "Analysis ready")
-            pipeline.practiceReport(elapsedSecondsOverride = maxOf(1L, durationMs / 1_000L))
+            Pair(
+                pipeline.practiceReport(elapsedSecondsOverride = maxOf(1L, durationMs / 1_000L)),
+                frameStates
+            )
         } finally {
             pipeline.close()
             retriever.release()
