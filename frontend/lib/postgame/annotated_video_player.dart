@@ -1,9 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
-import 'package:image_gallery_saver/image_gallery_saver.dart';
 
-import '../pose/pose_painter.dart';
 import '../postgame/postgame_analyzer.dart';
 import '../services/video_exporter.dart';
 

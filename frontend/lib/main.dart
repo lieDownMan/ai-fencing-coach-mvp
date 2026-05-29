@@ -707,44 +707,184 @@ class _MainScreenState extends State<MainScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        titleSpacing: 16,
-        title: Row(
-          children: [
-            const Icon(Icons.sports_martial_arts, color: Color(0xFFFF6600), size: 22),
-            const SizedBox(width: 8),
-            const Text('AI Fencing Coach'),
-            const Spacer(),
-            _buildStatusPill(),
-          ],
-        ),
-        bottom: TabBar(
+      backgroundColor: const Color(0xFF0D0D1A),
+      body: SafeArea(
+        child: TabBarView(
           controller: _tabController,
-          indicatorWeight: 3,
-          tabs: const [
-            Tab(icon: Icon(Icons.videocam, size: 20), text: 'Live'),
-            Tab(icon: Icon(Icons.video_library, size: 20), text: 'Postgame'),
-            Tab(icon: Icon(Icons.history, size: 20), text: 'History'),
-            Tab(icon: Icon(Icons.tune, size: 20), text: 'Settings'),
-            Tab(icon: Icon(Icons.analytics, size: 20), text: 'Debug'),
+          physics: const NeverScrollableScrollPhysics(),
+          children: [
+            _buildHomeTab(),
+            _buildLiveTab(),
+            _buildPostgameTab(),
+            _buildHistoryTab(),
+            _buildSettingsTab(),
+            _buildDebugTab(),
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tabController,
-        physics: const NeverScrollableScrollPhysics(),
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // TAB 0: HOME
+  // ──────────────────────────────────────────────────────────────────────────
+
+  Widget _buildHomeTab() {
+    return Column(
+      children: [
+        const SizedBox(height: 40),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.sports_martial_arts, color: Color(0xFFFF6600), size: 28),
+            const SizedBox(width: 10),
+            const Text(
+              'AI Fencing Coach',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 28,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Select Mode',
+          style: TextStyle(
+            color: Colors.white54,
+            fontSize: 16,
+            letterSpacing: 1.2,
+          ),
+        ),
+        const SizedBox(height: 32),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            children: [
+              _buildNavCard(
+                icon: Icons.videocam,
+                title: 'Live Camera',
+                subtitle: 'Realtime analysis & coaching feedback',
+                onTap: () => _tabController.animateTo(1),
+              ),
+              _buildNavCard(
+                icon: Icons.video_library,
+                title: 'Postgame Analysis',
+                subtitle: 'Analyze pre-recorded clips for errors',
+                onTap: () => _tabController.animateTo(2),
+              ),
+              _buildNavCard(
+                icon: Icons.history,
+                title: 'History',
+                subtitle: 'Review past sessions & AI summaries',
+                onTap: () => _tabController.animateTo(3),
+              ),
+              _buildNavCard(
+                icon: Icons.settings,
+                title: 'Settings',
+                subtitle: 'Configure target side, modes, and voice',
+                onTap: () => _tabController.animateTo(4),
+              ),
+              const SizedBox(height: 20),
+              GestureDetector(
+                onTap: () => _tabController.animateTo(5),
+                child: const Center(
+                  child: Text(
+                    'Open Debug Panel',
+                    style: TextStyle(color: Colors.white24, fontSize: 12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildNavCard({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: const Color(0xFF141420),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white10),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF6600).withOpacity(0.2),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: const Color(0xFFFF6600), size: 32),
+            ),
+            const SizedBox(width: 20),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(color: Colors.white54, fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.white54),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCustomAppBar(String title) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+      decoration: const BoxDecoration(
+        color: Color(0xFF141420),
+        border: Border(bottom: BorderSide(color: Colors.white10)),
+      ),
+      child: Row(
         children: [
-          _buildLiveTab(),
-          _buildPostgameTab(),
-          _buildHistoryTab(),
-          _buildSettingsTab(),
-          _buildDebugTab(),
+          IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: () => _tabController.animateTo(0),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ],
       ),
     );
   }
 
-  // ── Status pill ─────────────────────────────────────────────────────────────
+  // ── Status pill (used by Live tab) ─────────────────────────────────────────
 
   Widget _buildStatusPill() {
     final isActive = _coachState == 'ACTIVE';
@@ -785,6 +925,7 @@ class _MainScreenState extends State<MainScreen>
       ),
     );
   }
+
 
   // ──────────────────────────────────────────────────────────────────────────
   // TAB 1: LIVE FEED
@@ -1229,6 +1370,9 @@ class _MainScreenState extends State<MainScreen>
           )
         else
           _buildPostgameReport(report),
+            ],
+          ),
+        ),
       ],
     );
   }
@@ -1449,7 +1593,7 @@ class _MainScreenState extends State<MainScreen>
               _postgameStatus = 'Loaded from history';
               _lastSessionId = session.id;
               _geminiSummaryText = session.llmSummary;
-              _tabController.animateTo(1); // Jump to Postgame tab
+              _tabController.animateTo(2); // Jump to Postgame tab
             });
           },
           child: Container(
