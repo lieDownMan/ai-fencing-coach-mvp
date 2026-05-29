@@ -1,25 +1,21 @@
 import 'dart:async';
-import 'dart:io' show File, Platform;
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
-import 'package:intl/intl.dart';
-import 'package:image_gallery_saver/image_gallery_saver.dart';
-import 'package:video_player/video_player.dart' as vp;
 
 import 'heuristics/heuristics_engine.dart';
 import 'heuristics/fencenet_channel.dart';
-import 'postgame/postgame_analyzer.dart';
+import 'heuristics/feedback_scheduler.dart';
 import 'pose/pose_service.dart';
 import 'pose/pose_painter.dart';
 import 'pose/yolo_pose_service.dart';
-import 'database/database_helper.dart';
-import 'services/gemini_service.dart';
-import 'postgame/annotated_video_player.dart';
 import 'pose/activity_gatekeeper.dart';
+import 'postgame/postgame_analyzer.dart';
+import 'postgame/annotated_video_player.dart';
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -76,40 +72,40 @@ class FencingCoachApp extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Error display labels
+// Error display labels (Chinese/English)
 // ---------------------------------------------------------------------------
 
 const Map<String, String> kErrorLabels = {
-  'lunge_overextension': 'Lunge Overextension',
-  'guard_dropped': 'Guard Dropped',
-  'bounce_excessive': 'Excessive Bounce',
-  'foot_before_hand': 'Foot Before Hand',
-  'over_parrying': 'Over-Parrying',
-  'stance_too_high': 'Stance Too High',
-  'incomplete_arm_extension': 'Incomplete Arm Extension',
-  'wide_step': 'Wide Step',
-  'narrow_step': 'Narrow Step',
-  'center_of_mass_in_front': 'Center of Mass Forward',
-  'center_of_mass_leaning_backward': 'Center of Mass Backward',
+  'lunge_overextension': '長刺過度前傾 (Lunge Overextension)',
+  'guard_dropped': '持劍手掉落 (Guard Dropped)',
+  'bounce_excessive': '步伐上下浮動 (Excessive Bounce)',
+  'foot_before_hand': '手腳順序錯誤 (Foot Before Hand)',
+  'over_parrying': '防守動作太大 (Over-Parrying)',
+  'stance_too_high': '預備姿勢沒蹲好 (Stance Too High)',
+  'incomplete_arm_extension': '手沒有伸直 (Incomplete Extension)',
+  'wide_step': '步伐太大 (Wide Step)',
+  'narrow_step': '步伐太小 (Narrow Step)',
+  'center_of_mass_in_front': '重心向前 (CoM Forward)',
+  'center_of_mass_leaning_backward': '重心向後 (CoM Backward)',
 };
 
 const Map<String, String> kErrorVoice = {
-  'lunge_overextension': 'Do not collapse the front knee.',
-  'guard_dropped': 'Guard up.',
-  'bounce_excessive': 'Stay level.',
-  'foot_before_hand': 'Hand first.',
-  'over_parrying': 'Keep the parry compact.',
-  'stance_too_high': 'Stay lower.',
-  'incomplete_arm_extension': 'Extend the arm.',
-  'wide_step': 'Shorten the step.',
-  'narrow_step': 'Widen the base.',
-  'center_of_mass_in_front': 'Keep weight centered.',
-  'center_of_mass_leaning_backward': 'Do not lean back.',
+  'lunge_overextension': '長刺過度前傾，注意不要彎太低',
+  'guard_dropped': '持劍手掉落，請抬高手腕',
+  'bounce_excessive': '步伐上下浮動，保持重心穩定',
+  'foot_before_hand': '腳比手先動，先出手再移步',
+  'over_parrying': '防守動作太大，縮小防守範圍',
+  'stance_too_high': '預備姿勢太高，請蹲低一點',
+  'incomplete_arm_extension': '手沒有伸直，刺出時請完全伸展手臂',
+  'wide_step': '步伐太大，縮小步距',
+  'narrow_step': '步伐太小，加大步距',
+  'center_of_mass_in_front': '重心偏前，保持重心平衡',
+  'center_of_mass_leaning_backward': '重心偏後，向前調整重心',
 };
 
 const Map<String, List<String>> kErrorSupportedModes = {
   'foot_before_hand': ['Target Practice'],
-  'lunge_overextension': ['Target Practice'],
+  'lunge_overextension': ['Footwork', 'Target Practice', 'Free Bouting'], // 🎯 隨時監測
   'incomplete_arm_extension': ['Target Practice'],
   'guard_dropped': ['Footwork', 'Target Practice', 'Free Bouting'],
   'stance_too_high': ['Footwork', 'Target Practice', 'Free Bouting'],
@@ -158,6 +154,7 @@ class _MainScreenState extends State<MainScreen>
 
   // Heuristics
   late HeuristicsEngine _heuristics;
+  late FeedbackScheduler _scheduler;
 
   // Skeleton window buffer (28 frames)
   final List<Skeleton> _skeletonBuffer = [];
@@ -173,7 +170,7 @@ class _MainScreenState extends State<MainScreen>
   // Live state
   String _currentAction = 'Idle';
   double _actionConfidence = 0.0;
-  List<String> _activeErrors = [];
+  List<FeedbackItem> _activeErrors = [];
   late ActivityGatekeeper _gatekeeper;
   String _coachState = 'IDLE'; // 'ACTIVE' | 'IDLE'
   int _frameCount = 0;
@@ -182,7 +179,6 @@ class _MainScreenState extends State<MainScreen>
   late FlutterTts _tts;
   bool _ttsReady = false;
   bool _isSpeaking = false;
-  DateTime _lastSpokenTime = DateTime.fromMillisecondsSinceEpoch(0);
 
   // Flash animation
   late AnimationController _flashController;
@@ -191,32 +187,27 @@ class _MainScreenState extends State<MainScreen>
   // Debug metrics
   final Map<String, bool> _heuristicTriggered = {};
 
-  // Postgame clip analysis
-  final ImagePicker _videoPicker = ImagePicker();
-  XFile? _postgameVideo;
+  // ── Postgame state ─────────────────────────────────────────────────────────
   bool _postgameAnalyzing = false;
   double _postgameProgress = 0.0;
-  String _postgameStatus = 'No video selected';
+  String _postgameStatus = '';
   PostgameReport? _postgameReport;
-
-  // Database & Gemini
-  final DatabaseHelper _dbHelper = DatabaseHelper();
-  final GeminiService _geminiService = GeminiService();
-  bool _useGeminiSummary = true;
-  int? _lastSessionId;
-  String? _geminiSummaryText;
-
-  // History
-  List<SessionRecord> _sessions = [];
-  bool _sessionsLoading = false;
+  String? _postgameVideoPath;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 6, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _heuristics = HeuristicsEngine(
       targetSide: _targetSide,
       trainingMode: _trainingMode,
+    );
+    _scheduler = FeedbackScheduler(
+      focusErrors: Set<String>.from(_focusErrors),
+      muteErrors: Set<String>.from(_muteErrors),
+      onlyErrors: (_onlySelected && _focusErrors.isNotEmpty)
+          ? Set<String>.from(_focusErrors)
+          : {},
     );
     _gatekeeper = ActivityGatekeeper(fps: 30);
 
@@ -232,19 +223,7 @@ class _MainScreenState extends State<MainScreen>
     _initCamera();
     _initFenceNet();
     _initYoloPose();
-    _loadSessions();
     WakelockPlus.enable();
-  }
-
-  Future<void> _loadSessions() async {
-    setState(() => _sessionsLoading = true);
-    final sessions = await _dbHelper.getSessions();
-    if (mounted) {
-      setState(() {
-        _sessions = sessions;
-        _sessionsLoading = false;
-      });
-    }
   }
 
   @override
@@ -310,10 +289,9 @@ class _MainScreenState extends State<MainScreen>
 
   Future<void> _speak(String text) async {
     final cue = text.trim();
+    // Cooldown and priority are now handled by FeedbackScheduler.
+    // _isSpeaking guard prevents cutting off ongoing speech.
     if (!_voiceEnabled || !_ttsReady || _isSpeaking || cue.isEmpty) return;
-    final now = DateTime.now();
-    if (now.difference(_lastSpokenTime).inSeconds < 4) return;
-    _lastSpokenTime = now;
     _isSpeaking = true;
     try {
       await _tts.speak(cue);
@@ -426,7 +404,6 @@ class _MainScreenState extends State<MainScreen>
   // ── Camera Frame Processing ─────────────────────────────────────────────────
 
   Future<void> _onCameraFrame(CameraImage image) async {
-    if (_postgameAnalyzing) return;
     if (_isProcessingFrame) return;
     _isProcessingFrame = true;
 
@@ -514,41 +491,37 @@ class _MainScreenState extends State<MainScreen>
       skeletons: List.from(_skeletonBuffer),
     );
 
-    // Filter by mode
-    final filtered = errors.where((e) {
+    // Filter by training mode (mode-level gate, mirrors feedback_config.py)
+    final modeFiltered = errors.where((e) {
       final supported = kErrorSupportedModes[e] ?? [];
-      if (!supported.contains(_trainingMode)) return false;
-      if (_muteErrors.contains(e)) return false;
-      if (_onlySelected && _focusErrors.isNotEmpty && !_focusErrors.contains(e)) {
-        return false;
-      }
-      return true;
+      return supported.contains(_trainingMode);
     }).toList();
 
-    // Sort: focus errors first
-    filtered.sort((a, b) {
-      final aFocus = _focusErrors.contains(a) ? 0 : 1;
-      final bFocus = _focusErrors.contains(b) ? 0 : 1;
-      return aFocus.compareTo(bFocus);
-    });
-
-    // Update metrics map
-    for (final key in kErrorLabels.keys) {
-      _heuristicTriggered[key] = filtered.contains(key);
+    if (modeFiltered.isNotEmpty) {
+      debugPrint('Heuristics (mode-filtered): $modeFiltered');
     }
 
-    if (filtered.isNotEmpty) {
-      debugPrint('Triggered heuristics: $filtered');
+    // ── FeedbackScheduler: priority, cooldowns, aging ────────────────────────
+    final decision = _scheduler.update(modeFiltered);
+
+    // Update debug metrics map (use raw mode-filtered set for debug tab)
+    for (final key in kErrorLabels.keys) {
+      _heuristicTriggered[key] = modeFiltered.contains(key);
     }
 
     if (mounted) {
-      setState(() => _activeErrors = filtered);
+      setState(() => _activeErrors = decision.visualItems);
     }
 
-    // Flash & voice
-    if (filtered.isNotEmpty) {
+    // Flash if any errors are visible
+    if (decision.visualItems.isNotEmpty) {
       _flashController.forward(from: 0);
-      final voiceText = kErrorVoice[filtered.first] ?? filtered.first;
+    }
+
+    // Voice: speak only the error chosen by the scheduler
+    if (decision.voiceErrorKey != null) {
+      final voiceText =
+          kErrorVoice[decision.voiceErrorKey] ?? decision.voiceErrorKey!;
       _speak(voiceText);
     }
   }
@@ -598,293 +571,60 @@ class _MainScreenState extends State<MainScreen>
       targetSide: _targetSide,
       trainingMode: _trainingMode,
     );
+    _scheduler = FeedbackScheduler(
+      focusErrors: Set<String>.from(_focusErrors),
+      muteErrors: Set<String>.from(_muteErrors),
+      onlyErrors: (_onlySelected && _focusErrors.isNotEmpty)
+          ? Set<String>.from(_focusErrors)
+          : {},
+    );
     _resetLiveBuffers();
   }
 
-  Future<void> _pickPostgameVideo() async {
-    final video = await _videoPicker.pickVideo(source: ImageSource.gallery);
-    if (video == null) return;
-    setState(() {
-      _postgameVideo = video;
-      _postgameReport = null;
-      _postgameProgress = 0.0;
-      _postgameStatus = 'Video selected';
-    });
-  }
-
-  Future<void> _runPostgameAnalysis() async {
-    final video = _postgameVideo;
-    if (video == null || _postgameAnalyzing) return;
-
-    setState(() {
-      _postgameAnalyzing = true;
-      _postgameProgress = 0.0;
-      _postgameStatus = 'Preparing clip';
-    });
-
-    try {
-      final analyzer = PostgameAnalyzer(
-        poseService: _yoloPoseService,
-        fenceNet: _fenceNet,
-        supportedModes: kErrorSupportedModes,
-      );
-      final report = await analyzer.analyzeVideo(
-        path: video.path,
-        videoName: video.name,
-        config: PostgameAnalysisConfig(
-          targetSide: _targetSide,
-          trainingMode: _trainingMode,
-          focusErrors: List<String>.from(_focusErrors),
-          muteErrors: List<String>.from(_muteErrors),
-          onlySelected: _onlySelected,
-        ),
-        onProgress: (fraction, status) {
-          if (!mounted) return;
-          setState(() {
-            _postgameProgress = fraction.clamp(0.0, 1.0).toDouble();
-            _postgameStatus = status;
-          });
-        },
-      );
-      if (!mounted) return;
-      setState(() {
-        _postgameReport = report;
-        _postgameProgress = 1.0;
-        _postgameStatus = 'Analysis ready';
-      });
-
-      // Save to DB
-      final config = PostgameAnalysisConfig(
-        targetSide: _targetSide,
-        trainingMode: _trainingMode,
-        focusErrors: List<String>.from(_focusErrors),
-        muteErrors: List<String>.from(_muteErrors),
-        onlySelected: _onlySelected,
-      );
-      final sessionId = await _dbHelper.insertSession(
-        report: report,
-        config: config,
-      );
-      _lastSessionId = sessionId;
-
-      // Gemini summary
-      if (_useGeminiSummary && _geminiService.isEnabled) {
-        try {
-          final summary = await _geminiService.generateSummary(
-            trainingMode: _trainingMode,
-            targetSide: _targetSide,
-            actionCounts: report.actionCounts,
-            errorCounts: report.errorCounts,
-            errorLabels: kErrorLabels,
-            userName: 'Fencer',
-          );
-          await _dbHelper.updateSummary(sessionId, summary);
-          if (mounted) {
-            setState(() => _geminiSummaryText = summary);
-          }
-        } catch (_) {
-          // Fallback silently
-        }
-      }
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _postgameStatus = 'Analysis failed: $e';
-      });
-    } finally {
-      if (mounted) {
-        setState(() => _postgameAnalyzing = false);
-      }
-      _yoloPoseService.resetTracking();
-      _loadSessions(); // Refresh history
-    }
-  }
-
   // ──────────────────────────────────────────────────────────────────────────
-  // MAIN BUILD
+  // BUILD
   // ──────────────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0D0D1A),
-      body: SafeArea(
-        child: TabBarView(
+      backgroundColor: const Color(0xFF0A0A0F),
+      appBar: AppBar(
+        titleSpacing: 16,
+        title: Row(
+          children: [
+            const Icon(Icons.sports_martial_arts, color: Color(0xFFFF6600), size: 22),
+            const SizedBox(width: 8),
+            const Text('AI Fencing Coach'),
+            const Spacer(),
+            _buildStatusPill(),
+          ],
+        ),
+        bottom: TabBar(
           controller: _tabController,
-          physics: const NeverScrollableScrollPhysics(),
-          children: [
-            _buildHomeTab(),
-            _buildLiveTab(),
-            _buildPostgameTab(),
-            _buildHistoryTab(),
-            _buildSettingsTab(),
-            _buildDebugTab(),
+          indicatorWeight: 3,
+          tabs: const [
+            Tab(icon: Icon(Icons.videocam, size: 20), text: 'Live'),
+            Tab(icon: Icon(Icons.tune, size: 20), text: 'Settings'),
+            Tab(icon: Icon(Icons.analytics, size: 20), text: 'Debug'),
+            Tab(icon: Icon(Icons.bar_chart, size: 20), text: 'Postgame'),
           ],
         ),
       ),
-    );
-  }
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // TAB 0: HOME
-  // ──────────────────────────────────────────────────────────────────────────
-
-  Widget _buildHomeTab() {
-    return Column(
-      children: [
-        const SizedBox(height: 40),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.sports_martial_arts, color: Color(0xFFFF6600), size: 28),
-            const SizedBox(width: 10),
-            const Text(
-              'AI Fencing Coach',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 28,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          'Select Mode',
-          style: TextStyle(
-            color: Colors.white54,
-            fontSize: 16,
-            letterSpacing: 1.2,
-          ),
-        ),
-        const SizedBox(height: 32),
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            children: [
-              _buildNavCard(
-                icon: Icons.videocam,
-                title: 'Live Camera',
-                subtitle: 'Realtime analysis & coaching feedback',
-                onTap: () => _tabController.animateTo(1),
-              ),
-              _buildNavCard(
-                icon: Icons.video_library,
-                title: 'Postgame Analysis',
-                subtitle: 'Analyze pre-recorded clips for errors',
-                onTap: () => _tabController.animateTo(2),
-              ),
-              _buildNavCard(
-                icon: Icons.history,
-                title: 'History',
-                subtitle: 'Review past sessions & AI summaries',
-                onTap: () => _tabController.animateTo(3),
-              ),
-              _buildNavCard(
-                icon: Icons.settings,
-                title: 'Settings',
-                subtitle: 'Configure target side, modes, and voice',
-                onTap: () => _tabController.animateTo(4),
-              ),
-              const SizedBox(height: 20),
-              GestureDetector(
-                onTap: () => _tabController.animateTo(5),
-                child: const Center(
-                  child: Text(
-                    'Open Debug Panel',
-                    style: TextStyle(color: Colors.white24, fontSize: 12),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildNavCard({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 16),
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: const Color(0xFF141420),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white10),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFF6600).withOpacity(0.2),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, color: const Color(0xFFFF6600), size: 32),
-            ),
-            const SizedBox(width: 20),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(color: Colors.white54, fontSize: 13),
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right, color: Colors.white54),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCustomAppBar(String title) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-      decoration: const BoxDecoration(
-        color: Color(0xFF141420),
-        border: Border(bottom: BorderSide(color: Colors.white10)),
-      ),
-      child: Row(
+      body: TabBarView(
+        controller: _tabController,
+        physics: const NeverScrollableScrollPhysics(),
         children: [
-          IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.white),
-            onPressed: () => _tabController.animateTo(0),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            title,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
+          _buildLiveTab(),
+          _buildSettingsTab(),
+          _buildDebugTab(),
+          _buildPostgameTab(),
         ],
       ),
     );
   }
 
-  // ── Status pill (used by Live tab) ─────────────────────────────────────────
+  // ── Status pill ─────────────────────────────────────────────────────────────
 
   Widget _buildStatusPill() {
     final isActive = _coachState == 'ACTIVE';
@@ -926,51 +666,42 @@ class _MainScreenState extends State<MainScreen>
     );
   }
 
-
   // ──────────────────────────────────────────────────────────────────────────
   // TAB 1: LIVE FEED
   // ──────────────────────────────────────────────────────────────────────────
 
   Widget _buildLiveTab() {
+    if (!_isCameraInitialized || _cameraController == null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.camera_alt_outlined, size: 72, color: Color(0xFF333355)),
+            const SizedBox(height: 20),
+            const Text(
+              '初始化相機...\nInitializing Camera',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white38, fontSize: 16),
+            ),
+            const SizedBox(height: 20),
+            const CircularProgressIndicator(color: Color(0xFFFF6600)),
+          ],
+        ),
+      );
+    }
+
     return Column(
       children: [
-        _buildCustomAppBar('Live Camera'),
-        if (!_isCameraInitialized || _cameraController == null)
-          Expanded(
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.camera_alt_outlined, size: 72, color: Color(0xFF333355)),
-                  const SizedBox(height: 20),
-                  const Text(
-                    '初始化相機...\nInitializing Camera',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white38, fontSize: 16),
-                  ),
-                  const SizedBox(height: 20),
-                  const CircularProgressIndicator(color: Color(0xFFFF6600)),
-                ],
-              ),
-            ),
-          )
-        else
-          Expanded(
-            child: Column(
-              children: [
-                // Camera + Skeleton overlay
-                Expanded(
-                  flex: 6,
-                  child: _buildCameraOverlay(),
-                ),
-                // Error cards
-                Expanded(
-                  flex: 4,
-                  child: _buildFeedbackPanel(),
-                ),
-              ],
-            ),
-          ),
+        // Camera + Skeleton overlay
+        Expanded(
+          flex: 6,
+          child: _buildCameraOverlay(),
+        ),
+
+        // Error cards
+        Expanded(
+          flex: 4,
+          child: _buildFeedbackPanel(),
         ),
       ],
     );
@@ -1001,7 +732,7 @@ class _MainScreenState extends State<MainScreen>
                     _cameraController!.value.previewSize?.height ?? 480,
                     _cameraController!.value.previewSize?.width ?? 640,
                   ),
-                  triggeredError: _activeErrors.isNotEmpty ? _activeErrors.first : null,
+                  triggeredError: _activeErrors.isNotEmpty ? _activeErrors.first.errorKey : null,
                   currentAction: _currentAction,
                   isFrontCamera: _cameraController?.description.lensDirection == CameraLensDirection.front,
                 ),
@@ -1164,8 +895,10 @@ class _MainScreenState extends State<MainScreen>
         padding: const EdgeInsets.all(12),
         itemCount: _activeErrors.length,
         itemBuilder: (ctx, idx) {
-          final key = _activeErrors[idx];
+          final item = _activeErrors[idx];
+          final key = item.errorKey;
           final label = kErrorLabels[key] ?? key;
+          final scoreStr = item.score.toStringAsFixed(1);
           final isPrimary = idx == 0;
           return AnimatedContainer(
             duration: const Duration(milliseconds: 300),
@@ -1200,7 +933,7 @@ class _MainScreenState extends State<MainScreen>
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    label,
+                    '$label (權重: $scoreStr)',
                     style: TextStyle(
                       color: isPrimary ? Colors.white : Colors.white70,
                       fontWeight: isPrimary ? FontWeight.bold : FontWeight.normal,
@@ -1246,7 +979,8 @@ class _MainScreenState extends State<MainScreen>
               'Turned Back: ${_gatekeeper.lastReasons['turned_back']}\n'
               'Moving: ${_gatekeeper.lastReasons['moving']}\n'
               'Step Ratio: ${_heuristics.lastStepRatio?.toStringAsFixed(2) ?? 'N/A'} | '
-              'Step Width: ${_heuristics.lastStepWidth?.toStringAsFixed(3) ?? 'N/A'}',
+              'Step Width: ${_heuristics.lastStepWidth?.toStringAsFixed(3) ?? 'N/A'}\n'
+              'CoM Ratio: ${_heuristics.lastComRatio?.toStringAsFixed(2) ?? 'N/A'} (Needs < 0.35 or > 0.65)',
               style: const TextStyle(color: Colors.white54, fontSize: 10),
               textAlign: TextAlign.center,
             ),
@@ -1257,396 +991,7 @@ class _MainScreenState extends State<MainScreen>
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // TAB 2: POSTGAME
-  // ──────────────────────────────────────────────────────────────────────────
-
-  Widget _buildPostgameTab() {
-    final report = _postgameReport;
-    return Column(
-      children: [
-        _buildCustomAppBar('Postgame Analysis'),
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              _sectionHeader('Postgame Analysis'),
-              const SizedBox(height: 12),
-        _buildCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Icon(Icons.video_file, color: Color(0xFFFF6600)),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      _postgameVideo?.name ?? 'No clip selected',
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  ElevatedButton.icon(
-                    onPressed: _postgameAnalyzing ? null : _pickPostgameVideo,
-                    icon: const Icon(Icons.folder_open),
-                    label: const Text('Choose Video'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1C2230),
-                      foregroundColor: Colors.white,
-                    ),
-                  ),
-                  ElevatedButton.icon(
-                    onPressed: _postgameVideo == null || _postgameAnalyzing
-                        ? null
-                        : _runPostgameAnalysis,
-                    icon: const Icon(Icons.analytics),
-                    label: const Text('Run Analysis'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF6600),
-                      foregroundColor: Colors.black,
-                    ),
-                  ),
-                  if (_postgameReport != null && _postgameVideo != null)
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => AnnotatedVideoPlayerScreen(
-                              videoPath: _postgameVideo!.path,
-                              report: _postgameReport!,
-                            ),
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.play_circle_fill),
-                      label: const Text('Play Annotated Video'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blueAccent,
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              LinearProgressIndicator(
-                value: _postgameAnalyzing || _postgameProgress > 0
-                    ? _postgameProgress.clamp(0.0, 1.0).toDouble()
-                    : null,
-                minHeight: 6,
-                color: const Color(0xFFFF6600),
-                backgroundColor: Colors.white10,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                _postgameStatus,
-                style: TextStyle(
-                  color: _postgameStatus.startsWith('Analysis failed')
-                      ? Colors.redAccent
-                      : Colors.white54,
-                  fontSize: 12,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        if (report == null)
-          _buildCard(
-            child: const Text(
-              'Pick a recorded fencing clip to run the same pose, FenceNet, and heuristic checks used by the live coach.',
-              style: TextStyle(color: Colors.white54, height: 1.4),
-            ),
-          )
-        else
-          _buildPostgameReport(report),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildPostgameReport(PostgameReport report) {
-    final topErrors = report.topErrors;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                _geminiSummaryText ?? report.primaryTakeaway(kErrorLabels),
-                style: const TextStyle(
-                  color: Color(0xFFFF6600),
-                  fontWeight: FontWeight.bold,
-                  fontSize: 15,
-                ),
-              ),
-              if (_geminiSummaryText != null) ...[
-                const SizedBox(height: 8),
-                const Row(
-                  children: [
-                    Icon(Icons.auto_awesome, color: Colors.blueAccent, size: 14),
-                    SizedBox(width: 4),
-                    Text('Gemini AI Summary', style: TextStyle(color: Colors.blueAccent, fontSize: 11)),
-                  ],
-                ),
-              ],
-              const SizedBox(height: 14),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _metricChip('duration', _formatDuration(report.duration)),
-                  _metricChip('frames', '${report.framesAnalyzed}'),
-                  _metricChip('checks', '${report.modelChecks}'),
-                  _metricChip('top action', report.topAction),
-                ],
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
-        _buildCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Repeated Cues',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 10),
-              if (topErrors.isEmpty)
-                const Text('No posture cues detected.', style: TextStyle(color: Colors.white54))
-              else
-                ...topErrors.take(6).map((entry) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 34,
-                          alignment: Alignment.center,
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF3A0D12),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: Colors.redAccent.withAlpha(100)),
-                          ),
-                          child: Text(
-                            '${entry.value}x',
-                            style: const TextStyle(
-                              color: Colors.redAccent,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 11,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            kErrorLabels[entry.key] ?? entry.key,
-                            style: const TextStyle(color: Colors.white70, fontSize: 13),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
-        _buildCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Timeline',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 10),
-              if (report.timeline.isEmpty)
-                const Text(
-                  'No model windows were completed.',
-                  style: TextStyle(color: Colors.white54),
-                )
-              else
-                ...report.timeline.take(20).map((item) {
-                  final label = item.errors.isEmpty
-                      ? 'Clean window'
-                      : item.errors.map((key) => kErrorLabels[key] ?? key).join(', ');
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF0D0D1A),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.white10),
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _formatSeconds(item.timeSeconds),
-                          style: const TextStyle(
-                            color: Color(0xFF00D4FF),
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '${item.action}  ${(item.confidence * 100).toStringAsFixed(0)}%',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              const SizedBox(height: 3),
-                              Text(
-                                label,
-                                style: TextStyle(
-                                  color: item.errors.isEmpty
-                                      ? Colors.greenAccent
-                                      : Colors.orangeAccent,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // TAB 3: HISTORY
-  // ──────────────────────────────────────────────────────────────────────────
-
-  Widget _buildHistoryTab() {
-    if (_sessionsLoading) {
-      return Column(
-        children: [
-          _buildCustomAppBar('History'),
-          const Expanded(child: Center(child: CircularProgressIndicator(color: Color(0xFFFF6600)))),
-        ],
-      );
-    }
-    
-    if (_sessions.isEmpty) {
-      return Column(
-        children: [
-          _buildCustomAppBar('History'),
-          const Expanded(
-            child: Center(
-              child: Text(
-                'No history yet.\nRun a postgame analysis to save a session.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white54, height: 1.5),
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-
-    return Column(
-      children: [
-        _buildCustomAppBar('History'),
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: _sessions.length,
-            itemBuilder: (context, index) {
-        final session = _sessions[index];
-        final dateFormat = DateFormat('MMM d, yyyy • h:mm a');
-        final isSelected = _lastSessionId == session.id;
-        
-        return GestureDetector(
-          onTap: () {
-            setState(() {
-              _postgameVideo = XFile('history_dummy.mp4');
-              _postgameReport = session.toReport();
-              _postgameStatus = 'Loaded from history';
-              _lastSessionId = session.id;
-              _geminiSummaryText = session.llmSummary;
-              _tabController.animateTo(2); // Jump to Postgame tab
-            });
-          },
-          child: Container(
-            margin: const EdgeInsets.only(bottom: 12),
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFF141420),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: isSelected ? const Color(0xFFFF6600) : Colors.white10,
-                width: isSelected ? 2 : 1,
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      dateFormat.format(session.date),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
-                    ),
-                    const Icon(Icons.chevron_right, color: Colors.white54, size: 20),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    _metricChip('Mode', session.trainingMode),
-                    const SizedBox(width: 8),
-                    _metricChip('Side', session.targetSide),
-                    const SizedBox(width: 8),
-                    _metricChip('Action', session.topAction),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    ),
-        ),
-      ],
-    );
-  }
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // TAB 4: SETTINGS
+  // TAB 2: SETTINGS
   // ──────────────────────────────────────────────────────────────────────────
 
   Widget _buildSettingsTab() {
@@ -1655,17 +1000,13 @@ class _MainScreenState extends State<MainScreen>
       return modes.contains(_trainingMode);
     }).toList();
 
-    return Column(
-      children: [
-        _buildCustomAppBar('Settings'),
-        Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _sectionHeader('⚙️ 訓練設定 Training Settings'),
-                const SizedBox(height: 12),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _sectionHeader('⚙️ 訓練設定 Training Settings'),
+          const SizedBox(height: 12),
 
           // Target Side
           _buildDropdownField<String>(
@@ -1721,28 +1062,6 @@ class _MainScreenState extends State<MainScreen>
               activeThumbColor: const Color(0xFFFF6600),
               contentPadding: EdgeInsets.zero,
               onChanged: (val) => setState(() => _voiceEnabled = val),
-            ),
-          ),
-          const SizedBox(height: 12),
-
-          // Gemini switch
-          _buildCard(
-            child: SwitchListTile(
-              title: const Text('Gemini 總結 AI Summary'),
-              subtitle: Text(
-                _geminiService.isEnabled 
-                    ? '分析完成後產生 AI 建議 / Generate AI tips after analysis'
-                    : 'API Key 未設定，此功能無法使用 / API Key missing',
-                style: TextStyle(
-                  color: _geminiService.isEnabled ? Colors.white54 : Colors.redAccent,
-                ),
-              ),
-              value: _useGeminiSummary && _geminiService.isEnabled,
-              activeThumbColor: const Color(0xFFFF6600),
-              contentPadding: EdgeInsets.zero,
-              onChanged: _geminiService.isEnabled 
-                  ? (val) => setState(() => _useGeminiSummary = val)
-                  : null,
             ),
           ),
           const SizedBox(height: 16),
@@ -1830,14 +1149,11 @@ class _MainScreenState extends State<MainScreen>
           const SizedBox(height: 32),
         ],
       ),
-    ),
-        ),
-      ],
     );
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // TAB 4: DEBUG METRICS
+  // TAB 3: DEBUG METRICS
   // ──────────────────────────────────────────────────────────────────────────
 
   Widget _buildDebugTab() {
@@ -1943,32 +1259,309 @@ class _MainScreenState extends State<MainScreen>
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // UI helpers
+  // TAB 4: POSTGAME ANALYSIS
   // ──────────────────────────────────────────────────────────────────────────
 
-  Widget _metricChip(String label, String value) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1C2230),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white10),
-      ),
+  Future<void> _pickAndAnalyzeVideo() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickVideo(source: ImageSource.gallery);
+    if (picked == null) return;
+
+    if (!_yoloPoseLoaded || !_fenceNetLoaded) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('模型尚未載入完成，請稍候 / Models are still loading…'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
+    setState(() {
+      _postgameAnalyzing = true;
+      _postgameProgress = 0.0;
+      _postgameStatus = '準備中 / Preparing…';
+      _postgameReport = null;
+      _postgameVideoPath = picked.path;
+    });
+
+    try {
+      final analyzer = PostgameAnalyzer(
+        poseService: _yoloPoseService,
+        fenceNet: _fenceNet,
+        supportedModes: kErrorSupportedModes,
+      );
+
+      final config = PostgameAnalysisConfig(
+        targetSide: _targetSide,
+        trainingMode: _trainingMode,
+        focusErrors: _focusErrors,
+        muteErrors: _muteErrors,
+        onlySelected: _onlySelected,
+      );
+
+      final report = await analyzer.analyzeVideo(
+        path: picked.path,
+        videoName: picked.name,
+        config: config,
+        onProgress: (fraction, status) {
+          if (mounted) {
+            setState(() {
+              _postgameProgress = fraction;
+              _postgameStatus = status;
+            });
+          }
+        },
+      );
+
+      if (mounted) {
+        setState(() {
+          _postgameReport = report;
+          _postgameAnalyzing = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _postgameAnalyzing = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('分析失敗 / Analysis error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Widget _buildPostgameTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ── Header ──────────────────────────────────────────────────────
+          Row(
+            children: [
+              const Icon(Icons.bar_chart, color: Color(0xFFFF6600), size: 22),
+              const SizedBox(width: 8),
+              _sectionHeader('賽後影片分析 / Postgame Analysis'),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '從相簿選擇一段擊劍練習影片，App 將逐幀分析動作與姿勢錯誤。',
+            style: TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+          const SizedBox(height: 16),
+
+          // ── Pick video button ────────────────────────────────────────────
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFF6600),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            icon: const Icon(Icons.video_library),
+            label: Text(
+              _postgameAnalyzing
+                  ? '分析中… / Analyzing…'
+                  : '選擇影片 / Pick a Video',
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+            ),
+            onPressed: _postgameAnalyzing ? null : _pickAndAnalyzeVideo,
+          ),
+
+          // ── Progress bar ─────────────────────────────────────────────────
+          if (_postgameAnalyzing) ...([
+            const SizedBox(height: 20),
+            LinearProgressIndicator(
+              value: _postgameProgress,
+              backgroundColor: Colors.white12,
+              color: const Color(0xFFFF6600),
+              minHeight: 6,
+              borderRadius: BorderRadius.circular(3),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _postgameStatus,
+              style: const TextStyle(color: Colors.white60, fontSize: 12),
+              textAlign: TextAlign.center,
+            ),
+          ]),
+
+          // ── Report ───────────────────────────────────────────────────────
+          if (_postgameReport != null) ...([
+            const SizedBox(height: 24),
+            _buildPostgameReport(_postgameReport!),
+          ]),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPostgameReport(PostgameReport report) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Summary card
+        _buildCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.summarize, color: Color(0xFFFF6600), size: 18),
+                  const SizedBox(width: 6),
+                  Text('分析摘要 / Summary', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                ],
+              ),
+              const SizedBox(height: 10),
+              _infoRow('影片名稱 / File', report.videoName),
+              _infoRow('影片長度 / Duration', _formatDurationSec(report.duration.inSeconds)),
+              _infoRow('分析影格 / Frames Analyzed', '${report.framesAnalyzed}'),
+              _infoRow('模型判定次數 / Model Checks', '${report.modelChecks}'),
+              _infoRow('最常見動作 / Top Action', report.topAction),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // Watch annotated video button
+        if (_postgameVideoPath != null)
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFF00D4FF),
+              side: const BorderSide(color: Color(0xFF00D4FF)),
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            icon: const Icon(Icons.play_circle_outline),
+            label: const Text('觀看標注影片 / Watch Annotated Video'),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => AnnotatedVideoPlayerScreen(
+                    videoPath: _postgameVideoPath!,
+                    report: report,
+                  ),
+                ),
+              );
+            },
+          ),
+        const SizedBox(height: 12),
+
+        // Action counts card
+        if (report.actionCounts.isNotEmpty) ...([
+          _buildCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.directions_run, color: Color(0xFF00D4FF), size: 18),
+                    const SizedBox(width: 6),
+                    const Text('動作統計 / Action Counts', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                ...(report.actionCounts.entries.toList()
+                    ..sort((a, b) => b.value.compareTo(a.value)))
+                    .map((e) => _barRow(
+                          label: e.key,
+                          count: e.value,
+                          total: report.modelChecks > 0 ? report.modelChecks : 1,
+                          color: e.key == 'Idle' ? Colors.white24 : const Color(0xFF00D4FF),
+                        )),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+        ]),
+
+        // Error counts card
+        if (report.errorCounts.isNotEmpty) ...([
+          _buildCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.warning_amber, color: Colors.redAccent, size: 18),
+                    const SizedBox(width: 6),
+                    const Text('錯誤統計 / Error Counts', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                ...report.topErrors.map((e) => _barRow(
+                      label: kErrorLabels[e.key] ?? e.key,
+                      count: e.value,
+                      total: report.modelChecks > 0 ? report.modelChecks : 1,
+                      color: Colors.redAccent,
+                    )),
+              ],
+            ),
+          ),
+        ]) else
+          _buildCard(
+            child: Row(
+              children: const [
+                Icon(Icons.check_circle_outline, color: Colors.greenAccent, size: 20),
+                SizedBox(width: 8),
+                Text('沒有偵測到任何錯誤！/ No errors detected!',
+                    style: TextStyle(color: Colors.greenAccent)),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _infoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            label,
-            style: const TextStyle(color: Colors.white38, fontSize: 10),
+          SizedBox(
+            width: 160,
+            child: Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12)),
           ),
-          const SizedBox(height: 2),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
+          Expanded(
+            child: Text(value,
+                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _barRow({required String label, required int count, required int total, required Color color}) {
+    final fraction = (count / total).clamp(0.0, 1.0);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 11),
+                    overflow: TextOverflow.ellipsis),
+              ),
+              Text('$count', style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          const SizedBox(height: 4),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: fraction,
+              backgroundColor: Colors.white12,
+              color: color,
+              minHeight: 5,
             ),
           ),
         ],
@@ -1976,18 +1569,15 @@ class _MainScreenState extends State<MainScreen>
     );
   }
 
-  String _formatDuration(Duration duration) {
-    final minutes = duration.inMinutes;
-    final seconds = duration.inSeconds % 60;
-    return '$minutes:${seconds.toString().padLeft(2, '0')}';
+  String _formatDurationSec(int totalSeconds) {
+    final m = totalSeconds ~/ 60;
+    final s = totalSeconds % 60;
+    return '$m:${s.toString().padLeft(2, '0')}';
   }
 
-  String _formatSeconds(double seconds) {
-    final whole = seconds.floor();
-    final minutes = whole ~/ 60;
-    final remainder = whole % 60;
-    return '$minutes:${remainder.toString().padLeft(2, '0')}';
-  }
+  // ──────────────────────────────────────────────────────────────────────────
+  // UI helpers
+  // ──────────────────────────────────────────────────────────────────────────
 
   Widget _sectionHeader(String title) {
     return Text(

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io' show File;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+import 'package:flutter/painting.dart' show Offset;
 
 import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
@@ -282,7 +283,7 @@ class PostgameAnalyzer {
 
   List<double> _buildFenceNetInput(
     List<Skeleton> window, {
-    required ui.Offset? referenceNose,
+    required Offset? referenceNose,
     required double? referenceScale,
   }) {
     final input = List<double>.filled(18 * windowSize, 0.0);

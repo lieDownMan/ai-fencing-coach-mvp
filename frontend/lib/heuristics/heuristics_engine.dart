@@ -16,20 +16,20 @@ import 'package:flutter/foundation.dart';
 
 const int kBouncMinPelvisSamples = 5;
 const double kBounceRatioThreshold = 0.33;
-const double kLungeKneeMinAngleDeg = 90.0;
-const int kGuardDroppedThresholdFrames = 10;
-const int kGuardDroppedFreeBoutingThresholdFrames = 20;
-const double kFootBeforeHandMinDisplacementPx = 5.0;
-const double kStanceTooHighAngleDeg = 173.0;
+const double kLungeKneeMinAngleDeg = 120.0; // 🎯 已改為 120 度
+const int kGuardDroppedThresholdFrames = 5; // 🎯 觸發幀數調小 (原10)
+const int kGuardDroppedFreeBoutingThresholdFrames = 10; // 🎯 實戰觸發幀數調小 (原20)
+const double kFootBeforeHandMinDisplacementPx = 0.01; // 🎯 歸一化座標下合理值 (原5.0)
+const double kStanceTooHighAngleDeg = 160.0; // 🎯 改為 160 度，更容易觸發
 const double kIncompleteArmExtensionAngleDeg = 155.0;
 const int kOverParryMinWristSamples = 5;
 const double kOverParryShoulderMultiplier = 2.0;
 const double kOverParryRatioThreshold = 2.0;
 const double kStepShoulderProxyMultiplier = 2.5;
-const double kStepMinShoulderWidthPx = 10.0;
+const double kStepMinShoulderWidthPx = 0.02; // 🎯 歸一化座標下合理值 (原3.0)
 const double kWideStepRatioThreshold = 3.0;
-const double kNarrowStepRatioThreshold = 2.0;
-const double kComMinBaseWidthPx = 10.0;
+const double kNarrowStepRatioThreshold = 1.2; // 🎯 歸一化座標下合理值 (原2.5)
+const double kComMinBaseWidthPx = 0.03; // 🎯 歸一化座標下合理值 (原10.0)
 const double kComInFrontRatioThreshold = 0.65;
 const double kComLeaningBackRatioThreshold = 0.35;
 
@@ -112,6 +112,10 @@ class HeuristicsEngine {
   final String trainingMode;
   double? lastStepRatio;
   double? lastStepWidth;
+  double? lastComRatio;
+
+  // 🎯 新增：用來計算經過的總幀數，控制前五秒的冷卻時間
+  int _frameCount = 0;
 
   HeuristicsEngine({
     required this.targetSide,
@@ -125,6 +129,8 @@ class HeuristicsEngine {
     required List<Skeleton> skeletons,
   }) {
     if (skeletons.isEmpty) return [];
+
+    _frameCount++; // 每進來一個畫面，計數器 +1
 
     // Unconditionally compute live step debug metrics
     final latestSkel = skeletons.last;
@@ -145,37 +151,36 @@ class HeuristicsEngine {
     final errors = <String>[];
     final isOffensive = kOffensiveActions.contains(action);
 
-    // Footwork-specific checks
-    if (trainingMode == 'Footwork' && kFootworkActions.contains(action)) {
+    // 🎯 1. 身體起伏過大 (bounce_excessive)
+    // 假設 30 FPS，大約 150 幀是 5 秒。前 5 秒不檢查。
+    if (_frameCount > 150) {
       _tryAdd(errors, _checkBounce(skeletons));
-      _tryAdd(errors, _checkStanceTooHigh(skeletons));
-      _tryAdd(errors, _checkCenterOfMass(skeletons));
     }
 
-    // Target Practice offensive checks
-    if (trainingMode == 'Target Practice' && isOffensive) {
-      _tryAdd(errors, _checkLunge(skeletons));
-      _tryAdd(errors, _checkFootBeforeHand(skeletons));
-      _tryAdd(errors, _checkIncompleteArmExtension(skeletons));
-    }
+    // 🎯 2. 隨時監測：膝蓋超伸 (大於 100 度)
+    _tryAdd(errors, _checkLunge(skeletons));
 
-    // Guard dropped — all modes
+    // 🎯 3. 隨時監測：前傾後仰
+    _tryAdd(errors, _checkCenterOfMass(skeletons));
+
+    // 🎯 4. 隨時監測：站太高 (門檻已調為 160 度)
+    _tryAdd(errors, _checkStanceTooHigh(skeletons));
+
+    // 🎯 5. 隨時監測：持劍手掉落
     _tryAdd(errors, _checkGuard(skeletons));
 
-    // Step width — all modes, unconditionally
+    // 🎯 6. 隨時監測：步伐寬度
     _tryAdd(errors, _checkStepWidth(skeletons));
 
-    // Footwork checks in non-Footwork modes
-    if (trainingMode != 'Footwork' && kFootworkActions.contains(action)) {
-      _tryAdd(errors, _checkStanceTooHigh(skeletons));
-      _tryAdd(errors, _checkBounce(skeletons));
-      _tryAdd(errors, _checkCenterOfMass(skeletons));
-    }
+    // 🎯 7. 隨時監測：防守動作過大 (改用歐幾里得距離，偵測上下+左右)
+    _tryAdd(errors, _checkOverParrying(skeletons));
 
-    // Over-parrying
-    if (action == 'SB' ||
-        (trainingMode == 'Free Bouting' && kFootworkActions.contains(action))) {
-      _tryAdd(errors, _checkOverParrying(skeletons));
+    // ── 特定動作才觸發的檢查 ──
+
+    // Target Practice 專屬的攻擊檢查 (腳先走、手未伸直)
+    if (trainingMode == 'Target Practice' && isOffensive) {
+      _tryAdd(errors, _checkFootBeforeHand(skeletons));
+      _tryAdd(errors, _checkIncompleteArmExtension(skeletons));
     }
 
     return errors;
@@ -210,32 +215,24 @@ class HeuristicsEngine {
   }
 
   // ── Rule 2: lunge_overextension ───────────────────────────────────────────
+  // 🎯 隨時監測：掃描 window 中膝角最小的那幀（worst-case），
+  //    不再依賴腳踝位移，所以站立時也能偵測到膝蓋超伸。
 
   String? _checkLunge(List<Skeleton> skeletons) {
     final limbs = frontLimbs(targetSide);
-    final refAnkle = skeletons[0][limbs['ankle']!];
-    if (refAnkle == null) return null;
 
-    double maxDisp = 0;
-    Skeleton peakSkel = skeletons[0];
+    double minAngle = double.infinity;
     for (final skel in skeletons) {
+      final hip   = skel[limbs['hip']!];
+      final knee  = skel[limbs['knee']!];
       final ankle = skel[limbs['ankle']!];
-      if (ankle != null) {
-        final d = (ankle - refAnkle).distance;
-        if (d > maxDisp) {
-          maxDisp = d;
-          peakSkel = skel;
-        }
-      }
+      if (hip == null || knee == null || ankle == null) continue;
+      final angle = calcAngle(hip, knee, ankle);
+      if (angle < minAngle) minAngle = angle;
     }
 
-    final hip = peakSkel[limbs['hip']!];
-    final knee = peakSkel[limbs['knee']!];
-    final ankle = peakSkel[limbs['ankle']!];
-    if (hip == null || knee == null || ankle == null) return null;
-
-    final angle = calcAngle(hip, knee, ankle);
-    if (angle < kLungeKneeMinAngleDeg) return 'lunge_overextension';
+    if (minAngle == double.infinity) return null;
+    if (minAngle < kLungeKneeMinAngleDeg) return 'lunge_overextension';
     return null;
   }
 
@@ -350,11 +347,16 @@ class HeuristicsEngine {
   }
 
   // ── Rule 9: over_parrying ─────────────────────────────────────────────────
+  //
+  // 使用歐幾里得距離（2D）量測手腕的移動範圍。
+  // 傳統只看 x 軸的話，上下揮動的大幅防守動作會漏掉；
+  // 改成計算手腕移動的 「最大 2D 位移」 來同時捕捉水平和垂直方向的過大擺動。
 
   String? _checkOverParrying(List<Skeleton> skeletons) {
     final limbs = frontLimbs(targetSide);
     double? shoulderWidth;
 
+    // ── Step 1: 估算肩膀寬度作為比例基準 ────────────────────────────────────
     for (final skel in skeletons) {
       final shoulder = skel[limbs['shoulder']!];
       final otherShoulderName =
@@ -363,28 +365,40 @@ class HeuristicsEngine {
       if (otherShoulder == null) {
         final pelvis = _pelvisCenter(skel);
         if (shoulder != null && pelvis != null) {
+          // 只有單肩時，用肩到骨盆中心的距離近似
           shoulderWidth =
-              (shoulder.dx - pelvis.dx).abs() * kOverParryShoulderMultiplier;
+              (shoulder - pelvis).distance * kOverParryShoulderMultiplier;
           break;
         }
       } else if (shoulder != null) {
-        shoulderWidth = (shoulder.dx - otherShoulder.dx).abs();
+        // 兩肩都有時，直接用 2D 歐幾里得肩膀距離
+        shoulderWidth = (shoulder - otherShoulder).distance;
         break;
       }
     }
 
     if (shoulderWidth == null || shoulderWidth < 1e-6) return null;
 
-    final wristXs = <double>[];
+    // ── Step 2: 收集所有手腕位置 ────────────────────────────────────────────
+    final wristPositions = <Offset>[];
     for (final skel in skeletons) {
       final wrist = skel[limbs['wrist']!];
-      if (wrist != null) wristXs.add(wrist.dx);
+      if (wrist != null) wristPositions.add(wrist);
     }
 
-    if (wristXs.length < kOverParryMinWristSamples) return null;
+    if (wristPositions.length < kOverParryMinWristSamples) return null;
 
-    final sweepRange = wristXs.reduce(math.max) - wristXs.reduce(math.min);
-    if (sweepRange > kOverParryRatioThreshold * shoulderWidth) {
+    // ── Step 3: 計算手腕的最大 2D 歐幾里得移動距離 ──────────────────────────
+    // 取所有手腕位置兩兩之間的最大距離（最大 sweep 範圍）
+    double maxSweep = 0.0;
+    for (int i = 0; i < wristPositions.length; i++) {
+      for (int j = i + 1; j < wristPositions.length; j++) {
+        final d = (wristPositions[i] - wristPositions[j]).distance;
+        if (d > maxSweep) maxSweep = d;
+      }
+    }
+
+    if (maxSweep > kOverParryRatioThreshold * shoulderWidth) {
       return 'over_parrying';
     }
     return null;
@@ -412,6 +426,7 @@ class HeuristicsEngine {
       final ratio = stepWidth / sw;
 
       if (ratio < kNarrowStepRatioThreshold) return 'narrow_step';
+      if (ratio > kWideStepRatioThreshold) return 'wide_step'; // 🎯 修復 Bug，補上過寬檢查
     }
     return null;
   }
@@ -440,6 +455,8 @@ class HeuristicsEngine {
       } else {
         ratio = (backX - pelvisX) / baseWidth;
       }
+      
+      lastComRatio = ratio;
 
       if (ratio > kComInFrontRatioThreshold) return 'center_of_mass_in_front';
       if (ratio < kComLeaningBackRatioThreshold) {
