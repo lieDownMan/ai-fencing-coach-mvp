@@ -12,6 +12,12 @@ import 'pose/pose_service.dart';
 import 'pose/pose_painter.dart';
 import 'pose/yolo_pose_service.dart';
 import 'pose/activity_gatekeeper.dart';
+import 'package:uuid/uuid.dart';
+import 'database/entities.dart';
+import 'database/app_database.dart';
+import 'screens/history_screen.dart';
+import 'screens/postgame_screen.dart';
+import 'ai/gemini_agent.dart';
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -128,6 +134,11 @@ class _MainScreenState extends State<MainScreen>
   // Tab controller
   late TabController _tabController;
 
+  // Session tracking
+  int? _sessionStartTimeMs;
+  final Map<String, int> _sessionActionCounts = {};
+  final List<CueHistoryItem> _sessionCues = [];
+
   // Camera
   CameraController? _cameraController;
   bool _isCameraInitialized = false;
@@ -186,7 +197,8 @@ class _MainScreenState extends State<MainScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    // Use length 5 for Live, Postgame, Settings, History, Debug
+    _tabController = TabController(length: 5, vsync: this);
     _heuristics = HeuristicsEngine(
       targetSide: _targetSide,
       trainingMode: _trainingMode,
@@ -442,6 +454,28 @@ class _MainScreenState extends State<MainScreen>
         final isActive = _gatekeeper.update(null, _targetSide);
         final newState = isActive ? 'ACTIVE' : 'IDLE';
         if (newState != _coachState) {
+          if (newState == 'ACTIVE') {
+            _sessionStartTimeMs = DateTime.now().millisecondsSinceEpoch;
+            _sessionActionCounts.clear();
+            _sessionCues.clear();
+          } else if (newState == 'IDLE') {
+            if (_sessionStartTimeMs != null) {
+              final endTimeMs = DateTime.now().millisecondsSinceEpoch;
+              final elapsedSeconds = (endTimeMs - _sessionStartTimeMs!) ~/ 1000;
+              if (elapsedSeconds > 10) {
+                _saveSessionWithGemini(
+                  startTimeMs: _sessionStartTimeMs!,
+                  endTimeMs: endTimeMs,
+                  elapsedSeconds: elapsedSeconds,
+                  actionCounts: Map.from(_sessionActionCounts),
+                  cues: List.from(_sessionCues),
+                  trainingMode: _trainingMode,
+                  targetSide: _targetSide,
+                );
+              }
+              _sessionStartTimeMs = null;
+            }
+          }
           setState(() {
             _coachState = newState;
             if (newState == 'IDLE') _currentSkeleton = null;
@@ -451,6 +485,44 @@ class _MainScreenState extends State<MainScreen>
     } finally {
       _isProcessingFrame = false;
     }
+  }
+
+  Future<void> _saveSessionWithGemini({
+    required int startTimeMs,
+    required int endTimeMs,
+    required int elapsedSeconds,
+    required Map<String, int> actionCounts,
+    required List<CueHistoryItem> cues,
+    required String trainingMode,
+    required String targetSide,
+  }) async {
+    final actionsList = actionCounts.entries
+        .map((e) => ActionCountItem(action: e.key, count: e.value))
+        .toList();
+
+    String summary = "";
+    final agent = GeminiAgent();
+    if (agent.isEnabled) {
+      summary = await agent.generateSummary(
+        trainingMode: trainingMode,
+        targetSide: targetSide,
+        actionCounts: actionsList,
+        cuesFired: cues,
+        userSettingsName: "Fencer",
+      );
+    }
+
+    final report = PracticeReport(
+      id: const Uuid().v4(),
+      startTimeMs: startTimeMs,
+      endTimeMs: endTimeMs,
+      elapsedSeconds: elapsedSeconds,
+      actionCounts: actionsList,
+      cueTimeline: cues,
+      llmSummary: summary,
+    );
+
+    await AppDatabase.instance.savePracticeReport(report);
   }
 
   Future<void> _classifyAndEvaluate() async {
@@ -495,6 +567,17 @@ class _MainScreenState extends State<MainScreen>
     // Update metrics map
     for (final key in kErrorLabels.keys) {
       _heuristicTriggered[key] = filtered.contains(key);
+    }
+
+    // Session Tracking
+    if (action != 'Idle') {
+      _sessionActionCounts[action] = (_sessionActionCounts[action] ?? 0) + 1;
+    }
+    for (final error in filtered) {
+      _sessionCues.add(CueHistoryItem(
+        timestampMs: DateTime.now().millisecondsSinceEpoch,
+        label: error,
+      ));
     }
 
     if (filtered.isNotEmpty) {
@@ -583,9 +666,12 @@ class _MainScreenState extends State<MainScreen>
         bottom: TabBar(
           controller: _tabController,
           indicatorWeight: 3,
+          isScrollable: true,
           tabs: const [
             Tab(icon: Icon(Icons.videocam, size: 20), text: 'Live'),
+            Tab(icon: Icon(Icons.video_library, size: 20), text: 'Postgame'),
             Tab(icon: Icon(Icons.tune, size: 20), text: 'Settings'),
+            Tab(icon: Icon(Icons.history, size: 20), text: 'History'),
             Tab(icon: Icon(Icons.analytics, size: 20), text: 'Debug'),
           ],
         ),
@@ -595,7 +681,9 @@ class _MainScreenState extends State<MainScreen>
         physics: const NeverScrollableScrollPhysics(),
         children: [
           _buildLiveTab(),
+          const PostgameScreen(),
           _buildSettingsTab(),
+          const HistoryScreen(),
           _buildDebugTab(),
         ],
       ),
