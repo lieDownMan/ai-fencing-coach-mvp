@@ -15,12 +15,12 @@ import 'package:flutter/foundation.dart';
 // ---------------------------------------------------------------------------
 
 const int kBouncMinPelvisSamples = 5;
-const double kBounceRatioThreshold = 0.25;
+const double kBounceRatioThreshold = 0.33;
 const double kLungeKneeMinAngleDeg = 90.0;
 const int kGuardDroppedThresholdFrames = 10;
 const int kGuardDroppedFreeBoutingThresholdFrames = 20;
 const double kFootBeforeHandMinDisplacementPx = 5.0;
-const double kStanceTooHighAngleDeg = 170.0;
+const double kStanceTooHighAngleDeg = 173.0;
 const double kIncompleteArmExtensionAngleDeg = 155.0;
 const int kOverParryMinWristSamples = 5;
 const double kOverParryShoulderMultiplier = 2.0;
@@ -28,7 +28,7 @@ const double kOverParryRatioThreshold = 2.0;
 const double kStepShoulderProxyMultiplier = 2.5;
 const double kStepMinShoulderWidthPx = 10.0;
 const double kWideStepRatioThreshold = 3.0;
-const double kNarrowStepRatioThreshold = 1.0;
+const double kNarrowStepRatioThreshold = 2.0;
 const double kComMinBaseWidthPx = 10.0;
 const double kComInFrontRatioThreshold = 0.65;
 const double kComLeaningBackRatioThreshold = 0.35;
@@ -110,6 +110,8 @@ String backAnkleName(String targetSide) =>
 class HeuristicsEngine {
   final String targetSide;
   final String trainingMode;
+  double? lastStepRatio;
+  double? lastStepWidth;
 
   HeuristicsEngine({
     required this.targetSide,
@@ -124,6 +126,22 @@ class HeuristicsEngine {
   }) {
     if (skeletons.isEmpty) return [];
 
+    // Unconditionally compute live step debug metrics
+    final latestSkel = skeletons.last;
+    final liveLimbs = frontLimbs(targetSide);
+    final liveBackAnkle = backAnkleName(targetSide);
+    final fAnkle = latestSkel[liveLimbs['ankle']!];
+    final bAnkle = latestSkel[liveBackAnkle];
+    if (fAnkle != null && bAnkle != null) {
+      lastStepWidth = (fAnkle - bAnkle).distance;
+      final fShoulder = latestSkel[liveLimbs['shoulder']!];
+      final pCenter = _pelvisCenter(latestSkel);
+      if (fShoulder != null && pCenter != null) {
+        final sw = (fShoulder.dx - pCenter.dx).abs() * kStepShoulderProxyMultiplier;
+        if (sw > 1e-6) lastStepRatio = lastStepWidth! / sw;
+      }
+    }
+
     final errors = <String>[];
     final isOffensive = kOffensiveActions.contains(action);
 
@@ -131,7 +149,6 @@ class HeuristicsEngine {
     if (trainingMode == 'Footwork' && kFootworkActions.contains(action)) {
       _tryAdd(errors, _checkBounce(skeletons));
       _tryAdd(errors, _checkStanceTooHigh(skeletons));
-      _tryAdd(errors, _checkStepWidth(skeletons));
       _tryAdd(errors, _checkCenterOfMass(skeletons));
     }
 
@@ -145,11 +162,13 @@ class HeuristicsEngine {
     // Guard dropped — all modes
     _tryAdd(errors, _checkGuard(skeletons));
 
+    // Step width — all modes, unconditionally
+    _tryAdd(errors, _checkStepWidth(skeletons));
+
     // Footwork checks in non-Footwork modes
     if (trainingMode != 'Footwork' && kFootworkActions.contains(action)) {
       _tryAdd(errors, _checkStanceTooHigh(skeletons));
       _tryAdd(errors, _checkBounce(skeletons));
-      _tryAdd(errors, _checkStepWidth(skeletons));
       _tryAdd(errors, _checkCenterOfMass(skeletons));
     }
 
@@ -182,7 +201,7 @@ class HeuristicsEngine {
       return null;
     }
     final bboxHeight = allYs.reduce(math.max) - allYs.reduce(math.min);
-    if (bboxHeight < 1e-6) return null;
+    if (bboxHeight < 1e-4) return null;
     final deltaY = pelvisYs.reduce(math.max) - pelvisYs.reduce(math.min);
     if (deltaY > kBounceRatioThreshold * bboxHeight) {
       return 'bounce_excessive';
@@ -389,10 +408,9 @@ class HeuristicsEngine {
           (frontShoulder.dx - pelvis.dx).abs() * kStepShoulderProxyMultiplier;
       if (sw < kStepMinShoulderWidthPx) continue;
 
-      final stepWidth = (frontAnkle.dx - back.dx).abs();
+      final stepWidth = (frontAnkle - back).distance;
       final ratio = stepWidth / sw;
 
-      if (ratio > kWideStepRatioThreshold) return 'wide_step';
       if (ratio < kNarrowStepRatioThreshold) return 'narrow_step';
     }
     return null;
