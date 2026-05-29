@@ -80,6 +80,7 @@ private enum class AppScreen {
     HOME,
     REALTIME,
     POSTGAME,
+    HISTORY,
     SETTINGS,
     COACH
 }
@@ -164,6 +165,10 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
     val prefs = remember {
         context.getSharedPreferences("ai_fencing_coach_settings", Context.MODE_PRIVATE)
     }
+    
+    val database = remember { com.aifencingcoach.runtime.database.AppDatabase.getDatabase(context) }
+    val sessionRepository = remember { com.aifencingcoach.runtime.database.SessionRepository(context) }
+
     var appScreen by remember { mutableStateOf(AppScreen.HOME) }
     var targetSide by remember { mutableStateOf(TargetSide.LEFT) }
     var trainingMode by remember { mutableStateOf(TrainingMode.FREE_BOUTING) }
@@ -209,6 +214,7 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             lastPracticeReport = lastPracticeReport,
             onRealtime = { appScreen = AppScreen.REALTIME },
             onPostgame = { appScreen = AppScreen.POSTGAME },
+            onHistory = { appScreen = AppScreen.HISTORY },
             onSettings = { appScreen = AppScreen.SETTINGS }
         )
         AppScreen.REALTIME -> RealtimeSetupScreen(
@@ -233,11 +239,20 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             targetSide = targetSide,
             poseBackend = poseBackend,
             lastPracticeReport = lastPracticeReport,
+            sessionRepository = sessionRepository,
+            geminiAgent = remember { com.aifencingcoach.runtime.GeminiAgent() },
             onSettings = { appScreen = AppScreen.SETTINGS },
             onPracticeReport = { report -> lastPracticeReport = report },
             onBack = {
                 saveSettings()
                 appScreen = AppScreen.HOME
+            }
+        )
+        AppScreen.HISTORY -> com.aifencingcoach.HistoryScreen(
+            sessionRepo = sessionRepository,
+            onBack = { appScreen = AppScreen.HOME },
+            onSessionSelected = { fullSession ->
+                // TODO: show session detail
             }
         )
         AppScreen.SETTINGS -> UserSettingsScreen(
@@ -273,6 +288,28 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             },
             onPracticeReport = { report ->
                 lastPracticeReport = report
+                
+                // Save to DB and generate Gemini summary in background
+                val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default)
+                scope.launch {
+                    var geminiSummaryText = ""
+                    val geminiAgent = com.aifencingcoach.runtime.GeminiAgent()
+                    if (userSettings.useGeminiSummary && geminiAgent.isEnabled) {
+                        geminiSummaryText = geminiAgent.generateSummary(
+                            trainingMode = trainingMode.label,
+                            targetSide = targetSide.label,
+                            actionCounts = report.actionCounts,
+                            cuesFired = report.cueTimeline,
+                            userSettingsName = userSettings.name
+                        )
+                    }
+
+                    sessionRepository.savePracticeReport(
+                        report = report,
+                        cuesFired = report.cueTimeline,
+                        llmSummary = geminiSummaryText.ifEmpty { "AI Summary disabled or skipped." }
+                    )
+                }
             },
             onSpeak = onSpeak
         )
@@ -290,6 +327,7 @@ private fun HomeScreen(
     lastPracticeReport: PracticeReport?,
     onRealtime: () -> Unit,
     onPostgame: () -> Unit,
+    onHistory: () -> Unit,
     onSettings: () -> Unit
 ) {
     Column(
@@ -304,31 +342,45 @@ private fun HomeScreen(
             subtitle = "${userSettings.name.ifBlank { "Fencer" }}  |  ${trainingMode.label}  |  ${poseBackend.label}  |  ${targetSide.label}"
         )
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            HomeOption(
-                title = "Realtime",
-                accent = AccentGreen,
-                summary = liveSummary(trainingMode, poseBackend, voiceEnabled),
-                onClick = onRealtime,
-                modifier = Modifier.weight(1f)
-            )
-            HomeOption(
-                title = "Postgame",
-                accent = AccentGold,
-                summary = postgameSummary(lastPracticeReport),
-                onClick = onPostgame,
-                modifier = Modifier.weight(1f)
-            )
-            HomeOption(
-                title = "User Settings",
-                accent = AccentCoral,
-                summary = settingsSummary(userSettings),
-                onClick = onSettings,
-                modifier = Modifier.weight(1f)
-            )
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                HomeOption(
+                    title = "Realtime",
+                    accent = AccentGreen,
+                    summary = liveSummary(trainingMode, poseBackend, voiceEnabled),
+                    onClick = onRealtime,
+                    modifier = Modifier.weight(1f)
+                )
+                HomeOption(
+                    title = "Postgame",
+                    accent = AccentGold,
+                    summary = postgameSummary(lastPracticeReport),
+                    onClick = onPostgame,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                HomeOption(
+                    title = "History",
+                    accent = Color(0xFF9E9E9E),
+                    summary = "Review past sessions & summaries",
+                    onClick = onHistory,
+                    modifier = Modifier.weight(1f)
+                )
+                HomeOption(
+                    title = "User Settings",
+                    accent = AccentCoral,
+                    summary = settingsSummary(userSettings),
+                    onClick = onSettings,
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
 
         FlowRow(
@@ -481,6 +533,8 @@ private fun PostgameScreen(
     targetSide: TargetSide,
     poseBackend: PoseBackendKind,
     lastPracticeReport: PracticeReport?,
+    sessionRepository: com.aifencingcoach.runtime.database.SessionRepository,
+    geminiAgent: com.aifencingcoach.runtime.GeminiAgent,
     onSettings: () -> Unit,
     onPracticeReport: (PracticeReport) -> Unit,
     onBack: () -> Unit
@@ -492,11 +546,15 @@ private fun PostgameScreen(
     var analysisStatus by remember { mutableStateOf("Ready") }
     var analysisRunning by remember { mutableStateOf(false) }
     var analysisProgress by remember { mutableStateOf(0f) }
+    var frameStates by remember { mutableStateOf<Map<Long, com.aifencingcoach.runtime.CoachFrameState>?>(null) }
+    var isExporting by remember { mutableStateOf(false) }
+    val videoAnnotator = remember { com.aifencingcoach.runtime.VideoAnnotator(context) }
     val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         selectedVideoUri = uri
         selectedVideo = uri?.lastPathSegment ?: uri?.toString()
         analysisRunning = false
         analysisProgress = 0f
+        frameStates = null
         analysisStatus = if (uri == null) "No video selected" else "Video selected"
     }
 
@@ -571,8 +629,29 @@ private fun PostgameScreen(
                                                 analysisStatus = progress.status
                                             }
                                         )
-                                    }.onSuccess { report ->
+                                    }.onSuccess { (report, states) ->
+                                        frameStates = states
                                         onPracticeReport(report)
+                                        analysisStatus = "Saving to database..."
+                                        
+                                        var geminiSummaryText = ""
+                                        if (userSettings.useGeminiSummary && geminiAgent.isEnabled) {
+                                            analysisStatus = "Generating AI Summary..."
+                                            geminiSummaryText = geminiAgent.generateSummary(
+                                                trainingMode = trainingMode.label,
+                                                targetSide = targetSide.label,
+                                                actionCounts = report.actionCounts,
+                                                cuesFired = report.cueTimeline,
+                                                userSettingsName = userSettings.name
+                                            )
+                                        }
+
+                                        sessionRepository.savePracticeReport(
+                                            report = report,
+                                            cuesFired = report.cueTimeline,
+                                            llmSummary = geminiSummaryText.ifEmpty { "AI Summary disabled or skipped." }
+                                        )
+
                                         analysisProgress = 1f
                                         analysisStatus = "Analysis ready"
                                     }.onFailure { error ->
@@ -606,6 +685,38 @@ private fun PostgameScreen(
                 Text("No practice report yet", color = MutedText, fontSize = BodyTextSize)
             } else {
                 PracticeReportSummary(report = lastPracticeReport)
+                
+                if (frameStates != null && selectedVideoUri != null) {
+                    Spacer(Modifier.height(16.dp))
+                    HudButton(
+                        text = if (isExporting) "Exporting Video..." else "Save Annotated Video",
+                        selected = false,
+                        onClick = {
+                            if (!isExporting) {
+                                isExporting = true
+                                scope.launch {
+                                    videoAnnotator.exportVideo(
+                                        sourceUri = selectedVideoUri!!,
+                                        frameStates = frameStates!!,
+                                        videoWidth = 720,
+                                        videoHeight = 1280
+                                    ).collect { progress ->
+                                        when (progress) {
+                                            is com.aifencingcoach.runtime.ExportProgress.Completed -> {
+                                                isExporting = false
+                                                analysisStatus = "Video saved to Gallery!"
+                                            }
+                                            is com.aifencingcoach.runtime.ExportProgress.Error -> {
+                                                isExporting = false
+                                                analysisStatus = "Export failed: ${progress.exception.message}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    )
+                }
             }
         }
     }
