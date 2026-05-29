@@ -211,7 +211,7 @@ class _MainScreenState extends State<MainScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(length: 6, vsync: this);
     _heuristics = HeuristicsEngine(
       targetSide: _targetSide,
       trainingMode: _trainingMode,
@@ -694,13 +694,12 @@ class _MainScreenState extends State<MainScreen>
   }
 
   // ──────────────────────────────────────────────────────────────────────────
-  // BUILD
+  // MAIN BUILD
   // ──────────────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0F),
       appBar: AppBar(
         titleSpacing: 16,
         title: Row(
@@ -785,37 +784,45 @@ class _MainScreenState extends State<MainScreen>
   // ──────────────────────────────────────────────────────────────────────────
 
   Widget _buildLiveTab() {
-    if (!_isCameraInitialized || _cameraController == null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.camera_alt_outlined, size: 72, color: Color(0xFF333355)),
-            const SizedBox(height: 20),
-            const Text(
-              '初始化相機...\nInitializing Camera',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white38, fontSize: 16),
-            ),
-            const SizedBox(height: 20),
-            const CircularProgressIndicator(color: Color(0xFFFF6600)),
-          ],
-        ),
-      );
-    }
-
     return Column(
       children: [
-        // Camera + Skeleton overlay
-        Expanded(
-          flex: 6,
-          child: _buildCameraOverlay(),
-        ),
-
-        // Error cards
-        Expanded(
-          flex: 4,
-          child: _buildFeedbackPanel(),
+        _buildCustomAppBar('Live Camera'),
+        if (!_isCameraInitialized || _cameraController == null)
+          Expanded(
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.camera_alt_outlined, size: 72, color: Color(0xFF333355)),
+                  const SizedBox(height: 20),
+                  const Text(
+                    '初始化相機...\nInitializing Camera',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white38, fontSize: 16),
+                  ),
+                  const SizedBox(height: 20),
+                  const CircularProgressIndicator(color: Color(0xFFFF6600)),
+                ],
+              ),
+            ),
+          )
+        else
+          Expanded(
+            child: Column(
+              children: [
+                // Camera + Skeleton overlay
+                Expanded(
+                  flex: 6,
+                  child: _buildCameraOverlay(),
+                ),
+                // Error cards
+                Expanded(
+                  flex: 4,
+                  child: _buildFeedbackPanel(),
+                ),
+              ],
+            ),
+          ),
         ),
       ],
     );
@@ -1085,11 +1092,15 @@ class _MainScreenState extends State<MainScreen>
 
   Widget _buildPostgameTab() {
     final report = _postgameReport;
-    return ListView(
-      padding: const EdgeInsets.all(16),
+    return Column(
       children: [
-        _sectionHeader('Postgame Analysis'),
-        const SizedBox(height: 12),
+        _buildCustomAppBar('Postgame Analysis'),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              _sectionHeader('Postgame Analysis'),
+              const SizedBox(height: 12),
         _buildCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1364,23 +1375,39 @@ class _MainScreenState extends State<MainScreen>
 
   Widget _buildHistoryTab() {
     if (_sessionsLoading) {
-      return const Center(child: CircularProgressIndicator(color: Color(0xFFFF6600)));
+      return Column(
+        children: [
+          _buildCustomAppBar('History'),
+          const Expanded(child: Center(child: CircularProgressIndicator(color: Color(0xFFFF6600)))),
+        ],
+      );
     }
     
     if (_sessions.isEmpty) {
-      return const Center(
-        child: Text(
-          'No history yet.\nRun a postgame analysis to save a session.',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: Colors.white54, height: 1.5),
-        ),
+      return Column(
+        children: [
+          _buildCustomAppBar('History'),
+          const Expanded(
+            child: Center(
+              child: Text(
+                'No history yet.\nRun a postgame analysis to save a session.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white54, height: 1.5),
+              ),
+            ),
+          ),
+        ],
       );
     }
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: _sessions.length,
-      itemBuilder: (context, index) {
+    return Column(
+      children: [
+        _buildCustomAppBar('History'),
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: _sessions.length,
+            itemBuilder: (context, index) {
         final session = _sessions[index];
         final dateFormat = DateFormat('MMM d, yyyy • h:mm a');
         final isSelected = _lastSessionId == session.id;
@@ -1439,6 +1466,9 @@ class _MainScreenState extends State<MainScreen>
           ),
         );
       },
+    ),
+        ),
+      ],
     );
   }
 
@@ -1452,13 +1482,17 @@ class _MainScreenState extends State<MainScreen>
       return modes.contains(_trainingMode);
     }).toList();
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _sectionHeader('⚙️ 訓練設定 Training Settings'),
-          const SizedBox(height: 12),
+    return Column(
+      children: [
+        _buildCustomAppBar('Settings'),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _sectionHeader('⚙️ 訓練設定 Training Settings'),
+                const SizedBox(height: 12),
 
           // Target Side
           _buildDropdownField<String>(
@@ -1623,6 +1657,9 @@ class _MainScreenState extends State<MainScreen>
           const SizedBox(height: 32),
         ],
       ),
+    ),
+        ),
+      ],
     );
   }
 
