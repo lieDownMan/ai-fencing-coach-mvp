@@ -24,14 +24,17 @@ const double kStanceTooHighAngleDeg = 160.0; // 🎯 改為 160 度，更容易�
 const double kIncompleteArmExtensionAngleDeg = 155.0;
 const int kOverParryMinWristSamples = 5;
 const double kOverParryShoulderMultiplier = 2.0;
-const double kOverParryRatioThreshold = 2.0;
+const double kOverParryRatioThreshold = 3.0; // 🎯 調大門檻 (原2.0)，讓防守動作過大更難觸發
 const double kStepShoulderProxyMultiplier = 2.5;
 const double kStepMinShoulderWidthPx = 0.02; // 🎯 歸一化座標下合理值 (原3.0)
 const double kWideStepRatioThreshold = 3.0;
 const double kNarrowStepRatioThreshold = 1.2; // 🎯 歸一化座標下合理值 (原2.5)
 const double kComMinBaseWidthPx = 0.03; // 🎯 歸一化座標下合理值 (原10.0)
-const double kComInFrontRatioThreshold = 0.65;
-const double kComLeaningBackRatioThreshold = 0.35;
+const double kSpineForwardTiltThresholdDeg = 15.0; // 重心前傾判定角度
+const double kSpineBackwardTiltThresholdDeg = 10.0; // 重心後仰判定角度
+const double kShoulderForwardTiltThresholdDeg = 15.0; // 肩膀連線前傾角度門檻
+const double kShoulderBackwardTiltThresholdDeg = 15.0; // 肩膀連線後仰角度門檻
+const double kHandTooHighMinAngleDeg = 60.0; // 手抬太高的判定角度門檻 (大於 60 度)
 
 // ---------------------------------------------------------------------------
 // Detected action classes (from FenceNetV2 class names)
@@ -63,12 +66,19 @@ double calcAngle(Offset a, Offset b, Offset c) {
   return math.acos(cosAngle) * 180.0 / math.pi;
 }
 
-Offset? _pelvisCenter(Skeleton skel) {
-  final lh = skel['left_hip'];
-  final rh = skel['right_hip'];
-  if (lh == null || rh == null) return null;
-  return Offset((lh.dx + rh.dx) / 2, (lh.dy + rh.dy) / 2);
-}
+  Offset? _pelvisCenter(Skeleton skel) {
+    final l = skel['left_hip'];
+    final r = skel['right_hip'];
+    if (l == null || r == null) return null;
+    return Offset((l.dx + r.dx) / 2, (l.dy + r.dy) / 2);
+  }
+
+  Offset? _neckCenter(Skeleton skel) {
+    final l = skel['left_shoulder'];
+    final r = skel['right_shoulder'];
+    if (l == null || r == null) return null;
+    return Offset((l.dx + r.dx) / 2, (l.dy + r.dy) / 2);
+  }
 
 // ---------------------------------------------------------------------------
 // Joint mapping helper
@@ -112,7 +122,9 @@ class HeuristicsEngine {
   final String trainingMode;
   double? lastStepRatio;
   double? lastStepWidth;
-  double? lastComRatio;
+  double? lastSpineTiltDeg;
+  double? lastShoulderTiltDeg;
+  double? lastArmAngleDeg;
 
   // 🎯 新增：用來計算經過的總幀數，控制前五秒的冷卻時間
   int _frameCount = 0;
@@ -174,6 +186,9 @@ class HeuristicsEngine {
 
     // 🎯 7. 隨時監測：防守動作過大 (改用歐幾里得距離，偵測上下+左右)
     _tryAdd(errors, _checkOverParrying(skeletons));
+
+    // 🎯 8. 隨時監測：手抬太高
+    _tryAdd(errors, _checkHandTooHigh(skeletons));
 
     // ── 特定動作才觸發的檢查 ──
 
@@ -436,31 +451,95 @@ class HeuristicsEngine {
   String? _checkCenterOfMass(List<Skeleton> skeletons) {
     final limbs = frontLimbs(targetSide);
     final backAnkleKey = backAnkleName(targetSide);
+    final frontShoulderKey = targetSide == 'Right' ? 'right_shoulder' : 'left_shoulder';
+    final backShoulderKey = targetSide == 'Right' ? 'left_shoulder' : 'right_shoulder';
 
     for (final skel in skeletons) {
+      // 1. Spine Tilt Check
       final frontAnkle = skel[limbs['ankle']!];
       final back = skel[backAnkleKey];
       final pelvis = _pelvisCenter(skel);
-      if (frontAnkle == null || back == null || pelvis == null) continue;
-
-      final frontX = frontAnkle.dx;
-      final backX = back.dx;
-      final pelvisX = pelvis.dx;
-      final baseWidth = (frontX - backX).abs();
-      if (baseWidth < kComMinBaseWidthPx) continue;
-
-      double ratio;
-      if (frontX > backX) {
-        ratio = (pelvisX - backX) / baseWidth;
-      } else {
-        ratio = (backX - pelvisX) / baseWidth;
-      }
+      final neck = _neckCenter(skel);
       
-      lastComRatio = ratio;
+      if (frontAnkle != null && back != null && pelvis != null && neck != null) {
+        final frontX = frontAnkle.dx;
+        final backX = back.dx;
+        
+        // dx is horizontal difference (neck relative to pelvis)
+        // dy is vertical difference (positive if neck is above pelvis, which is expected)
+        final dx = neck.dx - pelvis.dx;
+        final dy = pelvis.dy - neck.dy; 
+        
+        if (dy > 0) {
+          // Angle from vertical (0 is perfectly upright, positive is neck to the right of pelvis)
+          final thetaDeg = math.atan2(dx, dy) * 180 / math.pi;
 
-      if (ratio > kComInFrontRatioThreshold) return 'center_of_mass_in_front';
-      if (ratio < kComLeaningBackRatioThreshold) {
-        return 'center_of_mass_leaning_backward';
+          // Determine forward tilt depending on facing direction
+          // If facing right (frontX > backX), positive theta means leaning forward
+          // If facing left (frontX < backX), negative theta means leaning forward
+          final forwardTiltDeg = (frontX > backX) ? thetaDeg : -thetaDeg;
+          
+          lastSpineTiltDeg = forwardTiltDeg;
+
+          if (forwardTiltDeg > kSpineForwardTiltThresholdDeg) return 'center_of_mass_in_front';
+          if (forwardTiltDeg < -kSpineBackwardTiltThresholdDeg) {
+            return 'center_of_mass_leaning_backward';
+          }
+        }
+      }
+
+      // 2. Shoulder Line Tilt Check
+      final frontShoulder = skel[frontShoulderKey];
+      final backShoulder = skel[backShoulderKey];
+      
+      if (frontShoulder != null && backShoulder != null) {
+        // dy: positive if front shoulder is lower (screen y grows downwards)
+        final dy = frontShoulder.dy - backShoulder.dy;
+        // dx: horizontal distance between shoulders
+        final dx = (frontShoulder.dx - backShoulder.dx).abs();
+        
+        // Tilt angle: positive means front shoulder is lower (leaning forward)
+        // negative means front shoulder is higher (leaning backward)
+        if (dx > 0.001 || dy.abs() > 0.001) {
+          final shoulderTiltDeg = math.atan2(dy, dx) * 180 / math.pi;
+          
+          lastShoulderTiltDeg = shoulderTiltDeg;
+          
+          if (shoulderTiltDeg > kShoulderForwardTiltThresholdDeg) return 'center_of_mass_in_front';
+          if (shoulderTiltDeg < -kShoulderBackwardTiltThresholdDeg) {
+            return 'center_of_mass_leaning_backward';
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  // ── Rule 12: hand_too_high ───────────────────────────────────────────────
+
+  String? _checkHandTooHigh(List<Skeleton> skeletons) {
+    final limbs = frontLimbs(targetSide);
+    
+    for (final skel in skeletons) {
+      final elbow = skel[limbs['elbow']!];
+      final wrist = skel[limbs['wrist']!];
+      
+      if (elbow != null && wrist != null) {
+        // dy: positive if wrist is above elbow (y goes downwards)
+        final dy = elbow.dy - wrist.dy;
+        final dx = (wrist.dx - elbow.dx).abs(); 
+        
+        if (dy > 0) {
+          // Angle from horizontal (90 degrees is perfectly vertical upwards)
+          final angleDeg = math.atan2(dy, dx) * 180 / math.pi;
+          lastArmAngleDeg = angleDeg;
+          
+          if (angleDeg > kHandTooHighMinAngleDeg) {
+            return 'hand_too_high';
+          }
+        } else {
+          lastArmAngleDeg = 0.0;
+        }
       }
     }
     return null;

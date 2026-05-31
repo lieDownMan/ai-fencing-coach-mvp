@@ -87,6 +87,7 @@ const Map<String, String> kErrorLabels = {
   'narrow_step': '步伐太小 (Narrow Step)',
   'center_of_mass_in_front': '重心向前 (CoM Forward)',
   'center_of_mass_leaning_backward': '重心向後 (CoM Backward)',
+  'hand_too_high': '手抬太高 (Hand Too High)',
 };
 
 const Map<String, String> kErrorVoice = {
@@ -101,6 +102,7 @@ const Map<String, String> kErrorVoice = {
   'narrow_step': '步伐太小，加大步距',
   'center_of_mass_in_front': '重心偏前，保持重心平衡',
   'center_of_mass_leaning_backward': '重心偏後，向前調整重心',
+  'hand_too_high': '手抬太高，請放低手臂',
 };
 
 const Map<String, List<String>> kErrorSupportedModes = {
@@ -115,6 +117,7 @@ const Map<String, List<String>> kErrorSupportedModes = {
   'over_parrying': ['Footwork', 'Target Practice', 'Free Bouting'],
   'wide_step': ['Footwork', 'Target Practice', 'Free Bouting'],
   'narrow_step': ['Footwork', 'Target Practice', 'Free Bouting'],
+  'hand_too_high': ['Footwork', 'Target Practice', 'Free Bouting'],
 };
 
 // ---------------------------------------------------------------------------
@@ -980,7 +983,9 @@ class _MainScreenState extends State<MainScreen>
               'Moving: ${_gatekeeper.lastReasons['moving']}\n'
               'Step Ratio: ${_heuristics.lastStepRatio?.toStringAsFixed(2) ?? 'N/A'} | '
               'Step Width: ${_heuristics.lastStepWidth?.toStringAsFixed(3) ?? 'N/A'}\n'
-              'CoM Ratio: ${_heuristics.lastComRatio?.toStringAsFixed(2) ?? 'N/A'} (Needs < 0.35 or > 0.65)',
+              'Spine Tilt: ${_heuristics.lastSpineTiltDeg?.toStringAsFixed(1) ?? 'N/A'}° (Needs > 15° or < -10°)\n'
+              'Shoulder Tilt: ${_heuristics.lastShoulderTiltDeg?.toStringAsFixed(1) ?? 'N/A'}° (Needs > 15° or < -15°)\n'
+              'Arm Angle: ${_heuristics.lastArmAngleDeg?.toStringAsFixed(1) ?? 'N/A'}° (Needs > 60°)',
               style: const TextStyle(color: Colors.white54, fontSize: 10),
               textAlign: TextAlign.center,
             ),

@@ -25,6 +25,7 @@ const Map<String, double> kDefaultErrorWeights = {
   'over_parrying': 5.0,
   'wide_step': 4.0,
   'narrow_step': 9.0,
+  'hand_too_high': 8.0,
 };
 
 // ---------------------------------------------------------------------------
