@@ -21,6 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -50,13 +51,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -66,7 +69,6 @@ import com.aifencingcoach.runtime.CoachFrameState
 import com.aifencingcoach.runtime.FeedbackCue
 import com.aifencingcoach.runtime.LiveCoachPipeline
 import com.aifencingcoach.runtime.PoseBackendKind
-import com.aifencingcoach.runtime.PostgameVideoAnalyzer
 import com.aifencingcoach.runtime.PracticeReport
 import com.aifencingcoach.runtime.Skeleton
 import com.aifencingcoach.runtime.TargetSide
@@ -82,7 +84,8 @@ private enum class AppScreen {
     POSTGAME,
     HISTORY,
     SETTINGS,
-    COACH
+    COACH,
+    SESSION_DETAIL
 }
 
 private data class UserSettings(
@@ -166,10 +169,12 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
         context.getSharedPreferences("ai_fencing_coach_settings", Context.MODE_PRIVATE)
     }
     
-    val database = remember { com.aifencingcoach.runtime.database.AppDatabase.getDatabase(context) }
     val sessionRepository = remember { com.aifencingcoach.runtime.database.SessionRepository(context) }
+    val geminiAgent = remember { com.aifencingcoach.runtime.GeminiAgent(context) }
+    val analysisManager = remember { com.aifencingcoach.runtime.AnalysisManager(context, sessionRepository, geminiAgent) }
 
     var appScreen by remember { mutableStateOf(AppScreen.HOME) }
+    var selectedSessionForDetail by remember { mutableStateOf<com.aifencingcoach.runtime.database.FullSessionData?>(null) }
     var targetSide by remember { mutableStateOf(TargetSide.LEFT) }
     var trainingMode by remember { mutableStateOf(TrainingMode.FREE_BOUTING) }
     var poseBackend by remember { mutableStateOf(PoseBackendKind.MEDIAPIPE) }
@@ -240,7 +245,8 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             poseBackend = poseBackend,
             lastPracticeReport = lastPracticeReport,
             sessionRepository = sessionRepository,
-            geminiAgent = remember { com.aifencingcoach.runtime.GeminiAgent() },
+            analysisManager = analysisManager,
+            geminiAgent = geminiAgent,
             onSettings = { appScreen = AppScreen.SETTINGS },
             onPracticeReport = { report -> lastPracticeReport = report },
             onBack = {
@@ -252,9 +258,20 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             sessionRepo = sessionRepository,
             onBack = { appScreen = AppScreen.HOME },
             onSessionSelected = { fullSession ->
-                // TODO: show session detail
+                selectedSessionForDetail = fullSession
+                appScreen = AppScreen.SESSION_DETAIL
             }
         )
+        AppScreen.SESSION_DETAIL -> {
+            selectedSessionForDetail?.let { sessionData ->
+                com.aifencingcoach.SessionDetailScreen(
+                    sessionData = sessionData,
+                    onBack = { appScreen = AppScreen.HISTORY }
+                )
+            } ?: run {
+                appScreen = AppScreen.HISTORY
+            }
+        }
         AppScreen.SETTINGS -> UserSettingsScreen(
             userSettings = userSettings,
             trainingMode = trainingMode,
@@ -293,21 +310,20 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
                 val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default)
                 scope.launch {
                     var geminiSummaryText = ""
-                    val geminiAgent = com.aifencingcoach.runtime.GeminiAgent()
-                    if (userSettings.useGeminiSummary && geminiAgent.isEnabled) {
-                        geminiSummaryText = geminiAgent.generateSummary(
-                            trainingMode = trainingMode.label,
-                            targetSide = targetSide.label,
-                            actionCounts = report.actionCounts,
-                            cuesFired = report.cueTimeline,
-                            userSettingsName = userSettings.name
-                        )
-                    }
+                    val geminiAgent = com.aifencingcoach.runtime.GeminiAgent(context)
+                    // Always generate summary: uses Gemini API if available, otherwise rule-based fallback
+                    geminiSummaryText = geminiAgent.generateSummary(
+                        trainingMode = trainingMode.label,
+                        targetSide = targetSide.label,
+                        actionCounts = report.actionCounts,
+                        cuesFired = report.cueTimeline,
+                        userSettingsName = userSettings.name
+                    )
 
                     sessionRepository.savePracticeReport(
                         report = report,
                         cuesFired = report.cueTimeline,
-                        llmSummary = geminiSummaryText.ifEmpty { "AI Summary disabled or skipped." }
+                        llmSummary = geminiSummaryText.ifEmpty { "No summary available." }
                     )
                 }
             },
@@ -339,7 +355,7 @@ private fun HomeScreen(
     ) {
         ScreenHeader(
             title = "AI Fencing Coach",
-            subtitle = "${userSettings.name.ifBlank { "Fencer" }}  |  ${trainingMode.label}  |  ${poseBackend.label}  |  ${targetSide.label}"
+            subtitle = "${userSettings.name.ifBlank { "Fencer" }}  |  ${trainingMode.label}  |  ${poseBackend.label}  |  ${targetSide.label}  |  v1.1.1"
         )
 
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -535,6 +551,7 @@ private fun PostgameScreen(
     lastPracticeReport: PracticeReport?,
     sessionRepository: com.aifencingcoach.runtime.database.SessionRepository,
     geminiAgent: com.aifencingcoach.runtime.GeminiAgent,
+    analysisManager: com.aifencingcoach.runtime.AnalysisManager,
     onSettings: () -> Unit,
     onPracticeReport: (PracticeReport) -> Unit,
     onBack: () -> Unit
@@ -543,19 +560,19 @@ private fun PostgameScreen(
     val scope = rememberCoroutineScope()
     var selectedVideoUri by remember { mutableStateOf<Uri?>(null) }
     var selectedVideo by remember { mutableStateOf<String?>(null) }
-    var analysisStatus by remember { mutableStateOf("Ready") }
-    var analysisRunning by remember { mutableStateOf(false) }
-    var analysisProgress by remember { mutableStateOf(0f) }
-    var frameStates by remember { mutableStateOf<Map<Long, com.aifencingcoach.runtime.CoachFrameState>?>(null) }
+    val analysisRunning by analysisManager.isAnalyzing.collectAsStateWithLifecycle()
+    val analysisProgress by analysisManager.analysisProgress.collectAsStateWithLifecycle()
+    val analysisStatus by analysisManager.analysisStatus.collectAsStateWithLifecycle()
+    val frameStates by analysisManager.frameStates.collectAsStateWithLifecycle()
+    val lastReport by analysisManager.lastReport.collectAsStateWithLifecycle()
+    val lastSessionId by analysisManager.lastSessionId.collectAsStateWithLifecycle()
+
     var isExporting by remember { mutableStateOf(false) }
     val videoAnnotator = remember { com.aifencingcoach.runtime.VideoAnnotator(context) }
     val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         selectedVideoUri = uri
         selectedVideo = uri?.lastPathSegment ?: uri?.toString()
-        analysisRunning = false
-        analysisProgress = 0f
-        frameStates = null
-        analysisStatus = if (uri == null) "No video selected" else "Video selected"
+        analysisManager.reset()
     }
 
     Column(
@@ -609,56 +626,17 @@ private fun PostgameScreen(
                     HudButton(text = "Choose Video", selected = false, onClick = { videoPicker.launch("video/*") })
                     HudButton(
                         text = if (analysisRunning) "Processing" else "Run Analysis",
-                        selected = selectedVideoUri != null,
+                        selected = selectedVideoUri != null && !analysisRunning,
                         onClick = {
-                            val uri = selectedVideoUri
-                            if (uri == null) {
-                                analysisStatus = "Choose a clip first"
-                            } else if (!analysisRunning) {
-                                analysisRunning = true
-                                analysisProgress = 0f
-                                scope.launch {
-                                    runCatching {
-                                        PostgameVideoAnalyzer(context).analyze(
-                                            uri = uri,
-                                            targetSide = targetSide,
-                                            trainingMode = trainingMode,
-                                            poseBackend = poseBackend,
-                                            onProgress = { progress ->
-                                                analysisProgress = progress.fraction
-                                                analysisStatus = progress.status
-                                            }
-                                        )
-                                    }.onSuccess { (report, states) ->
-                                        frameStates = states
-                                        onPracticeReport(report)
-                                        analysisStatus = "Saving to database..."
-                                        
-                                        var geminiSummaryText = ""
-                                        if (userSettings.useGeminiSummary && geminiAgent.isEnabled) {
-                                            analysisStatus = "Generating AI Summary..."
-                                            geminiSummaryText = geminiAgent.generateSummary(
-                                                trainingMode = trainingMode.label,
-                                                targetSide = targetSide.label,
-                                                actionCounts = report.actionCounts,
-                                                cuesFired = report.cueTimeline,
-                                                userSettingsName = userSettings.name
-                                            )
-                                        }
-
-                                        sessionRepository.savePracticeReport(
-                                            report = report,
-                                            cuesFired = report.cueTimeline,
-                                            llmSummary = geminiSummaryText.ifEmpty { "AI Summary disabled or skipped." }
-                                        )
-
-                                        analysisProgress = 1f
-                                        analysisStatus = "Analysis ready"
-                                    }.onFailure { error ->
-                                        analysisStatus = "Analysis failed: ${error.message ?: "unknown error"}"
-                                    }
-                                    analysisRunning = false
-                                }
+                            selectedVideoUri?.let { uri ->
+                                analysisManager.startAnalysis(
+                                    uri = uri,
+                                    targetSide = targetSide,
+                                    trainingMode = trainingMode,
+                                    poseBackend = poseBackend,
+                                    userSettingsName = userSettings.name,
+                                    useGeminiSummary = userSettings.useGeminiSummary
+                                )
                             }
                         }
                     )
@@ -681,12 +659,16 @@ private fun PostgameScreen(
         }
 
         MenuPanel("Latest Session", Modifier.fillMaxWidth()) {
-            if (lastPracticeReport == null) {
+            val reportToShow = lastReport ?: lastPracticeReport
+            if (reportToShow == null) {
                 Text("No practice report yet", color = MutedText, fontSize = BodyTextSize)
             } else {
-                PracticeReportSummary(report = lastPracticeReport)
+                if (lastReport != null) onPracticeReport(reportToShow)
                 
-                if (frameStates != null && selectedVideoUri != null) {
+                PracticeReportSummary(report = reportToShow)
+                
+                val currentFrameStates = frameStates
+                if (currentFrameStates != null && selectedVideoUri != null) {
                     Spacer(Modifier.height(16.dp))
                     HudButton(
                         text = if (isExporting) "Exporting Video..." else "Save Annotated Video",
@@ -697,18 +679,28 @@ private fun PostgameScreen(
                                 scope.launch {
                                     videoAnnotator.exportVideo(
                                         sourceUri = selectedVideoUri!!,
-                                        frameStates = frameStates!!,
+                                        frameStates = currentFrameStates,
                                         videoWidth = 720,
                                         videoHeight = 1280
                                     ).collect { progress ->
                                         when (progress) {
                                             is com.aifencingcoach.runtime.ExportProgress.Completed -> {
                                                 isExporting = false
-                                                analysisStatus = "Video saved to Gallery!"
+                                                val outputPath = progress.filePath
+                                                
+                                                val currentSessionId = lastSessionId
+                                                scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                                    if (currentSessionId != null) {
+                                                        com.aifencingcoach.runtime.database.AppDatabase.getDatabase(context)
+                                                            .sessionDao().updateSessionVideoPath(currentSessionId, outputPath)
+                                                    }
+                                                }
+                                                
+                                                android.widget.Toast.makeText(context, "Video saved to Gallery!", android.widget.Toast.LENGTH_LONG).show()
                                             }
                                             is com.aifencingcoach.runtime.ExportProgress.Error -> {
                                                 isExporting = false
-                                                analysisStatus = "Export failed: ${progress.exception.message}"
+                                                android.widget.Toast.makeText(context, "Export failed: ${progress.exception.message}", android.widget.Toast.LENGTH_LONG).show()
                                             }
                                         }
                                     }
@@ -1025,10 +1017,11 @@ private fun CoachScreen(
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         Column(modifier = Modifier.fillMaxSize()) {
+            // ── Camera + overlays (top 60%) ─────────────────────────────
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
+                    .weight(0.6f)
             ) {
                 CameraPreview(
                     pipeline = pipeline,
@@ -1039,8 +1032,37 @@ private fun CoachScreen(
                     }
                 )
                 SkeletonOverlay(state = displayedState)
+
+                // Action pill overlay (top center, like Flutter)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    ActionPill(
+                        action = displayedState.action,
+                        confidence = displayedState.confidence,
+                        state = displayedState.state
+                    )
+                }
+
+                // Status badge (top left)
+                Box(
+                    modifier = Modifier
+                        .padding(12.dp)
+                        .align(Alignment.TopStart)
+                ) {
+                    StatusBadge(
+                        poseBackend = poseBackend,
+                        ready = displayedState.ready,
+                        fps = displayedState.metrics.fps
+                    )
+                }
             }
-            HudPanel(
+
+            // ── Feedback panel (bottom 40%) ─────────────────────────────
+            FeedbackPanel(
                 state = displayedState,
                 targetSide = targetSide,
                 trainingMode = trainingMode,
@@ -1059,7 +1081,8 @@ private fun CoachScreen(
                     pipeline.reset()
                     resetToken += 1
                 },
-                onBackToMenu = onBackToMenu
+                onBackToMenu = onBackToMenu,
+                modifier = Modifier.weight(0.4f)
             )
         }
         reviewReport?.let { report ->
@@ -1093,7 +1116,7 @@ private fun CameraPreview(
     val pausedState = rememberUpdatedState(analysisPaused)
     val previewView = remember {
         PreviewView(context).apply {
-            scaleType = PreviewView.ScaleType.FILL_CENTER
+            scaleType = PreviewView.ScaleType.FIT_CENTER
             implementationMode = PreviewView.ImplementationMode.PERFORMANCE
         }
     }
@@ -1144,37 +1167,138 @@ private fun CameraPreview(
 
 @Composable
 private fun SkeletonOverlay(state: CoachFrameState) {
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        fun drawSkeleton(skeleton: Skeleton?, color: Color) {
-            if (skeleton == null) return
-            val scaleX = size.width / state.frameWidth.coerceAtLeast(1)
-            val scaleY = size.height / state.frameHeight.coerceAtLeast(1)
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val viewWidth = constraints.maxWidth.toFloat()
+        val viewHeight = constraints.maxHeight.toFloat()
+        val videoWidth = state.frameWidth.toFloat().coerceAtLeast(1f)
+        val videoHeight = state.frameHeight.toFloat().coerceAtLeast(1f)
 
-            fun offset(name: String): Offset? {
-                val point = skeleton[name] ?: return null
-                return Offset(point.x * scaleX, point.y * scaleY)
-            }
+        // FIT_CENTER logic
+        val scale = minOf(viewWidth / videoWidth, viewHeight / videoHeight)
+        val scaledWidth = videoWidth * scale
+        val scaledHeight = videoHeight * scale
+        val padX = (viewWidth - scaledWidth) / 2f
+        val padY = (viewHeight - scaledHeight) / 2f
 
-            for ((a, b) in SkeletonEdges) {
-                val start = offset(a)
-                val end = offset(b)
-                if (start != null && end != null) {
-                    drawLine(color, start, end, strokeWidth = 5f, cap = StrokeCap.Round)
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            fun drawSkeleton(skeleton: Skeleton?, color: Color) {
+                if (skeleton == null) return
+                
+                fun offset(name: String): Offset? {
+                    val point = skeleton[name] ?: return null
+                    return Offset(
+                        x = point.x * scale + padX,
+                        y = point.y * scale + padY
+                    )
+                }
+
+                for ((a, b) in SkeletonEdges) {
+                    val start = offset(a)
+                    val end = offset(b)
+                    if (start != null && end != null) {
+                        drawLine(color, start, end, strokeWidth = 5f, cap = StrokeCap.Round)
+                    }
+                }
+                for ((name, point) in skeleton) {
+                    val center = Offset(
+                        x = point.x * scale + padX,
+                        y = point.y * scale + padY
+                    )
+                    if (name == "front_wrist" || name == "front_ankle") {
+                        drawCircle(Color(0xFFFF4D00), radius = 18f, center = center, alpha = 0.6f)
+                        drawCircle(Color.White, radius = 8f, center = center)
+                    } else {
+                        drawCircle(color, radius = 6f, center = center)
+                    }
                 }
             }
-            for (point in skeleton.values) {
-                drawCircle(color, radius = 6f, center = Offset(point.x * scaleX, point.y * scaleY))
-            }
+
+            drawSkeleton(state.opponentSkeleton, Color(0x88FFFFFF))
+            drawSkeleton(state.targetSkeleton, Color(0xFFD7FF5F))
         }
 
-        drawSkeleton(state.opponentSkeleton, Color(0x88FFFFFF))
-        drawSkeleton(state.targetSkeleton, Color(0xFFD7FF5F))
+        if (state.visualCues.isNotEmpty()) {
+            val primaryCue = state.visualCues.first()
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0x40FF0000)), // Flash overlay effect
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = primaryCue.label,
+                    color = Color.White,
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    modifier = Modifier
+                        .background(Color(0xCCB71C1C), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 24.dp, vertical = 12.dp)
+                )
+            }
+        }
     }
 }
 
 @Composable
+private fun ActionPill(action: String, confidence: Float, state: String) {
+    val offensiveActions = setOf("R", "JS", "WW", "IS")
+    val footworkActions = setOf("SF", "SB")
+    val isIdle = action == "Idle" || state == "IDLE"
+    val isOffensive = action in offensiveActions
+    val pillColor = when {
+        state == "PAUSED" -> Color(0xFF888888)
+        state == "REVIEW" -> AccentGold
+        isIdle -> Color(0x80FFFFFF)
+        isOffensive -> Color(0xFFFF4D00)
+        action in footworkActions -> Color(0xFF00D4FF)
+        else -> Color.White
+    }
+    val emoji = when {
+        state == "PAUSED" -> "⏸"
+        state == "REVIEW" -> "📋"
+        isIdle -> "⏸"
+        isOffensive -> "⚔️"
+        else -> "🏃"
+    }
+    val label = if (isIdle && state != "PAUSED" && state != "REVIEW") {
+        "$emoji  Idle"
+    } else if (state == "PAUSED") {
+        "$emoji  Paused"
+    } else if (state == "REVIEW") {
+        "$emoji  Review"
+    } else {
+        "$emoji  $action  (${(confidence * 100f).toInt()}%)"
+    }
+
+    Text(
+        text = label,
+        color = pillColor,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier
+            .background(Color(0xAA000000), RoundedCornerShape(20.dp))
+            .padding(horizontal = 14.dp, vertical = 6.dp)
+    )
+}
+
+@Composable
+private fun StatusBadge(poseBackend: PoseBackendKind, ready: Boolean, fps: Float) {
+    val badgeColor = if (ready) Color(0xFF00E676) else Color(0xFFFF9100)
+    val label = if (ready) "✓ ${poseBackend.label} ${fps.toInt()}fps" else "⚠ Loading..."
+    Text(
+        text = label,
+        color = badgeColor,
+        fontSize = 10.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier
+            .background(Color(0x8C000000), RoundedCornerShape(8.dp))
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    )
+}
+
+@Composable
 @OptIn(ExperimentalLayoutApi::class)
-private fun HudPanel(
+private fun FeedbackPanel(
     state: CoachFrameState,
     targetSide: TargetSide,
     trainingMode: TrainingMode,
@@ -1185,77 +1309,162 @@ private fun HudPanel(
     onAnalysisPaused: (Boolean) -> Unit,
     onFinishPractice: () -> Unit,
     onReset: () -> Unit,
-    onBackToMenu: () -> Unit
+    onBackToMenu: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    Row(
-        modifier = Modifier
+    Column(
+        modifier = modifier
             .fillMaxWidth()
-            .background(Color(0xF0101418))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .background(Color(0xFF0A0A10))
     ) {
-        Column(modifier = Modifier.weight(1.25f)) {
-            Text(
-                text = state.cue.ifBlank { if (state.ready) "No active error" else "Model assets missing" },
-                color = Color.White,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = "${state.state} | ${state.action} ${(state.confidence * 100f).toInt()}% | ${state.poseBackend.label}",
-                color = AccentGreen,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-            if (state.tracking.warmupFramesRemaining > 0 && state.state == "ACTIVE") {
+        // ── Control bar ──────────────────────────────────────────────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF141420))
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Info text
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "warmup ${FenceNetWarmup - state.tracking.warmupFramesRemaining}/$FenceNetWarmup",
+                    text = "${userSettings.name.ifBlank { "Fencer" }} | ${trainingMode.label} | ${targetSide.label}",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "pose ${state.metrics.poseMs}ms | total ${state.metrics.totalMs}ms | cues ${state.session.cueCount}",
                     color = MutedText,
-                    fontSize = 11.sp
+                    fontSize = 10.sp
                 )
             }
-            CueStack(state = state)
+            // Buttons
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                HudButton(
+                    text = if (analysisPaused) "Resume" else "Pause",
+                    selected = analysisPaused,
+                    onClick = { onAnalysisPaused(!analysisPaused) }
+                )
+                HudButton(
+                    text = if (voiceEnabled) "Voice" else "Silent",
+                    selected = voiceEnabled,
+                    onClick = { onVoiceEnabled(!voiceEnabled) }
+                )
+                HudButton(text = "Finish", selected = false, onClick = onFinishPractice)
+                HudButton(text = "Reset", selected = false, onClick = onReset)
+                HudButton(text = "Home", selected = false, onClick = onBackToMenu)
+            }
         }
 
-        Column(modifier = Modifier.weight(0.9f)) {
-            Text(
-                text = "${userSettings.name.ifBlank { "Fencer" }} | ${trainingMode.label} | target ${targetSide.label}",
-                color = Color.White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                text = "pose ${state.metrics.poseMs}ms | model ${state.metrics.classifierMs}ms | total ${state.metrics.totalMs}ms | fps ${state.metrics.fps.toInt()}",
-                color = MutedText,
-                fontSize = 11.sp
-            )
-            Text(
-                text = "lock ${state.tracking.lockState} | buffer ${state.tracking.bufferFill}/$FenceNetWarmup | cues ${state.session.cueCount}",
-                color = if (state.tracking.targetInterpolated) AccentGold else MutedText,
-                fontSize = 11.sp
-            )
-        }
+        // ── Error cards / Good technique indicator ───────────────────────
+        val activeCues = state.visualCues
+        if (activeCues.isEmpty()) {
+            // Good technique - centered indicator
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        modifier = Modifier
+                            .background(Color(0x1A00E676), RoundedCornerShape(50))
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("✓", fontSize = 28.sp, color = Color(0xFF00E676))
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = if (state.state == "IDLE") "Waiting for fencer..." else "Good Technique",
+                        color = Color(0xFF00E676),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = if (state.state == "IDLE") "Position yourself in the camera frame" else "Keep it up!",
+                        color = Color(0xFFB6C2CC),
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        } else {
+            // Error cards list
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                activeCues.forEachIndexed { index, cue ->
+                    ErrorCard(
+                        label = cue.label,
+                        message = cue.message,
+                        isPrimary = index == 0
+                    )
+                }
 
-        FlowRow(
-            modifier = Modifier.weight(0.95f),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+                // Cue history
+                if (state.cueHistory.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "Recent: ${state.cueHistory.take(3).joinToString("  |  ") { it.label }}",
+                        color = Color(0xFF8DA2B2),
+                        fontSize = 11.sp
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ErrorCard(label: String, message: String, isPrimary: Boolean) {
+    val bgColors = if (isPrimary) {
+        listOf(Color(0xFF5A0000), Color(0xFF2A0000))
+    } else {
+        listOf(Color(0xFF3A2000), Color(0xFF1A1000))
+    }
+    val borderColor = if (isPrimary) Color(0xCCFF5252) else Color(0x66FF9800)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                brush = androidx.compose.ui.graphics.Brush.horizontalGradient(bgColors),
+                shape = RoundedCornerShape(10.dp)
+            )
+            .padding(1.dp) // border effect
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
-            HudButton(
-                text = if (analysisPaused) "Resume" else "Pause",
-                selected = analysisPaused,
-                onClick = { onAnalysisPaused(!analysisPaused) }
-            )
-            HudButton(
-                text = if (voiceEnabled) "Voice" else "Silent",
-                selected = voiceEnabled,
-                onClick = { onVoiceEnabled(!voiceEnabled) }
-            )
-            HudButton(text = "Finish", selected = false, onClick = onFinishPractice)
-            HudButton(text = "Reset", selected = false, onClick = onReset)
-            HudButton(text = "Home", selected = false, onClick = onBackToMenu)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = if (isPrimary) "⚠️" else "📌",
+                    fontSize = 14.sp
+                )
+                Text(
+                    text = label,
+                    color = Color.White,
+                    fontSize = if (isPrimary) 14.sp else 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
     }
 }
@@ -1441,31 +1650,6 @@ private fun ActionRow(action: String, count: Long, percent: Int) {
                     .background(Color(0xFFD7FF5F), RoundedCornerShape(4.dp))
             )
         }
-    }
-}
-
-@Composable
-private fun CueStack(state: CoachFrameState) {
-    val cues = state.visualCues.take(3)
-    if (cues.isNotEmpty()) {
-        Spacer(Modifier.height(10.dp))
-        cues.forEachIndexed { index, cue ->
-            Text(
-                text = if (index == 0) "${cue.label}: ${cue.message}" else "Next: ${cue.label}: ${cue.shortCue}",
-                color = if (index == 0) Color(0xFFFFE066) else Color(0xFFB6C2CC),
-                fontSize = if (index == 0) 11.sp else 10.sp,
-                fontWeight = if (index == 0) FontWeight.SemiBold else FontWeight.Normal
-            )
-        }
-    }
-
-    if (state.cueHistory.isNotEmpty()) {
-        Spacer(Modifier.height(10.dp))
-        Text(
-            text = state.cueHistory.take(2).joinToString("  |  ") { it.label },
-            color = Color(0xFF8DA2B2),
-            fontSize = 12.sp
-        )
     }
 }
 

@@ -63,6 +63,7 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.activity:activity-compose:1.9.3")
 
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
@@ -87,17 +88,35 @@ dependencies {
     implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
 
+    // Room KSP settings
+    // room.generateKotlin=true requires Room 2.6.0+
+    // It makes Room generate Kotlin code, which is better for KSP.
+    // However, it can sometimes cause issues if not all Room entities are fully Kotlin-compatible.
+    // Given the previous error was NoSuchFileException for AppDatabase_Impl.java, 
+    // it suggests the compiler was expecting Java but maybe KSP was confused.
+
     // Google Generative AI (Gemini)
     implementation("com.google.ai.client.generativeai:generativeai:0.2.2")
 
-    // Media3 Transformer for Video Export
+    // Media3 Transformer for Video Export & ExoPlayer for playback
     val media3Version = "1.4.1"
     implementation("androidx.media3:media3-transformer:$media3Version")
     implementation("androidx.media3:media3-effect:$media3Version")
     implementation("androidx.media3:media3-common:$media3Version")
+    implementation("androidx.media3:media3-exoplayer:$media3Version")
+    implementation("androidx.media3:media3-ui:$media3Version")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("androidx.test:core:1.6.1")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
+}
+
+// Workaround for IDE sync issue with prepareKotlinBuildScriptModel
+if (!tasks.names.contains("prepareKotlinBuildScriptModel")) {
+    tasks.register("prepareKotlinBuildScriptModel") {}
+}
+
+ksp {
+    arg("room.generateKotlin", "true")
 }
