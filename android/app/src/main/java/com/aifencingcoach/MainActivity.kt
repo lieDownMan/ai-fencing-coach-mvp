@@ -486,8 +486,9 @@ private fun HomeScreen(
         ) {
             ScreenHeader(
                 title = "AI Fencing Coach",
-                subtitle = "${userSettings.name.ifBlank { "Fencer" }}  |  ${trainingMode.label}  |  ${poseBackend.label}  |  ${targetSide.label}"
+                subtitle = ""
             )
+            UserBox(userName = userSettings.name)
     
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Row(
@@ -714,26 +715,23 @@ private fun PostgameScreen(
         )
         UserBox(userName = userSettings.name)
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            MenuPanel("Analysis Defaults", Modifier.weight(1f)) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    StatusPill(trainingMode.label, AccentGreen)
-                    StatusPill("target ${targetSide.label}", AccentGreen)
-                    StatusPill(userSettings.processingProfile, AccentGold)
-                    StatusPill(if (userSettings.useGeminiSummary) userSettings.llmProvider.label else "Playbook", AccentGold)
-                }
-
-                Spacer(Modifier.height(10.dp))
-                HudButton(text = "Edit Settings", selected = false, onClick = onSettings)
+        ExpandableMenuPanel("Analysis Defaults", initiallyExpanded = true) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                StatusPill(trainingMode.label, AccentGreen)
+                StatusPill("target ${targetSide.label}", AccentGreen)
+                StatusPill(userSettings.processingProfile, AccentGold)
+                StatusPill(if (userSettings.useGeminiSummary) userSettings.llmProvider.label else "Playbook", AccentGold)
             }
-            MenuPanel("Video Queue", Modifier.weight(2f)) {
-                val statusText = if (selectedVideoUris.isEmpty()) {
+
+            Spacer(Modifier.height(10.dp))
+            HudButton(text = "Edit Settings", selected = false, onClick = onSettings)
+        }
+        
+        ExpandableMenuPanel("Video Queue", initiallyExpanded = true) {
+            val statusText = if (selectedVideoUris.isEmpty()) {
                     "No videos selected"
                 } else {
                     "${selectedVideoUris.size} video(s) selected"
@@ -819,9 +817,8 @@ private fun PostgameScreen(
                     trackColor = Color(0xFF263039)
                 )
             }
-        }
 
-        MenuPanel("Latest Session", Modifier.fillMaxWidth()) {
+        ExpandableMenuPanel("Latest Session", initiallyExpanded = true) {
             val reportToShow = lastReport ?: lastPracticeReport
             if (reportToShow == null) {
                 Text("No practice report yet", color = MutedText, fontSize = BodyTextSize)
