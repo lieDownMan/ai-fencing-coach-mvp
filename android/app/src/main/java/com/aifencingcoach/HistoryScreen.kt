@@ -455,6 +455,22 @@ private fun UserRecapCard(
             "${session.session.id}:${session.session.timestamp}:${session.cues.size}"
         }
     }
+    val topErrorKeys = remember(recapRefreshKey) {
+        allCues
+            .groupingBy { it.errorKey }
+            .eachCount()
+            .entries
+            .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+            .take(3)
+            .map { it.key }
+            .toSet()
+    }
+    val aiWarning = aiRecapWarning(
+        useGeminiSummary = useGeminiSummary,
+        llmConfig = llmConfig,
+        lastApiError = lastApiError,
+        configError = geminiAgent.configurationError(llmConfig)
+    )
 
     LaunchedEffect(recapRefreshKey, llmConfig, useGeminiSummary) {
         val fallback = buildRecapFallback(recentSessions, geminiAgent, recapConfig, llmConfig.language)
@@ -486,7 +502,7 @@ private fun UserRecapCard(
             aiAnalysis = geminiAgent.generateImprovementAnalysis(
                 userName = userName,
                 recapFocus = recapFocus,
-                recentErrorsText = buildRecentErrorPromptData(recentSessions, geminiAgent),
+                recentErrorsText = buildRecentErrorPromptData(recentSessions, geminiAgent, topErrorKeys),
                 fallback = fallback,
                 preferGemini = useGeminiSummary,
                 llmConfig = llmConfig
@@ -573,6 +589,10 @@ private fun UserRecapCard(
             if (recentSessions.isEmpty()) {
                 Text("No sessions found for this filter.", color = Color.Gray)
             } else {
+                if (aiWarning != null) {
+                    Text(aiWarning, color = Color(0xFFE57373), fontSize = 12.sp)
+                    Spacer(Modifier.height(10.dp))
+                }
                 if (isGenerating) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color(0xFF64B5F6), strokeWidth = 2.dp)
@@ -602,7 +622,7 @@ private fun UserRecapCard(
                         lineHeight = 22.sp
                     )
                     
-                    if (lastApiError != null && useGeminiSummary && llmConfig.provider != LlmProviderKind.PLAYBOOK) {
+                    if (lastApiError != null && useGeminiSummary && llmConfig.provider != LlmProviderKind.PLAYBOOK && aiWarning == null) {
                         Spacer(Modifier.height(8.dp))
                         Text("AI unavailable: $lastApiError", color = Color(0xFFE57373), fontSize = 12.sp)
                     }
@@ -617,6 +637,25 @@ private fun UserRecapCard(
                 }
             }
         }
+    }
+}
+
+private fun aiRecapWarning(
+    useGeminiSummary: Boolean,
+    llmConfig: LlmProviderConfig,
+    lastApiError: String?,
+    configError: String?
+): String? {
+    if (llmConfig.provider == LlmProviderKind.PLAYBOOK) return null
+    val provider = llmConfig.provider.label
+    return when {
+        !useGeminiSummary ->
+            "AI Summary is off. $provider is selected, but the recap will use playbook analysis until AI Summary is enabled."
+        configError != null ->
+            "AI unavailable for $provider: $configError The recap is using playbook analysis."
+        lastApiError != null ->
+            "AI unavailable for $provider: $lastApiError The recap is using playbook analysis."
+        else -> null
     }
 }
 
@@ -636,10 +675,13 @@ private fun buildRecapFallback(
         }
     }
 
-    val topError = allCues
+    val topErrors = allCues
         .groupingBy { it.errorKey }
         .eachCount()
-        .maxByOrNull { it.value }
+        .entries
+        .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+        .take(3)
+    val topError = topErrors.firstOrNull()
         ?: return if (english) {
             "No repeated mistake stands out recently. Keep the current rhythm."
         } else {
@@ -737,6 +779,15 @@ private fun buildRecapFallback(
         } else {
             add("【 近期重點: $label】\n$trendText")
         }
+        if (topErrors.size > 1) {
+            val topList = topErrors.joinToString(if (english) "; " else "；") { (key, count) ->
+                val topLabel = geminiAgent.playbookEntry(key)?.label
+                    ?: allCues.firstOrNull { it.errorKey == key }?.errorName
+                    ?: key
+                if (english) "$topLabel: $count" else "$topLabel：$count 次"
+            }
+            add(if (english) "Top 3 errors: $topList." else "前三個錯誤：$topList。")
+        }
         val hasPriorData = if (english) {
             !trendText.contains("not much prior data")
         } else {
@@ -763,13 +814,15 @@ private fun buildRecapFallback(
 
 private fun buildRecentErrorPromptData(
     recentSessions: List<FullSessionData>,
-    geminiAgent: GeminiAgent
+    geminiAgent: GeminiAgent,
+    focusErrorKeys: Set<String>
 ): String {
     val formatter = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.getDefault())
     return recentSessions.reversed().map { session ->
         val dateString = formatter.format(Date(session.session.timestamp))
         val total = session.cues.size.coerceAtLeast(1)
         val counts = session.cues
+            .filter { focusErrorKeys.isEmpty() || it.errorKey in focusErrorKeys }
             .groupingBy { it.errorKey }
             .eachCount()
             .entries
@@ -782,6 +835,7 @@ private fun buildRecentErrorPromptData(
         "Session on $dateString: ${counts.ifBlank { "no errors" }}"
     }.joinToString("\n") + "\n\nFocus details:\n" + geminiAgent.allPlaybookEntries()
         .entries
+        .filter { focusErrorKeys.isEmpty() || it.key in focusErrorKeys }
         .joinToString("\n") { (key, entry) ->
             "$key: ${entry.label}; diagnosis=${entry.diagnosis}; practice=${entry.practice}"
         }

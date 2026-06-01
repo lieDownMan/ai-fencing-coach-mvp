@@ -402,6 +402,7 @@ private fun FencingCoachScreen(onSpeak: (String, String) -> Unit) {
             voiceEnabled = voiceEnabled,
             poseBackend = poseBackend,
             lastApiError = lastApiError,
+            aiConfigError = geminiAgent.configurationError(userSettings.llmConfig()),
             onUserSettings = { userSettings = it },
             onTrainingMode = { trainingMode = it },
             onTargetSide = { targetSide = it },
@@ -945,11 +946,12 @@ private enum class SettingsSubpage {
     PRACTICE_INFORMATION,
     APP_DEFAULT,
     FEEDBACK_CONTROL,
+    AI_SUMMARY_SETTINGS,
     HAND_SELECTION,
     LANGUAGE_SELECTION,
     TRAINING_MODE_SELECTION,
     TARGET_SIDE_SELECTION,
-    CV_MODEL_SELECTION,
+    POSE_ENGINE_SELECTION,
     EFFICIENCY_SELECTION,
     LLM_MODEL_SELECTION
 }
@@ -1018,6 +1020,7 @@ private fun UserSettingsScreen(
     voiceEnabled: Boolean,
     poseBackend: PoseBackendKind,
     lastApiError: String?,
+    aiConfigError: String?,
     onUserSettings: (UserSettings) -> Unit,
     onTrainingMode: (TrainingMode) -> Unit,
     onTargetSide: (TargetSide) -> Unit,
@@ -1055,13 +1058,14 @@ private fun UserSettingsScreen(
                     SettingsSubpage.PRACTICE_INFORMATION -> "Practice Information"
                     SettingsSubpage.APP_DEFAULT -> "App Default"
                     SettingsSubpage.FEEDBACK_CONTROL -> "Feedback Control"
+                    SettingsSubpage.AI_SUMMARY_SETTINGS -> "AI Summary"
                     SettingsSubpage.HAND_SELECTION -> "Hand"
                     SettingsSubpage.LANGUAGE_SELECTION -> "Language"
                     SettingsSubpage.TRAINING_MODE_SELECTION -> "Training Mode"
                     SettingsSubpage.TARGET_SIDE_SELECTION -> "Target Side"
-                    SettingsSubpage.CV_MODEL_SELECTION -> "CV Model"
+                    SettingsSubpage.POSE_ENGINE_SELECTION -> "Pose Engine"
                     SettingsSubpage.EFFICIENCY_SELECTION -> "Efficiency"
-                    SettingsSubpage.LLM_MODEL_SELECTION -> "LLM Model"
+                    SettingsSubpage.LLM_MODEL_SELECTION -> "AI Model"
                 },
                 subtitle = "",
                 onBack = onBackSubpage
@@ -1083,7 +1087,7 @@ private fun UserSettingsScreen(
                     IgCategoryRow("Target Side", targetSide.label) { subpageStack.add(SettingsSubpage.TARGET_SIDE_SELECTION) }
                 }
                 SettingsSubpage.APP_DEFAULT -> {
-                    IgCategoryRow("CV Model", poseBackend.label) { subpageStack.add(SettingsSubpage.CV_MODEL_SELECTION) }
+                    IgCategoryRow("Pose Engine", poseBackend.label) { subpageStack.add(SettingsSubpage.POSE_ENGINE_SELECTION) }
                     IgCategoryRow("Efficiency", userSettings.processingProfile) { subpageStack.add(SettingsSubpage.EFFICIENCY_SELECTION) }
                     IgSettingRow("Voice Cues") {
                         Switch(
@@ -1092,18 +1096,55 @@ private fun UserSettingsScreen(
                             colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF0095F6))
                         )
                     }
-                    IgCategoryRow("LLM Model", userSettings.llmProvider.label) { subpageStack.add(SettingsSubpage.LLM_MODEL_SELECTION) }
-                    val keyStatus = when (userSettings.llmProvider) {
-                        LlmProviderKind.PLAYBOOK -> "offline"
-                        LlmProviderKind.GEMINI -> if (userSettings.geminiApiKey.isBlank()) {
-                            if (com.aifencingcoach.BuildConfig.GEMINI_API_KEY.isBlank()) "missing bundled key" else "bundled key"
-                        } else "user key"
-                        LlmProviderKind.OPENAI -> if (userSettings.openAiApiKey.isBlank()) {
-                            if (com.aifencingcoach.BuildConfig.OPENAI_API_KEY.isBlank()) "missing bundled key" else "bundled key"
-                        } else "user key"
+                    IgCategoryRow("AI Summary", aiSettingsSummary(userSettings, lastApiError, aiConfigError)) {
+                        subpageStack.add(SettingsSubpage.AI_SUMMARY_SETTINGS)
                     }
+                    IgSettingRow("Auto-export annotated video") {
+                        Switch(
+                            checked = userSettings.autoExportVideo,
+                            onCheckedChange = { onUserSettings(userSettings.copy(autoExportVideo = it)) },
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF0095F6))
+                        )
+                    }
+                    IgSettingRow("Show skeleton overlay") {
+                        Switch(
+                            checked = userSettings.showSkeletonOverlay,
+                            onCheckedChange = { onUserSettings(userSettings.copy(showSkeletonOverlay = it)) },
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF0095F6))
+                        )
+                    }
+                }
+                SettingsSubpage.AI_SUMMARY_SETTINGS -> {
+                    IgSettingRow("AI Summary") {
+                        Switch(
+                            checked = userSettings.useGeminiSummary && userSettings.llmProvider != LlmProviderKind.PLAYBOOK,
+                            onCheckedChange = { enabled ->
+                                onUserSettings(
+                                    userSettings.copy(
+                                        useGeminiSummary = enabled,
+                                        llmProvider = if (enabled && userSettings.llmProvider == LlmProviderKind.PLAYBOOK) {
+                                            LlmProviderKind.GEMINI
+                                        } else {
+                                            userSettings.llmProvider
+                                        }
+                                    )
+                                )
+                            },
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF0095F6))
+                        )
+                    }
+                    IgCategoryRow("AI Model", userSettings.llmProvider.label) { subpageStack.add(SettingsSubpage.LLM_MODEL_SELECTION) }
+                    val keyStatus = aiKeyStatus(userSettings)
                     IgSettingRow("API Key Status") {
                         StatusPill(keyStatus, if (keyStatus.contains("missing")) AccentCoral else AccentGreen)
+                    }
+                    aiStatusMessage(userSettings, lastApiError, aiConfigError)?.let { status ->
+                        Text(
+                            status,
+                            color = AccentCoral,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                        )
                     }
                     
                     if (userSettings.llmProvider != LlmProviderKind.PLAYBOOK) {
@@ -1118,30 +1159,6 @@ private fun UserSettingsScreen(
                                     else userSettings.copy(geminiApiKey = value.trim())
                                 )
                             }
-                        )
-                    }
-                    
-                    if (lastApiError != null && userSettings.llmProvider != LlmProviderKind.PLAYBOOK) {
-                        Text(
-                            "AI unavailable: $lastApiError",
-                            color = AccentCoral,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                        )
-                    }
-
-                    IgSettingRow("Auto-export annotated video") {
-                        Switch(
-                            checked = userSettings.autoExportVideo,
-                            onCheckedChange = { onUserSettings(userSettings.copy(autoExportVideo = it)) },
-                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF0095F6))
-                        )
-                    }
-                    IgSettingRow("Show skeleton overlay") {
-                        Switch(
-                            checked = userSettings.showSkeletonOverlay,
-                            onCheckedChange = { onUserSettings(userSettings.copy(showSkeletonOverlay = it)) },
-                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF0095F6))
                         )
                     }
                 }
@@ -1201,7 +1218,7 @@ private fun UserSettingsScreen(
                         onBackSubpage()
                     }
                 }
-                SettingsSubpage.CV_MODEL_SELECTION -> {
+                SettingsSubpage.POSE_ENGINE_SELECTION -> {
                     SelectionList(PoseBackendKind.entries.map { it.label }, poseBackend.label) {
                         onPoseBackend(PoseBackendKind.fromLabel(it))
                         onBackSubpage()
@@ -1215,7 +1232,13 @@ private fun UserSettingsScreen(
                 }
                 SettingsSubpage.LLM_MODEL_SELECTION -> {
                     SelectionList(LlmProviderKind.entries.map { it.label }, userSettings.llmProvider.label) {
-                        onUserSettings(userSettings.copy(llmProvider = LlmProviderKind.fromLabel(it)))
+                        val provider = LlmProviderKind.fromLabel(it)
+                        onUserSettings(
+                            userSettings.copy(
+                                llmProvider = provider,
+                                useGeminiSummary = provider != LlmProviderKind.PLAYBOOK
+                            )
+                        )
                         onBackSubpage()
                     }
                 }
@@ -1365,6 +1388,51 @@ private fun summaryStatusText(result: CoachingSummaryResult): String =
         SummarySource.FAILED -> "AI summary failed: ${summaryErrorLabel(result.errorMessage)}."
     }
 
+private fun aiStatusMessage(
+    settings: UserSettings,
+    lastApiError: String?,
+    configError: String?
+): String? {
+    if (settings.llmProvider == LlmProviderKind.PLAYBOOK) return null
+    val provider = settings.llmProvider.label
+    return when {
+        !settings.useGeminiSummary ->
+            "AI Summary is off. $provider is selected, but the app will use the playbook summary until AI Summary is enabled."
+        configError != null ->
+            "AI unavailable for $provider: $configError The app is using the playbook summary."
+        lastApiError != null ->
+            "AI unavailable for $provider: $lastApiError The app is using the playbook summary."
+        else -> null
+    }
+}
+
+private fun aiKeyStatus(settings: UserSettings): String =
+    when (settings.llmProvider) {
+        LlmProviderKind.PLAYBOOK -> "offline"
+        LlmProviderKind.GEMINI -> if (settings.geminiApiKey.isBlank()) {
+            if (com.aifencingcoach.BuildConfig.GEMINI_API_KEY.isBlank()) "missing bundled key" else "bundled key"
+        } else {
+            "user key"
+        }
+        LlmProviderKind.OPENAI -> if (settings.openAiApiKey.isBlank()) {
+            if (com.aifencingcoach.BuildConfig.OPENAI_API_KEY.isBlank()) "missing bundled key" else "bundled key"
+        } else {
+            "user key"
+        }
+    }
+
+private fun aiSettingsSummary(
+    settings: UserSettings,
+    lastApiError: String?,
+    configError: String?
+): String =
+    when {
+        settings.llmProvider == LlmProviderKind.PLAYBOOK -> "offline playbook"
+        !settings.useGeminiSummary -> "${settings.llmProvider.label} off"
+        configError != null || lastApiError != null -> "${settings.llmProvider.label} issue"
+        else -> "${settings.llmProvider.label} on"
+    }
+
 private fun summaryErrorLabel(errorMessage: String?): String {
     val lower = errorMessage.orEmpty().lowercase()
     return when {
@@ -1389,7 +1457,11 @@ private fun summaryStatusColor(status: String): Color =
                 status.contains("OpenAI", ignoreCase = true)
             ) -> AccentGreen
         status.contains("Generating", ignoreCase = true) -> AccentGold
-        status.contains("failed", ignoreCase = true) || status.contains("not configured", ignoreCase = true) -> AccentCoral
+        status.contains("failed", ignoreCase = true) ||
+            status.contains("not configured", ignoreCase = true) ||
+            status.contains("missing", ignoreCase = true) ||
+            status.contains("unavailable", ignoreCase = true) ||
+            status.contains("off", ignoreCase = true) -> AccentCoral
         else -> MutedText
     }
 
@@ -1486,14 +1558,18 @@ private fun CoachScreen(
                 llmConfig = llmConfig
             )
             reviewSummary = fallbackResult.text
-            reviewSummaryStatus = summaryStatusText(fallbackResult)
+            reviewSummaryStatus = if (!userSettings.useGeminiSummary && userSettings.llmProvider != LlmProviderKind.PLAYBOOK) {
+                "AI Summary is off. ${userSettings.llmProvider.label} is selected; showing playbook summary."
+            } else {
+                summaryStatusText(fallbackResult)
+            }
 
             if (userSettings.useGeminiSummary) {
                 val providerLabel = geminiAgent.providerLabel(llmConfig)
                 reviewSummaryStatus = if (geminiAgent.isEnabled(llmConfig)) {
                     "Generating $providerLabel summary..."
                 } else {
-                    "$providerLabel is not configured; showing playbook summary."
+                    "AI unavailable for $providerLabel: ${geminiAgent.configurationError(llmConfig) ?: "$providerLabel is not configured."} Showing playbook summary."
                 }
                 if (geminiAgent.isEnabled(llmConfig)) {
                     val geminiResult = geminiAgent.generateSummaryResult(

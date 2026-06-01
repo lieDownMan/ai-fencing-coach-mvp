@@ -19,6 +19,7 @@ internal const val DEFAULT_GEMINI_MODEL_NAME = "gemini-flash-lite-latest"
 internal const val DEFAULT_OPENAI_MODEL_NAME = "gpt-5.4-nano"
 
 private const val LLM_TAG = "LlmCoachAgent"
+private const val SummaryTopErrorLimit = 3
 private val FALLBACK_GEMINI_MODEL_NAMES = listOf(
     DEFAULT_GEMINI_MODEL_NAME,
     "gemini-2.0-flash-lite"
@@ -114,6 +115,15 @@ class GeminiAgent(private val playbookRepository: PlaybookRepository) {
             effectiveApiKey(config).isNotBlank() &&
             effectiveModelName(config).isNotBlank()
 
+    fun configurationError(config: LlmProviderConfig): String? {
+        if (config.provider == LlmProviderKind.PLAYBOOK) return null
+        return when {
+            effectiveApiKey(config).isBlank() -> "API key is missing."
+            effectiveModelName(config).isBlank() -> "model is missing."
+            else -> null
+        }
+    }
+
     fun providerLabel(config: LlmProviderConfig): String = config.provider.label
 
     fun playbookEntry(errorKey: String): PlaybookEntry? = playbookRepository.getEntry(errorKey)
@@ -152,14 +162,17 @@ class GeminiAgent(private val playbookRepository: PlaybookRepository) {
     ): CoachingSummaryResult = withContext(Dispatchers.IO) {
         val totalActions = actionCounts.sumOf { it.count }
         val aggregatedErrors = aggregateErrors(cuesFired)
+        val summaryErrors = aggregatedErrors.take(SummaryTopErrorLimit)
         val language = normalizePlaybookLanguage(llmConfig.language)
-        val fallback = generateRuleBasedSummary(trainingMode, totalActions, aggregatedErrors, language)
+        val fallback = generateRuleBasedSummary(trainingMode, totalActions, summaryErrors, language)
 
         if (!preferGemini || !isEnabled(llmConfig)) {
             return@withContext CoachingSummaryResult(
                 text = fallback,
                 source = if (preferGemini) SummarySource.DISABLED else SummarySource.PLAYBOOK,
-                errorMessage = if (preferGemini) "${providerLabel(llmConfig)} is not configured." else null
+                errorMessage = if (preferGemini) {
+                    "AI unavailable for ${providerLabel(llmConfig)}: ${configurationError(llmConfig) ?: "${providerLabel(llmConfig)} is not configured."}"
+                } else null
             )
         }
 
@@ -168,7 +181,7 @@ class GeminiAgent(private val playbookRepository: PlaybookRepository) {
             .map { "- ${it.action}: ${it.count} times (${it.percent}%)" }
             .joinToString("\n")
 
-        val playbookBlock = formatPlaybookBlock(aggregatedErrors, language)
+        val playbookBlock = formatPlaybookBlock(summaryErrors, language)
         val prompt = buildSessionSummaryPrompt(
             userName = userSettingsName,
             trainingMode = trainingMode,
@@ -428,7 +441,7 @@ $outputRules
                 shortCue = entry?.shortCue ?: "",
                 practice = entry?.practice ?: ""
             )
-        }.sortedByDescending { it.count }
+        }.sortedWith(compareByDescending<AggregatedError> { it.count }.thenBy { it.key })
     }
 
     private fun generateRuleBasedSummary(
@@ -443,7 +456,7 @@ $outputRules
                 lines.add("No playbook-defined posture problems were detected. Keep the same stable form.")
                 return lines.joinToString("\n")
             }
-            lines.add("Detected playbook problems and frequency:")
+            lines.add("Top detected playbook problems:")
             for (item in errors) {
                 val detail = StringBuilder("- ${item.errorName}: ${item.count} times\n")
                 if (item.diagnosis.isNotBlank()) detail.append("  Diagnosis: ${item.diagnosis}\n")
@@ -458,7 +471,7 @@ $outputRules
             lines.add("未偵測到姿勢問題，表現良好！繼續保持！")
             return lines.joinToString("\n")
         }
-        lines.add("偵測到的問題與頻率：")
+        lines.add("主要偵測問題（最多 3 項）：")
         for (item in errors) {
             val detail = StringBuilder("- ${item.errorName}：${item.count} 次\n")
             if (item.diagnosis.isNotBlank()) detail.append("  診斷：${item.diagnosis}\n")
@@ -501,7 +514,7 @@ $outputRules
 - Use only the evidence in OBJECTIVE_DATA and PLAYBOOK_CONTEXT.
 - Do not invent mistakes, timecodes, injuries, tactics, opponent behavior, or psychological advice.
 - If detected_problem_count is 0, say no playbook-defined posture problems were detected and give only a light next-step cue for the training mode.
-- If problems exist, mention every listed problem exactly once with its frequency, diagnosis, and practice recommendation.
+- If problems exist, focus only on the top ${SummaryTopErrorLimit} listed problems. Mention each listed problem exactly once with its frequency, diagnosis, and practice recommendation.
 $languageRule
 - Address the student directly as "$userName".
 - Prefer compact paragraphs over long bullet lists.

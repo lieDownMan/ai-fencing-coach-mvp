@@ -139,7 +139,11 @@ class AnalysisManager(
             val fallbackSummary = fallbackResult.text
 
             _lastSummary.value = fallbackSummary
-            _lastSummaryStatus.value = "Playbook summary ready."
+            _lastSummaryStatus.value = if (!job.useGeminiSummary && job.llmConfig.provider != LlmProviderKind.PLAYBOOK) {
+                "AI Summary is off. ${job.llmConfig.provider.label} is selected; showing playbook summary."
+            } else {
+                "Playbook summary ready."
+            }
 
             val sessionId = sessionRepository.savePracticeReport(
                 report = report,
@@ -157,7 +161,7 @@ class AnalysisManager(
                 _lastSummaryStatus.value = if (geminiAgent.isEnabled(job.llmConfig)) {
                     "Generating $providerLabel summary..."
                 } else {
-                    "$providerLabel is not configured; showing playbook summary."
+                    "AI unavailable for $providerLabel: ${geminiAgent.configurationError(job.llmConfig) ?: "$providerLabel is not configured."} Showing playbook summary."
                 }
                 scope.launch {
                     val geminiResult = geminiAgent.generateSummaryResult(
