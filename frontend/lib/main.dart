@@ -17,6 +17,7 @@ import 'pose/activity_gatekeeper.dart';
 import 'postgame/postgame_analyzer.dart';
 import 'postgame/annotated_video_player.dart';
 import 'history/history_screen.dart';
+import 'database/database_helper.dart';
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -197,6 +198,15 @@ class _MainScreenState extends State<MainScreen>
   String _postgameStatus = '';
   PostgameReport? _postgameReport;
   String? _postgameVideoPath;
+
+  // ── Session tracking (for History DB) ─────────────────────────────────
+  String _userName = 'Fencer';
+  DateTime? _sessionStartTime;
+  final List<CueHistoryItem> _sessionCues = [];
+  final Map<String, int> _sessionActionCounts = {};
+  int _sessionFrameCount = 0;
+  int _sessionInferenceCount = 0;
+  final _db = DatabaseHelper();
 
   @override
   void initState() {
@@ -527,7 +537,26 @@ class _MainScreenState extends State<MainScreen>
       final voiceText =
           kErrorVoice[decision.voiceErrorKey] ?? decision.voiceErrorKey!;
       _speak(voiceText);
+
+      // Record this cue in session history
+      _sessionStartTime ??= DateTime.now();
+      final elapsed = DateTime.now().difference(_sessionStartTime!).inSeconds.toDouble();
+      _sessionCues.add(CueHistoryItem(
+        id: 0,
+        sessionId: 0,
+        timeSeconds: elapsed,
+        errorKey: decision.voiceErrorKey!,
+        errorName: kErrorLabels[decision.voiceErrorKey!] ?? decision.voiceErrorKey!,
+        practiceSuggestion: '',
+      ));
     }
+
+    // Track action counts
+    if (action != 'Idle') {
+      _sessionActionCounts[action] = (_sessionActionCounts[action] ?? 0) + 1;
+    }
+    _sessionInferenceCount++;
+    _sessionFrameCount++;
   }
 
   // ── Build FenceNet input tensor ─────────────────────────────────────────────
@@ -557,6 +586,42 @@ class _MainScreenState extends State<MainScreen>
   // ── Settings helpers ────────────────────────────────────────────────────────
 
   void _resetLiveBuffers() {
+    // Save session to DB if it has meaningful data
+    if (_sessionStartTime != null && _sessionInferenceCount > 0) {
+      final durationMs = DateTime.now().difference(_sessionStartTime!).inMilliseconds;
+      if (durationMs > 3000) { // Only save sessions longer than 3 seconds
+        final topAction = _sessionActionCounts.isEmpty
+            ? 'Idle'
+            : (_sessionActionCounts.entries.toList()
+                ..sort((a, b) => b.value.compareTo(a.value)))
+                .first
+                .key;
+        _db.insertSession(
+          trainingMode: _trainingMode,
+          targetSide: _targetSide,
+          durationMs: durationMs,
+          framesAnalyzed: _sessionFrameCount,
+          modelChecks: _sessionInferenceCount,
+          topAction: topAction,
+          actionCounts: Map.from(_sessionActionCounts),
+          errorCounts: {
+            for (final cue in _sessionCues)
+              cue.errorKey: (_sessionCues.where((c) => c.errorKey == cue.errorKey).length)
+          },
+          cues: List.from(_sessionCues),
+          userName: _userName,
+          source: 'Realtime',
+        );
+      }
+    }
+
+    // Reset session tracking
+    _sessionStartTime = null;
+    _sessionCues.clear();
+    _sessionActionCounts.clear();
+    _sessionFrameCount = 0;
+    _sessionInferenceCount = 0;
+
     _yoloPoseService.resetTracking();
     _refNose = null;
     _refScale = null;
@@ -1016,6 +1081,29 @@ class _MainScreenState extends State<MainScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _sectionHeader('⚙️ 訓練設定 Training Settings'),
+          const SizedBox(height: 12),
+
+          // User Name
+          _buildCard(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: TextFormField(
+                initialValue: _userName,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: '使用者名稱 User Name',
+                  labelStyle: TextStyle(color: Colors.white54),
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
+                ),
+                onChanged: (val) {
+                  if (val.trim().isNotEmpty) {
+                    setState(() => _userName = val.trim());
+                  }
+                },
+              ),
+            ),
+          ),
           const SizedBox(height: 12),
 
           // Target Side
