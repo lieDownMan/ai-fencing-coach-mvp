@@ -114,6 +114,7 @@ class AnalysisManager(
                 targetSide = job.targetSide,
                 trainingMode = job.trainingMode,
                 poseBackend = job.poseBackend,
+                playbookLanguage = job.llmConfig.language,
                 onProgress = { progress ->
                     _analysisProgress.value = progress.fraction
                     _analysisStatus.value = progress.status
@@ -145,7 +146,8 @@ class AnalysisManager(
                 cuesFired = report.cueTimeline,
                 llmSummary = fallbackSummary.ifEmpty { "No summary available." },
                 userName = job.userSettingsName,
-                source = "Postgame"
+                source = "Postgame",
+                playbookLanguage = job.llmConfig.language
             )
 
             _lastSessionId.value = sessionId
@@ -227,7 +229,7 @@ class AnalysisManager(
             SummarySource.OPENAI -> "OpenAI summary ready."
             SummarySource.PLAYBOOK -> "Playbook summary ready."
             SummarySource.DISABLED -> result.errorMessage ?: "AI is not configured; showing playbook summary."
-            SummarySource.FAILED -> "AI summary failed: ${formatLlmErrorMessage(result.errorMessage)}."
+            SummarySource.FAILED -> "AI summary failed: ${formatLlmErrorMessage(result.errorMessage)}"
         }
 
 

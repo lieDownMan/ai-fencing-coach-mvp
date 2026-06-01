@@ -94,12 +94,14 @@ import com.aifencingcoach.runtime.FeedbackCue
 import com.aifencingcoach.runtime.LiveCoachPipeline
 import com.aifencingcoach.runtime.LlmProviderConfig
 import com.aifencingcoach.runtime.LlmProviderKind
+import com.aifencingcoach.runtime.PlaybookRepository
 import com.aifencingcoach.runtime.PoseBackendKind
 import com.aifencingcoach.runtime.PracticeReport
 import com.aifencingcoach.runtime.Skeleton
 import com.aifencingcoach.runtime.SummarySource
 import com.aifencingcoach.runtime.TargetSide
 import com.aifencingcoach.runtime.TrainingMode
+import com.aifencingcoach.runtime.normalizePlaybookLanguage
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -145,7 +147,8 @@ private fun UserSettings.llmConfig(): LlmProviderConfig {
     }
     return LlmProviderConfig(
         provider = llmProvider,
-        apiKey = providerApiKey.trim()
+        apiKey = providerApiKey.trim(),
+        language = normalizePlaybookLanguage(language)
     )
 }
 
@@ -178,14 +181,15 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    private fun speak(text: String) {
+    private fun speak(text: String, language: String) {
         if (!ttsReady || text.isBlank()) return
+        tts?.language = ttsLocaleForLanguage(language)
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "cue-${System.nanoTime()}")
     }
 }
 
 @Composable
-private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
+private fun FencingCoachScreen(onSpeak: (String, String) -> Unit) {
     val context = LocalContext.current
     var hasPermission by remember {
         mutableStateOf(
@@ -221,12 +225,7 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
     }
     
     val sessionRepository = remember { com.aifencingcoach.runtime.database.SessionRepository(context) }
-    val playbookRepository = remember { com.aifencingcoach.runtime.PlaybookRepository(context) }
-    val geminiAgent = remember { com.aifencingcoach.runtime.GeminiAgent(playbookRepository) }
-    val analysisManager = remember { com.aifencingcoach.runtime.AnalysisManager(context, sessionRepository, geminiAgent) }
     val persistenceScope = rememberCoroutineScope()
-    
-    val lastApiError by geminiAgent.lastApiError.collectAsState()
 
     var appScreen by remember { mutableStateOf(AppScreen.HOME) }
     var selectedSessionForDetail by remember { mutableStateOf<com.aifencingcoach.runtime.database.FullSessionData?>(null) }
@@ -255,12 +254,23 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
                 onlyFocusedErrors = prefs.getBoolean("only_focused_errors", false),
                 emphasizedErrors = prefs.getStringSet("emphasized_errors", emptySet())?.toSet().orEmpty(),
                 mutedErrors = prefs.getStringSet("muted_errors", emptySet())?.toSet().orEmpty(),
-                language = prefs.getString("language", "zh") ?: "zh",
+                language = normalizePlaybookLanguage(prefs.getString("language", PlaybookRepository.DEFAULT_LANGUAGE)),
                 autoExportVideo = prefs.getBoolean("auto_export_video", false),
                 showSkeletonOverlay = prefs.getBoolean("show_skeleton_overlay", true)
             )
         )
     }
+    val playbookRepository = remember(userSettings.language) {
+        com.aifencingcoach.runtime.PlaybookRepository(context, userSettings.language)
+    }
+    val geminiAgent = remember(playbookRepository) {
+        com.aifencingcoach.runtime.GeminiAgent(playbookRepository)
+    }
+    val analysisManager = remember(geminiAgent) {
+        com.aifencingcoach.runtime.AnalysisManager(context, sessionRepository, geminiAgent)
+    }
+    
+    val lastApiError by geminiAgent.lastApiError.collectAsState()
 
     fun saveSettings() {
         prefs.edit()
@@ -279,7 +289,7 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             .putStringSet("emphasized_errors", userSettings.emphasizedErrors)
             .putStringSet("muted_errors", userSettings.mutedErrors)
             .putBoolean("voice_enabled", voiceEnabled)
-            .putString("language", userSettings.language)
+            .putString("language", normalizePlaybookLanguage(userSettings.language))
             .putBoolean("auto_export_video", userSettings.autoExportVideo)
             .putBoolean("show_skeleton_overlay", userSettings.showSkeletonOverlay)
             .apply()
@@ -438,7 +448,8 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
                         report = report,
                         cuesFired = report.cueTimeline,
                         llmSummary = fallbackSummary.ifEmpty { "No summary available." },
-                        userName = userSettings.name
+                        userName = userSettings.name,
+                        playbookLanguage = userSettings.language
                     )
 
                     if (userSettings.useGeminiSummary) {
@@ -644,7 +655,7 @@ private fun RealtimeSetupScreen(
                             in userSettings.emphasizedErrors -> AccentGold
                             else -> MutedText
                         }
-                        StatusPill(option.label, color)
+                        StatusPill(localizedErrorLabel(option, userSettings.language), color)
                     }
                 }
             }
@@ -971,6 +982,7 @@ private fun IgCategoryRow(label: String, value: String? = null, onClick: () -> U
 private fun SelectionList(
     items: List<String>,
     selected: String,
+    labelFor: (String) -> String = { it },
     onSelect: (String) -> Unit
 ) {
     Column {
@@ -983,7 +995,7 @@ private fun SelectionList(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(text = item, color = Color.White, fontSize = 16.sp)
+                Text(text = labelFor(item), color = Color.White, fontSize = 16.sp)
                 if (item == selected) {
                     Icon(
                         imageVector = Icons.Default.Check,
@@ -1062,7 +1074,9 @@ private fun UserSettingsScreen(
                     IgTextFieldRow("Height cm", userSettings.heightCm) { onUserSettings(userSettings.copy(heightCm = it.filter(Char::isDigit).take(3))) }
                     IgTextFieldRow("Weight kg", userSettings.weightKg) { onUserSettings(userSettings.copy(weightKg = it.filter(Char::isDigit).take(3))) }
                     IgCategoryRow("Hand", userSettings.handedness) { subpageStack.add(SettingsSubpage.HAND_SELECTION) }
-                    IgCategoryRow("Language", userSettings.language) { subpageStack.add(SettingsSubpage.LANGUAGE_SELECTION) }
+                    IgCategoryRow("Language", PlaybookRepository.displayName(userSettings.language)) {
+                        subpageStack.add(SettingsSubpage.LANGUAGE_SELECTION)
+                    }
                 }
                 SettingsSubpage.PRACTICE_INFORMATION -> {
                     IgCategoryRow("Training Mode", trainingMode.label) { subpageStack.add(SettingsSubpage.TRAINING_MODE_SELECTION) }
@@ -1108,7 +1122,12 @@ private fun UserSettingsScreen(
                     }
                     
                     if (lastApiError != null && userSettings.llmProvider != LlmProviderKind.PLAYBOOK) {
-                        Text("API Error: $lastApiError", color = AccentCoral, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                        Text(
+                            "AI unavailable: $lastApiError",
+                            color = AccentCoral,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                        )
                     }
 
                     IgSettingRow("Auto-export annotated video") {
@@ -1137,6 +1156,7 @@ private fun UserSettingsScreen(
                         availableErrorsForMode(trainingMode).forEach { option ->
                             ErrorPreferenceRow(
                                 option = option,
+                                language = userSettings.language,
                                 emphasized = option.key in userSettings.emphasizedErrors,
                                 muted = option.key in userSettings.mutedErrors,
                                 onEmphasized = { checked ->
@@ -1160,8 +1180,12 @@ private fun UserSettingsScreen(
                     }
                 }
                 SettingsSubpage.LANGUAGE_SELECTION -> {
-                    SelectionList(listOf("zh", "en"), userSettings.language) {
-                        onUserSettings(userSettings.copy(language = it))
+                    SelectionList(
+                        items = listOf(PlaybookRepository.DEFAULT_LANGUAGE, PlaybookRepository.ENGLISH_LANGUAGE),
+                        selected = userSettings.language,
+                        labelFor = { PlaybookRepository.displayName(it) }
+                    ) {
+                        onUserSettings(userSettings.copy(language = normalizePlaybookLanguage(it)))
                         onBackSubpage()
                     }
                 }
@@ -1271,7 +1295,9 @@ private fun ScreenHeader(
     onBack: (() -> Unit)? = null
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 0.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (onBack != null) {
@@ -1342,10 +1368,16 @@ private fun summaryStatusText(result: CoachingSummaryResult): String =
 private fun summaryErrorLabel(errorMessage: String?): String {
     val lower = errorMessage.orEmpty().lowercase()
     return when {
-        lower.contains("quota") || lower.contains("rate") -> "quota/rate limit"
+        lower.contains("quota") || lower.contains("rate") -> "API quota or rate limit reached"
         lower.contains("api key") || lower.contains("permission") || lower.contains("unauthorized") -> "API key rejected"
         lower.contains("model") || lower.contains("not found") -> "model unavailable"
-        lower.contains("network") || lower.contains("timeout") || lower.contains("unable to resolve host") -> "network error"
+        lower.contains("network") ||
+            lower.contains("timeout") ||
+            lower.contains("unable to resolve host") ||
+            lower.contains("unknown host") ||
+            lower.contains("failed to connect") ||
+            lower.contains("connectexception") ||
+            lower.contains("socket") -> "No internet connection"
         else -> "see logcat"
     }
 }
@@ -1391,6 +1423,7 @@ private fun CheckboxLine(
 @Composable
 private fun ErrorPreferenceRow(
     option: FeedbackErrorOption,
+    language: String,
     emphasized: Boolean,
     muted: Boolean,
     onEmphasized: (Boolean) -> Unit,
@@ -1404,7 +1437,7 @@ private fun ErrorPreferenceRow(
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(option.label, color = Color.White, fontSize = BodyTextSize, fontWeight = FontWeight.SemiBold)
+            Text(localizedErrorLabel(option, language), color = Color.White, fontSize = BodyTextSize, fontWeight = FontWeight.SemiBold)
             Text(option.key, color = MutedText, fontSize = 11.sp)
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1429,7 +1462,7 @@ private fun CoachScreen(
     onVoiceEnabled: (Boolean) -> Unit,
     onBackToMenu: () -> Unit,
     onPracticeReport: (PracticeReport) -> Unit,
-    onSpeak: (String) -> Unit
+    onSpeak: (String, String) -> Unit
 ) {
     var analysisPaused by remember { mutableStateOf(false) }
     var frameState by remember { mutableStateOf(CoachFrameState()) }
@@ -1489,6 +1522,7 @@ private fun CoachScreen(
         userSettings.emphasizedErrors,
         userSettings.mutedErrors,
         userSettings.onlyFocusedErrors,
+        userSettings.language,
         resetToken
     ) {
         LiveCoachPipeline(
@@ -1498,7 +1532,8 @@ private fun CoachScreen(
             trainingMode = trainingMode,
             focusErrors = userSettings.emphasizedErrors,
             muteErrors = userSettings.mutedErrors,
-            onlyErrors = if (userSettings.onlyFocusedErrors) userSettings.emphasizedErrors else emptySet()
+            onlyErrors = if (userSettings.onlyFocusedErrors) userSettings.emphasizedErrors else emptySet(),
+            playbookLanguage = userSettings.language
         )
     }
 
@@ -1544,7 +1579,9 @@ private fun CoachScreen(
                     analysisPaused = analysisPaused || isReviewing,
                     onFrameState = { state, cue ->
                         frameState = state
-                        if (voiceEnabled && cue != null) onSpeak(cue.shortCue.ifBlank { cue.message })
+                        if (voiceEnabled && cue != null) {
+                            onSpeak(cue.shortCue.ifBlank { cue.message }, userSettings.language)
+                        }
                     }
                 )
                 if (userSettings.showSkeletonOverlay) {
@@ -1555,7 +1592,7 @@ private fun CoachScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 12.dp),
+                        .padding(top = 28.dp),
                     contentAlignment = Alignment.TopCenter
                 ) {
                     ActionPill(
@@ -1568,7 +1605,7 @@ private fun CoachScreen(
                 // Status badge (top left)
                 Box(
                     modifier = Modifier
-                        .padding(12.dp)
+                        .padding(start = 12.dp, top = 28.dp, end = 12.dp, bottom = 12.dp)
                         .align(Alignment.TopStart)
                 ) {
                     StatusBadge(
@@ -2145,6 +2182,13 @@ private fun formatSeconds(totalSeconds: Long): String {
     return "%d:%02d".format(Locale.US, minutes, seconds)
 }
 
+private fun ttsLocaleForLanguage(language: String): Locale =
+    if (normalizePlaybookLanguage(language) == PlaybookRepository.ENGLISH_LANGUAGE) {
+        Locale.US
+    } else {
+        Locale.TAIWAN
+    }
+
 private fun modeSummary(mode: TrainingMode): String =
     when (mode) {
         TrainingMode.FOOTWORK -> "Footwork cues prioritize stance, bounce, step width, and center of mass."
@@ -2173,7 +2217,7 @@ private fun postgameSummary(report: PracticeReport?): String =
     }
 
 private fun settingsSummary(settings: UserSettings): String =
-    "${settings.handedness}, ${settings.heightCm.ifBlank { "180" }}cm, ${settings.emphasizedErrors.size} focus, ${settings.mutedErrors.size} muted."
+    "${PlaybookRepository.displayName(settings.language)}, ${settings.handedness}, ${settings.heightCm.ifBlank { "180" }}cm, ${settings.emphasizedErrors.size} focus, ${settings.mutedErrors.size} muted."
 
 private fun videoDisplayName(context: Context, uri: Uri): String {
     context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
@@ -2194,6 +2238,13 @@ private data class FeedbackErrorOption(
 private fun availableErrorsForMode(mode: TrainingMode): List<FeedbackErrorOption> =
     FeedbackErrorOptions.filter { mode in it.modes }
 
+private fun localizedErrorLabel(option: FeedbackErrorOption, language: String): String =
+    if (normalizePlaybookLanguage(language) == PlaybookRepository.ENGLISH_LANGUAGE) {
+        option.label
+    } else {
+        ChineseFeedbackLabels[option.key] ?: option.label
+    }
+
 private fun Set<String>.toggle(value: String, enabled: Boolean): Set<String> =
     if (enabled) this + value else this - value
 
@@ -2212,6 +2263,21 @@ private val FeedbackErrorOptions = listOf(
     FeedbackErrorOption("wide_step", "Wide step", TrainingMode.entries.toSet()),
     FeedbackErrorOption("narrow_step", "Narrow step", TrainingMode.entries.toSet()),
     FeedbackErrorOption("hand_too_high", "Hand too high", TrainingMode.entries.toSet())
+)
+
+private val ChineseFeedbackLabels = mapOf(
+    "foot_before_hand" to "腳先於手",
+    "lunge_overextension" to "弓步過度伸展",
+    "incomplete_arm_extension" to "手臂伸展不足",
+    "guard_dropped" to "護手下掉",
+    "stance_too_high" to "姿勢太高",
+    "bounce_excessive" to "彈跳過多",
+    "center_of_mass_in_front" to "重心過前",
+    "center_of_mass_leaning_backward" to "重心後仰",
+    "over_parrying" to "格擋過大",
+    "wide_step" to "步幅過大",
+    "narrow_step" to "步距過窄",
+    "hand_too_high" to "手位過高"
 )
 
 private val PageBackground = Color(0xFF0D1115)

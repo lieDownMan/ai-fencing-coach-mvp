@@ -1,0 +1,86 @@
+{
+  "foot_before_hand": {
+    "error_name": "Foot Before Hand",
+    "diagnosis": "The front foot begins moving before the weapon arm creates threat, which makes the attack easier to read.",
+    "short_cue": "Hand first.",
+    "practice": "Slow step-lunge reps: extend the arm first, then move the front foot.",
+    "weight": 5.0
+  },
+  "lunge_overextension": {
+    "error_name": "Lunge Overextension",
+    "diagnosis": "The front knee angle is collapsing below the safe technical range during attack or stance transitions.",
+    "short_cue": "Do not collapse the front knee.",
+    "practice": "Practice controlled lunges to a marked landing spot and freeze the knee over the foot.",
+    "weight": 9.5
+  },
+  "incomplete_arm_extension": {
+    "error_name": "Incomplete Arm Extension",
+    "diagnosis": "The weapon arm does not reach a strong extension at the peak of the attacking action.",
+    "short_cue": "Extend the arm.",
+    "practice": "Wall-target extensions: finish the arm before adding footwork.",
+    "weight": 9.0
+  },
+  "guard_dropped": {
+    "error_name": "Guard Dropped",
+    "diagnosis": "The weapon hand drops below the pelvis line long enough to expose the target.",
+    "short_cue": "Guard up.",
+    "practice": "En garde holds with short advances and retreats while keeping the hand above the waist.",
+    "weight": 9.7
+  },
+  "stance_too_high": {
+    "error_name": "Stance Too High",
+    "diagnosis": "The front knee stays too straight, reducing balance and readiness to change direction.",
+    "short_cue": "Stay lower.",
+    "practice": "Advance-retreat sets while maintaining a bent front knee and quiet head height.",
+    "weight": 10.0
+  },
+  "bounce_excessive": {
+    "error_name": "Excessive Bounce",
+    "diagnosis": "The pelvis moves vertically too much across the window, wasting energy and telegraphing footwork.",
+    "short_cue": "Stay level.",
+    "practice": "Line footwork with a level-head cue: move forward and back without rising.",
+    "weight": 6.5
+  },
+  "center_of_mass_in_front": {
+    "error_name": "Center of Mass Forward",
+    "diagnosis": "The torso or front shoulder tilts too far forward, putting weight ahead of the base.",
+    "short_cue": "Keep weight centered.",
+    "practice": "Mirror en garde checks: shoulders stacked over hips before every step.",
+    "weight": 6.0
+  },
+  "center_of_mass_leaning_backward": {
+    "error_name": "Center of Mass Backward",
+    "diagnosis": "The torso or front shoulder tilts backward, delaying attack and recovery.",
+    "short_cue": "Do not lean back.",
+    "practice": "Small advance-lunge drills while keeping the chest balanced over the feet.",
+    "weight": 6.0
+  },
+  "over_parrying": {
+    "error_name": "Over-Parrying",
+    "diagnosis": "The weapon hand sweeps too far relative to shoulder width, opening lines after the parry.",
+    "short_cue": "Keep the parry compact.",
+    "practice": "Partner blade-tap drills using the smallest parry that closes the line.",
+    "weight": 5.0
+  },
+  "wide_step": {
+    "error_name": "Wide Step",
+    "diagnosis": "The foot distance grows too large relative to the shoulder/pelvis reference.",
+    "short_cue": "Shorten the step.",
+    "practice": "Marked-footwork reps with tape targets for consistent step length.",
+    "weight": 4.0
+  },
+  "narrow_step": {
+    "error_name": "Narrow Step",
+    "diagnosis": "The feet are too close together, reducing base stability and recovery options.",
+    "short_cue": "Widen the base.",
+    "practice": "En garde reset after every advance and retreat, checking shoulder-width spacing.",
+    "weight": 9.0
+  },
+  "hand_too_high": {
+    "error_name": "Hand Too High",
+    "diagnosis": "The weapon hand rises steeply above the elbow, making the guard inefficient and exposing lower lines.",
+    "short_cue": "Lower the weapon hand.",
+    "practice": "Guard-line holds: keep wrist, elbow, and shoulder in a compact fencing line.",
+    "weight": 8.0
+  }
+}

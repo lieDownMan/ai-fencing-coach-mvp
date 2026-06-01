@@ -9,15 +9,16 @@ import kotlinx.coroutines.withContext
 
 class SessionRepository(private val context: Context) {
     private val dao = AppDatabase.getDatabase(context).sessionDao()
-    private val playbookRepository = PlaybookRepository(context)
 
     suspend fun savePracticeReport(
         report: PracticeReport,
         cuesFired: List<CueHistoryItem>, // Using the PracticeReport model directly
         llmSummary: String? = null,
         userName: String = "Fencer",
-        source: String = "Realtime"
+        source: String = "Realtime",
+        playbookLanguage: String = PlaybookRepository.DEFAULT_LANGUAGE
     ): Long = withContext(Dispatchers.IO) {
+        val playbookRepository = PlaybookRepository(context, playbookLanguage)
         val sessionEntity = SessionEntity(
             timestamp = System.currentTimeMillis(),
             trainingMode = report.trainingMode.label,
