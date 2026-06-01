@@ -89,6 +89,7 @@ fun UserSelectionScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                modifier = Modifier.padding(top = 24.dp),
                 title = { Text("Select User", color = Color.White) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -225,7 +226,7 @@ fun UserHistoryScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                modifier = Modifier.padding(top = 16.dp),
+                modifier = Modifier.padding(top = 24.dp),
                 title = {
                     Text(
                         text = if (selectionMode) "${selectedSessionIds.size} selected" else "$userName's History",

@@ -196,7 +196,7 @@ $recentErrorsText
 - Do not define trends by percentage only; also define them by the absolute number of times (frequency).
 - Focus your analysis context specifically on the timeframe or selection described in [RECAP FOCUS].
 - End with one concrete practice recommendation from the playbook when present.
-- Keep it under 250 Chinese characters if possible.
+- Keep it under 350 Chinese characters if possible.
 """
         generateTextWithFallback(prompt, llmConfig).text ?: fallback
     }

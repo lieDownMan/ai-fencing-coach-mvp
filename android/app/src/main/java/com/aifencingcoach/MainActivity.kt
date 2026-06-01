@@ -257,6 +257,31 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             .apply()
     }
 
+    var backPressedOnce by remember { mutableStateOf(false) }
+    LaunchedEffect(backPressedOnce) {
+        if (backPressedOnce) {
+            kotlinx.coroutines.delay(2000)
+            backPressedOnce = false
+        }
+    }
+
+    val activity = context as? android.app.Activity
+    BackHandler {
+        if (appScreen == AppScreen.HOME) {
+            if (backPressedOnce) {
+                activity?.finish()
+            } else {
+                backPressedOnce = true
+                android.widget.Toast.makeText(context, "再次點按即可退出", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        } else if (appScreen == AppScreen.SESSION_DETAIL) {
+            appScreen = AppScreen.HISTORY
+        } else {
+            saveSettings()
+            appScreen = AppScreen.HOME
+        }
+    }
+
     when (appScreen) {
         AppScreen.HOME -> HomeScreen(
             trainingMode = trainingMode,
@@ -419,75 +444,72 @@ private fun HomeScreen(
     onHistory: () -> Unit,
     onSettings: () -> Unit
 ) {
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(PageBackground)
-            .padding(ScreenPadding),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        ScreenHeader(
-            title = "AI Fencing Coach",
-            subtitle = "${userSettings.name.ifBlank { "Fencer" }}  |  ${trainingMode.label}  |  ${poseBackend.label}  |  ${targetSide.label}  |  v1.1.1"
-        )
-
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                HomeOption(
-                    title = "Realtime",
-                    accent = AccentGreen,
-                    summary = liveSummary(trainingMode, poseBackend, voiceEnabled),
-                    onClick = onRealtime,
-                    modifier = Modifier.weight(1f)
-                )
-                HomeOption(
-                    title = "Postgame",
-                    accent = AccentGold,
-                    summary = postgameSummary(lastPracticeReport),
-                    onClick = onPostgame,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                HomeOption(
-                    title = "History",
-                    accent = Color(0xFF9E9E9E),
-                    summary = "Review past sessions & summaries",
-                    onClick = onHistory,
-                    modifier = Modifier.weight(1f)
-                )
-                HomeOption(
-                    title = "User Settings",
-                    accent = AccentCoral,
-                    summary = settingsSummary(userSettings),
-                    onClick = onSettings,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-
-        FlowRow(
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .background(PanelColor, RoundedCornerShape(8.dp))
-                .padding(10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .fillMaxSize()
+                .padding(ScreenPadding),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            StatusPill("target ${targetSide.label}", AccentGreen)
-            StatusPill(if (voiceEnabled) "voice on" else "voice off", if (voiceEnabled) AccentGreen else MutedText)
-            StatusPill("${userSettings.emphasizedErrors.size} emphasized", AccentGold)
-            StatusPill("${userSettings.mutedErrors.size} muted", AccentCoral)
-            lastPracticeReport?.let {
-                StatusPill("last ${formatSeconds(it.elapsedSeconds)}", Color.White)
+            ScreenHeader(
+                title = "AI Fencing Coach",
+                subtitle = "${userSettings.name.ifBlank { "Fencer" }}  |  ${trainingMode.label}  |  ${poseBackend.label}  |  ${targetSide.label}"
+            )
+    
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    HomeOption(
+                        title = "Realtime",
+                        accent = AccentGreen,
+                        summary = liveSummary(trainingMode, poseBackend, voiceEnabled),
+                        onClick = onRealtime,
+                        modifier = Modifier.weight(1f)
+                    )
+                    HomeOption(
+                        title = "Postgame",
+                        accent = AccentGold,
+                        summary = postgameSummary(lastPracticeReport),
+                        onClick = onPostgame,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    HomeOption(
+                        title = "History",
+                        accent = Color(0xFF9E9E9E),
+                        summary = "Review past sessions & summaries",
+                        onClick = onHistory,
+                        modifier = Modifier.weight(1f)
+                    )
+                    HomeOption(
+                        title = "User Settings",
+                        accent = AccentCoral,
+                        summary = settingsSummary(userSettings),
+                        onClick = onSettings,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         }
+
+        Text(
+            text = "v1.1.1",
+            color = MutedText,
+            fontSize = 11.sp,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp)
+        )
     }
 }
 
@@ -1065,14 +1087,14 @@ private fun ScreenHeader(
     onBack: (() -> Unit)? = null
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.Top
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
-            Text(subtitle, color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = AccentGreen, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
         }
         if (onBack != null) {
             HudButton(text = "Home", selected = false, onClick = onBack)
