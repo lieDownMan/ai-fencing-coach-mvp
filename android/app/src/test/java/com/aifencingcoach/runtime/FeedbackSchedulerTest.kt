@@ -8,7 +8,6 @@ class FeedbackSchedulerTest {
     @Test
     fun ranksAndRateLimitsVoiceCues() {
         val scheduler = FeedbackScheduler(
-            context = null,
             trainingMode = TrainingMode.FREE_BOUTING,
             playbookEntries = mapOf(
                 "stance_too_high" to PlaybookEntry("Stance too high", "Stay lower.", 10f),

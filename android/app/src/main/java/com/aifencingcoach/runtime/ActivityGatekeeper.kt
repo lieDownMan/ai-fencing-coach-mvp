@@ -1,20 +1,33 @@
 package com.aifencingcoach.runtime
 
-class ActivityGatekeeper(private val fps: Int = 30) {
+import kotlin.math.sqrt
+
+class ActivityGatekeeper(
+    private val fps: Int = 30,
+    private val activeKneeAngleDeg: Float = 176f,
+    private val idleKneeAngleDeg: Float = 178f,
+    private val motionThresholdNorm: Float = 0.005f
+) {
     var state: String = StateIdle
         private set
 
     private var frameCount = 0
     private var activeTriggerCount = 0
-    private val activeTriggerThreshold = 5
+    private var activeTriggerThreshold = 5
     private var idleTriggerCount = 0
-    private val idleTriggerThreshold = 2 * fps
+    private var idleTriggerThreshold = 2 * fps
+    private var lastPelvisCenter: Point2? = null
+
+    var lastReasons: Map<String, Any?> = emptyMap()
+        private set
 
     fun reset() {
         state = StateIdle
         frameCount = 0
         activeTriggerCount = 0
         idleTriggerCount = 0
+        lastPelvisCenter = null
+        lastReasons = emptyMap()
     }
 
     fun shouldExtractPose(): Boolean {
@@ -43,22 +56,43 @@ class ActivityGatekeeper(private val fps: Int = 30) {
                 state = StateIdle
                 activeTriggerCount = 0
             }
+            lastReasons = mapOf(
+                "has_target" to false,
+                "state" to state,
+                "reason" to "missing_target"
+            )
             return state == StateActive
         }
 
         val kneeAngle = frontKneeAngle(targetSkeleton, targetSide) ?: 180f
-        val shoulderWidth = shoulderWidth(targetSkeleton) ?: 100f
-        val isTurnedBack = shoulderWidth < frameWidth * 0.05f
-        val tooFar = fencerDistanceTooLarge(targetSkeleton, opponentSkeleton, frameWidth)
-        val enGarde = kneeAngle < 175f
-        val stopCondition = kneeAngle > 180f || isTurnedBack || tooFar
+        val shoulderWidth = shoulderWidth(targetSkeleton)
+        val isTurnedBack = (shoulderWidth ?: frameWidth.toFloat()) < frameWidth * 0.05f
 
-        when (state) {
-            StateIdle -> if (enGarde) {
+        val pelvisCenter = FencingGeometry.pelvisCenter(targetSkeleton)
+        var pelvisMotion = 0f
+        if (pelvisCenter != null && lastPelvisCenter != null) {
+            val dx = pelvisCenter.x - lastPelvisCenter!!.x
+            val dy = pelvisCenter.y - lastPelvisCenter!!.y
+            pelvisMotion = sqrt(dx * dx + dy * dy) / frameWidth.toFloat()
+        }
+
+        val moving = lastPelvisCenter == null || pelvisMotion >= motionThresholdNorm
+        if (pelvisCenter != null) {
+            lastPelvisCenter = pelvisCenter
+        }
+
+        val enGardePosture = kneeAngle < activeKneeAngleDeg
+        val enGarde = enGardePosture && (moving || state != StateIdle || activeTriggerCount > 0)
+        val standingUp = kneeAngle > idleKneeAngleDeg
+        val stopCondition = standingUp || isTurnedBack
+
+        if (state == StateIdle) {
+            if (enGarde) {
                 state = StateChecking
                 activeTriggerCount = 1
             }
-            StateChecking -> if (enGarde) {
+        } else if (state == StateChecking) {
+            if (enGarde) {
                 activeTriggerCount += 1
                 if (activeTriggerCount >= activeTriggerThreshold) {
                     state = StateActive
@@ -68,7 +102,8 @@ class ActivityGatekeeper(private val fps: Int = 30) {
                 state = StateIdle
                 activeTriggerCount = 0
             }
-            StateActive -> if (stopCondition) {
+        } else if (state == StateActive) {
+            if (stopCondition) {
                 idleTriggerCount += 1
                 if (idleTriggerCount >= idleTriggerThreshold) {
                     state = StateIdle
@@ -79,6 +114,16 @@ class ActivityGatekeeper(private val fps: Int = 30) {
             }
         }
 
+        lastReasons = mapOf(
+            "has_target" to true,
+            "state" to state,
+            "knee_angle" to kneeAngle,
+            "en_garde" to enGarde,
+            "en_garde_posture" to enGardePosture,
+            "standing_up" to standingUp,
+            "turned_back" to isTurnedBack,
+            "moving" to moving
+        )
         return state == StateActive
     }
 
@@ -94,13 +139,6 @@ class ActivityGatekeeper(private val fps: Int = 30) {
         val left = skeleton["left_shoulder"]
         val right = skeleton["right_shoulder"]
         return if (left != null && right != null) left.distanceTo(right) else null
-    }
-
-    private fun fencerDistanceTooLarge(target: Skeleton, opponent: Skeleton?, frameWidth: Int): Boolean {
-        val opponentSkeleton = opponent ?: return false
-        val targetCenter = FencingGeometry.pelvisCenter(target) ?: return false
-        val opponentCenter = FencingGeometry.pelvisCenter(opponentSkeleton) ?: return false
-        return kotlin.math.abs(targetCenter.x - opponentCenter.x) > frameWidth * 0.6f
     }
 
     companion object {

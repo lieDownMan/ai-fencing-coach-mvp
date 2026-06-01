@@ -2,6 +2,7 @@ package com.aifencingcoach.runtime
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Matrix
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
@@ -13,7 +14,7 @@ import androidx.camera.core.ImageProxy
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
-import com.google.mediapipe.framework.image.MediaImageBuilder
+import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.ImageProcessingOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
@@ -25,7 +26,8 @@ import kotlin.math.min
 
 data class PoseBackendResult(
     val targetSkeleton: Skeleton?,
-    val opponentSkeleton: Skeleton?
+    val opponentSkeleton: Skeleton?,
+    val detections: List<PoseDetection> = emptyList()
 )
 
 interface PoseBackend : AutoCloseable {
@@ -36,6 +38,13 @@ interface PoseBackend : AutoCloseable {
     fun detect(
         imageProxy: ImageProxy,
         targetSide: TargetSide
+    ): PoseBackendResult
+
+    fun detectBitmap(
+        bitmap: Bitmap,
+        targetSide: TargetSide,
+        rotationDegrees: Int,
+        timestampNs: Long
     ): PoseBackendResult
 }
 
@@ -53,21 +62,56 @@ class MediaPipePoseBackend(context: Context) : PoseBackend {
         imageProxy: ImageProxy,
         targetSide: TargetSide
     ): PoseBackendResult {
+        val rawBitmap = imageProxy.toBitmapOrNull() ?: return PoseBackendResult(null, null)
+        val rotation = imageProxy.imageInfo.rotationDegrees
+        val bitmap = if (rotation != 0) rotateBitmap(rawBitmap, rotation) else rawBitmap
+        return try {
+            detectBitmap(
+                bitmap = bitmap,
+                targetSide = targetSide,
+                rotationDegrees = 0,  // already rotated
+                timestampNs = imageProxy.imageInfo.timestamp
+            )
+        } finally {
+            bitmap.recycle()
+            if (bitmap !== rawBitmap) rawBitmap.recycle()
+        }
+    }
+
+    private var lastTimestampMs = -1L
+
+    override fun detectBitmap(
+        bitmap: Bitmap,
+        targetSide: TargetSide,
+        rotationDegrees: Int,
+        timestampNs: Long
+    ): PoseBackendResult {
         val landmarker = poseLandmarker ?: return PoseBackendResult(null, null)
-        val mediaImage = imageProxy.image ?: return PoseBackendResult(null, null)
-        val mpImage = MediaImageBuilder(mediaImage).build()
+        val timestampMs = timestampNs / 1_000_000
+
+        // MediaPipe requires strictly increasing timestamps
+        if (timestampMs <= lastTimestampMs) {
+            return PoseBackendResult(null, null)
+        }
+        lastTimestampMs = timestampMs
+
+        val mpImage = BitmapImageBuilder(bitmap).build()
         val processingOptions = ImageProcessingOptions.builder()
-            .setRotationDegrees(imageProxy.imageInfo.rotationDegrees)
+            .setRotationDegrees(rotationDegrees)
             .build()
-        val timestampMs = imageProxy.imageInfo.timestamp / 1_000_000
-        val result = landmarker.detectForVideo(mpImage, processingOptions, timestampMs)
-        val selected = mapper.selectFencers(
-            poses = result.landmarks(),
-            frameWidth = imageProxy.width,
-            frameHeight = imageProxy.height,
-            targetSide = targetSide
-        )
-        return PoseBackendResult(selected.first, selected.second)
+
+        return try {
+            val result = landmarker.detectForVideo(mpImage, processingOptions, timestampMs)
+            val detections = mapper.mapDetections(
+                poses = result.landmarks(),
+                frameWidth = bitmap.width,
+                frameHeight = bitmap.height,
+                targetSide = targetSide
+            )
+            PoseBackendResult(null, null, detections)
+        } catch (e: Exception) {
+            PoseBackendResult(null, null)
+        }
     }
 
     override fun close() {
@@ -107,19 +151,30 @@ class YoloPoseBackend(context: Context) : PoseBackend {
         imageProxy: ImageProxy,
         targetSide: TargetSide
     ): PoseBackendResult {
+        val rawBitmap = imageProxy.toBitmapOrNull() ?: return PoseBackendResult(null, null)
+        val rotation = imageProxy.imageInfo.rotationDegrees
+        val bitmap = if (rotation != 0) rotateBitmap(rawBitmap, rotation) else rawBitmap
+        return try {
+            detectBitmap(bitmap, targetSide, 0, imageProxy.imageInfo.timestamp)  // already rotated
+        } finally {
+            bitmap.recycle()
+            if (bitmap !== rawBitmap) rawBitmap.recycle()
+        }
+    }
+
+    override fun detectBitmap(
+        bitmap: Bitmap,
+        targetSide: TargetSide,
+        rotationDegrees: Int,
+        timestampNs: Long
+    ): PoseBackendResult {
         val activeSession = session ?: return PoseBackendResult(null, null)
-        val bitmap = imageProxy.toBitmapOrNull() ?: return PoseBackendResult(null, null)
         val prepared = prepareInput(bitmap)
         val detections = runInference(activeSession, prepared)
-        val skeletons = detections
             .sortedByDescending { it.score }
             .take(8)
-            .mapNotNull { it.toSkeleton(targetSide) }
-            .sortedBy { centerX(it) }
-        if (skeletons.isEmpty()) return PoseBackendResult(null, null)
-        val target = if (targetSide == TargetSide.LEFT) skeletons.first() else skeletons.last()
-        val opponent = skeletons.firstOrNull { it !== target }
-        return PoseBackendResult(target, opponent)
+            .mapIndexedNotNull { index, detection -> detection.toPoseDetection(targetSide, index) }
+        return PoseBackendResult(null, null, detections)
     }
 
     override fun close() {
@@ -207,7 +262,6 @@ class YoloPoseBackend(context: Context) : PoseBackend {
             tensor[2 * planeSize + i] = Color.blue(color) / 255f
         }
         square.recycle()
-        bitmap.recycle()
         return LetterboxInput(tensor, scale, padX, padY, sourceWidth, sourceHeight)
     }
 
@@ -238,78 +292,6 @@ class YoloPoseBackend(context: Context) : PoseBackend {
         return intersection / (areaA + areaB - intersection).coerceAtLeast(1e-6f)
     }
 
-    private fun ImageProxy.toBitmapOrNull(): Bitmap? {
-        if (format != ImageFormat.YUV_420_888 || planes.size < 3) return null
-        val nv21 = yuv420ToNv21(this)
-        val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
-        val out = ByteArrayOutputStream()
-        yuvImage.compressToJpeg(Rect(0, 0, width, height), 90, out)
-        return BitmapFactory.decodeByteArray(out.toByteArray(), 0, out.size())
-    }
-
-    private fun yuv420ToNv21(image: ImageProxy): ByteArray {
-        val yPlane = image.planes[0]
-        val uPlane = image.planes[1]
-        val vPlane = image.planes[2]
-        val out = ByteArray(image.width * image.height * 3 / 2)
-        copyPlane(yPlane, image.width, image.height, out, 0, 1)
-        copyInterleavedChroma(vPlane, uPlane, image.width, image.height, out, image.width * image.height)
-        return out
-    }
-
-    private fun copyPlane(
-        plane: ImageProxy.PlaneProxy,
-        width: Int,
-        height: Int,
-        out: ByteArray,
-        offset: Int,
-        pixelStrideOut: Int
-    ) {
-        val buffer = plane.buffer.duplicate()
-        val rowStride = plane.rowStride
-        val pixelStride = plane.pixelStride
-        var outputIndex = offset
-        for (row in 0 until height) {
-            for (col in 0 until width) {
-                out[outputIndex] = buffer.get(row * rowStride + col * pixelStride)
-                outputIndex += pixelStrideOut
-            }
-        }
-    }
-
-    private fun copyInterleavedChroma(
-        vPlane: ImageProxy.PlaneProxy,
-        uPlane: ImageProxy.PlaneProxy,
-        width: Int,
-        height: Int,
-        out: ByteArray,
-        offset: Int
-    ) {
-        val chromaWidth = width / 2
-        val chromaHeight = height / 2
-        val vBuffer = vPlane.buffer.duplicate()
-        val uBuffer = uPlane.buffer.duplicate()
-        var outputIndex = offset
-        for (row in 0 until chromaHeight) {
-            for (col in 0 until chromaWidth) {
-                out[outputIndex++] = vBuffer.get(row * vPlane.rowStride + col * vPlane.pixelStride)
-                out[outputIndex++] = uBuffer.get(row * uPlane.rowStride + col * uPlane.pixelStride)
-            }
-        }
-    }
-
-    private fun centerX(skeleton: Skeleton): Float {
-        val points = listOfNotNull(
-            skeleton["left_hip"],
-            skeleton["right_hip"],
-            skeleton["left_shoulder"],
-            skeleton["right_shoulder"],
-            skeleton["left_ankle"],
-            skeleton["right_ankle"]
-        )
-        return if (points.isEmpty()) 0f else points.map { it.x }.average().toFloat()
-    }
-
     private data class LetterboxInput(
         val tensor: FloatArray,
         val scale: Float,
@@ -333,7 +315,7 @@ class YoloPoseBackend(context: Context) : PoseBackend {
         val score: Float,
         val keypoints: Array<YoloKeypoint>
     ) {
-        fun toSkeleton(targetSide: TargetSide): Skeleton? {
+        fun toPoseDetection(targetSide: TargetSide, sourceRank: Int): PoseDetection? {
             fun point(index: Int): Point2? {
                 val keypoint = keypoints.getOrNull(index) ?: return null
                 if (keypoint.confidence < KeypointThreshold) return null
@@ -354,11 +336,11 @@ class YoloPoseBackend(context: Context) : PoseBackend {
             val leftAnkle = point(15) ?: return null
             val rightAnkle = point(16) ?: return null
 
-            val frontWrist = if (targetSide == TargetSide.LEFT) rightWrist else leftWrist
-            val frontElbow = if (targetSide == TargetSide.LEFT) rightElbow else leftElbow
-            val frontShoulder = if (targetSide == TargetSide.LEFT) rightShoulder else leftShoulder
-            val frontAnkle = if (targetSide == TargetSide.LEFT) rightAnkle else leftAnkle
-            val backWrist = if (targetSide == TargetSide.LEFT) leftWrist else rightWrist
+            val frontWrist = rightWrist
+            val frontElbow = rightElbow
+            val frontShoulder = rightShoulder
+            val frontAnkle = rightAnkle
+            val backWrist = leftWrist
             if (frontWrist == null || frontElbow == null || frontShoulder == null) return null
 
             val skeleton = linkedMapOf(
@@ -377,7 +359,12 @@ class YoloPoseBackend(context: Context) : PoseBackend {
                 "right_ankle" to rightAnkle
             )
             if (backWrist != null) skeleton["back_wrist"] = backWrist
-            return skeleton
+            return PoseDetection(
+                skeleton = skeleton,
+                bbox = BoundingBox(x1, y1, x2, y2),
+                confidence = score,
+                sourceRank = sourceRank
+            )
         }
     }
 
@@ -400,3 +387,69 @@ fun createPoseBackend(context: Context, kind: PoseBackendKind): PoseBackend =
         PoseBackendKind.MEDIAPIPE -> MediaPipePoseBackend(context)
         PoseBackendKind.YOLO -> YoloPoseBackend(context.applicationContext)
     }
+
+private fun ImageProxy.toBitmapOrNull(): Bitmap? {
+    if (format != ImageFormat.YUV_420_888 || planes.size < 3) return null
+    val nv21 = yuv420ToNv21(this)
+    val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
+    val out = ByteArrayOutputStream()
+    yuvImage.compressToJpeg(Rect(0, 0, width, height), 90, out)
+    return BitmapFactory.decodeByteArray(out.toByteArray(), 0, out.size())
+}
+
+private fun yuv420ToNv21(image: ImageProxy): ByteArray {
+    val yPlane = image.planes[0]
+    val uPlane = image.planes[1]
+    val vPlane = image.planes[2]
+    val out = ByteArray(image.width * image.height * 3 / 2)
+    copyPlane(yPlane, image.width, image.height, out, 0, 1)
+    copyInterleavedChroma(vPlane, uPlane, image.width, image.height, out, image.width * image.height)
+    return out
+}
+
+private fun copyPlane(
+    plane: ImageProxy.PlaneProxy,
+    width: Int,
+    height: Int,
+    out: ByteArray,
+    offset: Int,
+    pixelStrideOut: Int
+) {
+    val buffer = plane.buffer.duplicate()
+    val rowStride = plane.rowStride
+    val pixelStride = plane.pixelStride
+    var outputIndex = offset
+    for (row in 0 until height) {
+        for (col in 0 until width) {
+            out[outputIndex] = buffer.get(row * rowStride + col * pixelStride)
+            outputIndex += pixelStrideOut
+        }
+    }
+}
+
+private fun copyInterleavedChroma(
+    vPlane: ImageProxy.PlaneProxy,
+    uPlane: ImageProxy.PlaneProxy,
+    width: Int,
+    height: Int,
+    out: ByteArray,
+    offset: Int
+) {
+    val chromaWidth = width / 2
+    val chromaHeight = height / 2
+    val vBuffer = vPlane.buffer.duplicate()
+    val uBuffer = uPlane.buffer.duplicate()
+    var outputIndex = offset
+    for (row in 0 until chromaHeight) {
+        for (col in 0 until chromaWidth) {
+            out[outputIndex++] = vBuffer.get(row * vPlane.rowStride + col * vPlane.pixelStride)
+            out[outputIndex++] = uBuffer.get(row * uPlane.rowStride + col * uPlane.pixelStride)
+        }
+    }
+}
+
+private fun rotateBitmap(bitmap: Bitmap, degrees: Int): Bitmap {
+    if (degrees == 0) return bitmap
+    val matrix = Matrix().apply { postRotate(degrees.toFloat()) }
+    return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+}
