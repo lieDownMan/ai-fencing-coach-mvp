@@ -347,6 +347,7 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             trainingMode = trainingMode,
             targetSide = targetSide,
             poseBackend = poseBackend,
+            voiceEnabled = voiceEnabled,
             lastPracticeReport = lastPracticeReport,
             sessionRepository = sessionRepository,
             analysisManager = analysisManager,
@@ -666,6 +667,7 @@ private fun PostgameScreen(
     trainingMode: TrainingMode,
     targetSide: TargetSide,
     poseBackend: PoseBackendKind,
+    voiceEnabled: Boolean,
     lastPracticeReport: PracticeReport?,
     sessionRepository: com.aifencingcoach.runtime.database.SessionRepository,
     geminiAgent: com.aifencingcoach.runtime.GeminiAgent,
@@ -715,19 +717,16 @@ private fun PostgameScreen(
         )
         UserBox(userName = userSettings.name)
 
-        ExpandableMenuPanel("Analysis Defaults", initiallyExpanded = true) {
+        ExpandableMenuPanel("Analysis Setup", initiallyExpanded = true) {
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 StatusPill(trainingMode.label, AccentGreen)
+                StatusPill(poseBackend.label, AccentGreen)
                 StatusPill("target ${targetSide.label}", AccentGreen)
-                StatusPill(userSettings.processingProfile, AccentGold)
-                StatusPill(if (userSettings.useGeminiSummary) userSettings.llmProvider.label else "Playbook", AccentGold)
+                StatusPill(if (voiceEnabled) "voice on" else "voice off", if (voiceEnabled) AccentGreen else MutedText)
             }
-
-            Spacer(Modifier.height(10.dp))
-            HudButton(text = "Edit Settings", selected = false, onClick = onSettings)
         }
         
         ExpandableMenuPanel("Video Queue", initiallyExpanded = true) {
