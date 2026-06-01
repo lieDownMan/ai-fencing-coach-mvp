@@ -49,4 +49,5 @@ android/.gradle/
 android/**/build/
 android/local.properties
 android/captures/
-
+android/app/.idea/workspace.xml
+android/app/.idea/inspectionProfiles/
