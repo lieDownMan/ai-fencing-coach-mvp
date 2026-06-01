@@ -1,6 +1,7 @@
 package com.aifencingcoach
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.paint
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -90,6 +91,9 @@ fun UserSelectionScreen(
     }
 
     Scaffold(
+        modifier = Modifier
+            .paint(androidx.compose.ui.res.painterResource(id = R.drawable.app_bg), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+            .background(Color.Black.copy(alpha = 0.5f)),
         topBar = {
             TopAppBar(
                 modifier = Modifier.padding(top = 32.dp),
@@ -99,10 +103,10 @@ fun UserSelectionScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF1E262F))
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
             )
         },
-        containerColor = Color(0xFF101418)
+        containerColor = Color.Transparent
     ) { padding ->
         if (isLoading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -227,6 +231,9 @@ fun UserHistoryScreen(
     }
 
     Scaffold(
+        modifier = Modifier
+            .paint(androidx.compose.ui.res.painterResource(id = R.drawable.app_bg), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+            .background(Color.Black.copy(alpha = 0.5f)),
         topBar = {
             TopAppBar(
                 modifier = Modifier.padding(top = 32.dp),
@@ -289,10 +296,10 @@ fun UserHistoryScreen(
                         }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF1E262F))
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
             )
         },
-        containerColor = Color(0xFF101418)
+        containerColor = Color.Transparent
     ) { padding ->
         if (isLoading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
