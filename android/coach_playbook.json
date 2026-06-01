@@ -1,75 +1,86 @@
 {
-    "lunge_overextension": {
-        "error_name": "長刺過度前傾",
-        "diagnosis": "重心衝太快，前腳發力不夠，容易傷膝蓋且無法快速收步。",
-        "short_cue": "注意前腳不要壓膝蓋，長刺打到90度就好",
-        "practice": "長刺（lunge）重複練習"
-    },
-    "guard_dropped": {
-        "error_name": "持劍手掉落",
-        "diagnosis": "攻擊或防守時手放太低，劍尖沒有威脅對手，且有效部位完全暴露給對手。",
-        "short_cue": "手抬起來，劍尖指著對手",
-        "practice": ""
-    },
-    "bounce_excessive": {
-        "error_name": "步伐上下浮動",
-        "diagnosis": "在走腳步的時候大腿肌力或是控制力不足導致身體重心不穩，影響攻擊刺點",
-        "short_cue": "重心壓低蹲好，不要上下移動!",
-        "practice": "連續前進、後退以穩定腳步"
-    },
-    "foot_before_hand": {
-        "error_name": "手腳順序錯誤",
-        "diagnosis": "腳先動了，劍尖還沒出去，這樣會先把自己的身體送出去給對方打，容易被得分。",
-        "short_cue": "手要先伸",
-        "practice": "長刺（lunge）前進長刺（step lunge）重複練習"
-    },
-    "over_parrying": {
-        "error_name": "防守動作太大且太頻繁",
-        "diagnosis": "撥擋（Parry）的動作超過身體輪廓太多，導致防守後露出太多有效部位。對手很容易做一個簡單的轉移刺（Disengage）擊中你，且動作太大會導致回防速度變慢。",
-        "short_cue": "防守小一點，不要亂撈劍，用手指頭控制劍尖不要用整個手腕",
-        "practice": "重複防守（Parry）練習"
-    },
-    "stance_too_high": {
-        "error_name": "預備姿勢沒蹲好",
-        "diagnosis": "重心太高會導致啟動速度變慢，無法瞬間爆發，也容易在快速移動中失去平衡。",
-        "short_cue": "重心壓低，蹲好！",
-        "practice": "預備姿勢（en guard）練習"
-    },
-    "wide_disengage": {
-        "error_name": "換側動作太大",
-        "diagnosis": "繞劍幅度過大會浪費攻擊時間，不僅容易被對手直接反擊，也容易讓自己的劍尖偏離有效部位。",
-        "short_cue": "換側小一點！用手指頭控制劍尖，不要動到整支手臂和手肘！",
-        "practice": "重複換側練習"
-    },
-    
-    "incomplete_arm_extension": {
-        "error_name": "刺的時候手沒有伸直",
-        "diagnosis": "手臂沒有完全伸直會讓你平白損失攻擊距離，導致原本能擊中的攻擊落空。",
-        "short_cue": "刺的時候手伸直！",
-        "practice": "重複長刺（lunge）練習"
-    },
-    "wide_step": {
-        "error_name": "步伐太大",
-        "diagnosis": "雙腳間距過大影響移動和動作發動",
-        "short_cue": "腳打太開",
-        "practice": "以後多注意"
-    },
-    "narrow_step": {
-        "error_name": "步伐太小",
-        "diagnosis": "雙腳間距過小會影響移動和動作發動",
-        "short_cue": "腳打太窄",
-        "practice": "以後注意"
-    },
-    "center_of_mass_in_front": {
-        "error_name": "重心向前移動",
-        "diagnosis": "姿勢不標準，會無法有正確迅速確實的發力過程",
-        "short_cue": "重心太靠前",
-        "practice": "提供身體應有基準給選手參考"
-    },
-    "center_of_mass_leaning_backward": {
-        "error_name": "重心向後傾斜",
-        "diagnosis": "姿勢不標準，會無法有正確迅速確實的發力過程",
-        "short_cue": "重心太靠後",
-        "practice": "提供身體應有基準給選手參考"
-    }
+  "foot_before_hand": {
+    "error_name": "Foot Before Hand",
+    "diagnosis": "The front foot begins moving before the weapon arm creates threat, which makes the attack easier to read.",
+    "short_cue": "Hand first.",
+    "practice": "Slow step-lunge reps: extend the arm first, then move the front foot.",
+    "weight": 5.0
+  },
+  "lunge_overextension": {
+    "error_name": "Lunge Overextension",
+    "diagnosis": "The front knee angle is collapsing below the safe technical range during attack or stance transitions.",
+    "short_cue": "Do not collapse the front knee.",
+    "practice": "Practice controlled lunges to a marked landing spot and freeze the knee over the foot.",
+    "weight": 9.5
+  },
+  "incomplete_arm_extension": {
+    "error_name": "Incomplete Arm Extension",
+    "diagnosis": "The weapon arm does not reach a strong extension at the peak of the attacking action.",
+    "short_cue": "Extend the arm.",
+    "practice": "Wall-target extensions: finish the arm before adding footwork.",
+    "weight": 9.0
+  },
+  "guard_dropped": {
+    "error_name": "Guard Dropped",
+    "diagnosis": "The weapon hand drops below the pelvis line long enough to expose the target.",
+    "short_cue": "Guard up.",
+    "practice": "En garde holds with short advances and retreats while keeping the hand above the waist.",
+    "weight": 9.7
+  },
+  "stance_too_high": {
+    "error_name": "Stance Too High",
+    "diagnosis": "The front knee stays too straight, reducing balance and readiness to change direction.",
+    "short_cue": "Stay lower.",
+    "practice": "Advance-retreat sets while maintaining a bent front knee and quiet head height.",
+    "weight": 10.0
+  },
+  "bounce_excessive": {
+    "error_name": "Excessive Bounce",
+    "diagnosis": "The pelvis moves vertically too much across the window, wasting energy and telegraphing footwork.",
+    "short_cue": "Stay level.",
+    "practice": "Line footwork with a level-head cue: move forward and back without rising.",
+    "weight": 6.5
+  },
+  "center_of_mass_in_front": {
+    "error_name": "Center of Mass Forward",
+    "diagnosis": "The torso or front shoulder tilts too far forward, putting weight ahead of the base.",
+    "short_cue": "Keep weight centered.",
+    "practice": "Mirror en garde checks: shoulders stacked over hips before every step.",
+    "weight": 6.0
+  },
+  "center_of_mass_leaning_backward": {
+    "error_name": "Center of Mass Backward",
+    "diagnosis": "The torso or front shoulder tilts backward, delaying attack and recovery.",
+    "short_cue": "Do not lean back.",
+    "practice": "Small advance-lunge drills while keeping the chest balanced over the feet.",
+    "weight": 6.0
+  },
+  "over_parrying": {
+    "error_name": "Over-Parrying",
+    "diagnosis": "The weapon hand sweeps too far relative to shoulder width, opening lines after the parry.",
+    "short_cue": "Keep the parry compact.",
+    "practice": "Partner blade-tap drills using the smallest parry that closes the line.",
+    "weight": 5.0
+  },
+  "wide_step": {
+    "error_name": "Wide Step",
+    "diagnosis": "The foot distance grows too large relative to the shoulder/pelvis reference.",
+    "short_cue": "Shorten the step.",
+    "practice": "Marked-footwork reps with tape targets for consistent step length.",
+    "weight": 4.0
+  },
+  "narrow_step": {
+    "error_name": "Narrow Step",
+    "diagnosis": "The feet are too close together, reducing base stability and recovery options.",
+    "short_cue": "Widen the base.",
+    "practice": "En garde reset after every advance and retreat, checking shoulder-width spacing.",
+    "weight": 9.0
+  },
+  "hand_too_high": {
+    "error_name": "Hand Too High",
+    "diagnosis": "The weapon hand rises steeply above the elbow, making the guard inefficient and exposing lower lines.",
+    "short_cue": "Lower the weapon hand.",
+    "practice": "Guard-line holds: keep wrist, elbow, and shoulder in a compact fencing line.",
+    "weight": 8.0
+  }
 }

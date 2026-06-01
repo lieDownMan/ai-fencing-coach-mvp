@@ -233,7 +233,7 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
     var selectedHistoryUser by remember { mutableStateOf<String?>(null) }
     var targetSide by remember { mutableStateOf(TargetSide.LEFT) }
     var trainingMode by remember { mutableStateOf(TrainingMode.FREE_BOUTING) }
-    var poseBackend by remember { mutableStateOf(PoseBackendKind.MEDIAPIPE) }
+    var poseBackend by remember { mutableStateOf(PoseBackendKind.YOLO) }
     var voiceEnabled by remember { mutableStateOf(prefs.getBoolean("voice_enabled", true)) }
     var lastPracticeReport by remember { mutableStateOf<PracticeReport?>(null) }
     var userSettings by remember {
@@ -1482,8 +1482,24 @@ private fun CoachScreen(
         }
     }
 
-    val pipeline = remember(poseBackend, targetSide, trainingMode, resetToken) {
-        LiveCoachPipeline(context, poseBackend, targetSide, trainingMode)
+    val pipeline = remember(
+        poseBackend,
+        targetSide,
+        trainingMode,
+        userSettings.emphasizedErrors,
+        userSettings.mutedErrors,
+        userSettings.onlyFocusedErrors,
+        resetToken
+    ) {
+        LiveCoachPipeline(
+            context = context,
+            poseBackendKind = poseBackend,
+            targetSide = targetSide,
+            trainingMode = trainingMode,
+            focusErrors = userSettings.emphasizedErrors,
+            muteErrors = userSettings.mutedErrors,
+            onlyErrors = if (userSettings.onlyFocusedErrors) userSettings.emphasizedErrors else emptySet()
+        )
     }
 
     DisposableEffect(pipeline) {
@@ -2138,8 +2154,8 @@ private fun modeSummary(mode: TrainingMode): String =
 
 private fun modelSummary(model: PoseBackendKind): String =
     when (model) {
-        PoseBackendKind.MEDIAPIPE -> "MediaPipe lite is the default low-latency pose model."
-        PoseBackendKind.YOLO -> "YOLO pose runs from yolo_pose.onnx through ONNX Runtime."
+        PoseBackendKind.MEDIAPIPE -> "MediaPipe lite provides low-latency single-person pose tracking."
+        PoseBackendKind.YOLO -> "YOLO pose is the default bout-oriented model through ONNX Runtime."
     }
 
 private fun liveSummary(
@@ -2185,7 +2201,7 @@ private val ProcessingProfiles = listOf("Balanced", "Fast", "Full Quality")
 
 private val FeedbackErrorOptions = listOf(
     FeedbackErrorOption("foot_before_hand", "Foot before hand", setOf(TrainingMode.TARGET_PRACTICE)),
-    FeedbackErrorOption("lunge_overextension", "Lunge overextension", setOf(TrainingMode.TARGET_PRACTICE)),
+    FeedbackErrorOption("lunge_overextension", "Lunge overextension", TrainingMode.entries.toSet()),
     FeedbackErrorOption("incomplete_arm_extension", "Incomplete arm extension", setOf(TrainingMode.TARGET_PRACTICE)),
     FeedbackErrorOption("guard_dropped", "Guard dropped", TrainingMode.entries.toSet()),
     FeedbackErrorOption("stance_too_high", "Stance too high", TrainingMode.entries.toSet()),
@@ -2194,7 +2210,8 @@ private val FeedbackErrorOptions = listOf(
     FeedbackErrorOption("center_of_mass_leaning_backward", "Center of mass leaning backward", TrainingMode.entries.toSet()),
     FeedbackErrorOption("over_parrying", "Over parrying", TrainingMode.entries.toSet()),
     FeedbackErrorOption("wide_step", "Wide step", TrainingMode.entries.toSet()),
-    FeedbackErrorOption("narrow_step", "Narrow step", TrainingMode.entries.toSet())
+    FeedbackErrorOption("narrow_step", "Narrow step", TrainingMode.entries.toSet()),
+    FeedbackErrorOption("hand_too_high", "Hand too high", TrainingMode.entries.toSet())
 )
 
 private val PageBackground = Color(0xFF0D1115)
