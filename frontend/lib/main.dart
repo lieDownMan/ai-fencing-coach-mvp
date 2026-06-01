@@ -16,6 +16,7 @@ import 'pose/yolo_pose_service.dart';
 import 'pose/activity_gatekeeper.dart';
 import 'postgame/postgame_analyzer.dart';
 import 'postgame/annotated_video_player.dart';
+import 'history/history_screen.dart';
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -200,7 +201,7 @@ class _MainScreenState extends State<MainScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
     _heuristics = HeuristicsEngine(
       targetSide: _targetSide,
       trainingMode: _trainingMode,
@@ -606,11 +607,14 @@ class _MainScreenState extends State<MainScreen>
         bottom: TabBar(
           controller: _tabController,
           indicatorWeight: 3,
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
           tabs: const [
             Tab(icon: Icon(Icons.videocam, size: 20), text: 'Live'),
             Tab(icon: Icon(Icons.tune, size: 20), text: 'Settings'),
             Tab(icon: Icon(Icons.analytics, size: 20), text: 'Debug'),
             Tab(icon: Icon(Icons.bar_chart, size: 20), text: 'Postgame'),
+            Tab(icon: Icon(Icons.history, size: 20), text: 'History'),
           ],
         ),
       ),
@@ -622,6 +626,7 @@ class _MainScreenState extends State<MainScreen>
           _buildSettingsTab(),
           _buildDebugTab(),
           _buildPostgameTab(),
+          const HistoryScreen(),
         ],
       ),
     );

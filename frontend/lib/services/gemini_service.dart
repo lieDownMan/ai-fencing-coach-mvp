@@ -81,4 +81,36 @@ $cueSummary
         'Actions tracked: $totalActions\n'
         'Feedback cues: ${errorCounts.length}';
   }
+
+  /// Generate a cross-session recap analysis.
+  Future<String> generateRecapAnalysis({
+    required String userName,
+    required String recentErrorsText,
+    required int recapCount,
+    required String fallback,
+  }) async {
+    if (!isEnabled) return fallback;
+
+    final prompt = '''
+You are an expert fencing coach reviewing training trends.
+In Traditional Chinese, write a concise 2-3 sentence coaching analysis (no markdown headers).
+Focus on the most repeated mistakes and whether they are improving or worsening.
+Wrap the most important focus point in 【 近期重點: ... 】 brackets.
+
+Athlete: $userName
+Recap window: Last $recapCount sessions
+
+Session error data (chronological, oldest first):
+$recentErrorsText
+''';
+
+    try {
+      final content = [Content.text(prompt)];
+      final response = await _generativeModel.generateContent(content);
+      return response.text ?? fallback;
+    } catch (e) {
+      return fallback;
+    }
+  }
 }
+
