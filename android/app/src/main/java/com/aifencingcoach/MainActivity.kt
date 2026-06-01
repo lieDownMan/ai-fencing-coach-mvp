@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -592,25 +593,20 @@ private fun RealtimeSetupScreen(
             .padding(ScreenPadding),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        ScreenHeader(
-            title = "Realtime",
-            subtitle = "${userSettings.name.ifBlank { "Fencer" }} | ${trainingMode.label} | ${poseBackend.label} | target ${targetSide.label}",
-            onBack = onBack
-        )
-        FlowRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            HudButton(text = "Start Camera", selected = true, onClick = onStart)
-            HudButton(text = "User Settings", selected = false, onClick = onSettings)
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            MenuPanel("Current Setup", Modifier.weight(1f)) {
+            ScreenHeader(
+                title = "Realtime",
+                subtitle = "",
+                onBack = onBack
+            )
+            UserBox(userName = userSettings.name)
+            
+            ExpandableMenuPanel(title = "Current Setup", initiallyExpanded = true) {
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -620,10 +616,10 @@ private fun RealtimeSetupScreen(
                     StatusPill("target ${targetSide.label}", AccentGreen)
                     StatusPill(if (voiceEnabled) "voice on" else "voice off", if (voiceEnabled) AccentGreen else MutedText)
                 }
-                Spacer(Modifier.height(8.dp))
-                Text(settingsSummary(userSettings), color = MutedText, fontSize = BodyTextSize)
+
             }
-            MenuPanel("Feedback", Modifier.weight(1f)) {
+            
+            ExpandableMenuPanel(title = "Feedback", initiallyExpanded = true) {
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -632,35 +628,33 @@ private fun RealtimeSetupScreen(
                     StatusPill("${userSettings.mutedErrors.size} muted", AccentCoral)
                     StatusPill(if (userSettings.onlyFocusedErrors) "focused only" else "all cues", MutedText)
                 }
-                Spacer(Modifier.height(8.dp))
-                Text(modeSummary(trainingMode), color = MutedText, fontSize = BodyTextSize)
-            }
-        }
 
-        MenuPanel("Feedback Focus") {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                availableErrorsForMode(trainingMode).take(5).forEach { option ->
-                    val color = when (option.key) {
-                        in userSettings.mutedErrors -> AccentCoral
-                        in userSettings.emphasizedErrors -> AccentGold
-                        else -> MutedText
+            }
+            
+            ExpandableMenuPanel(title = "Feedback Focus", initiallyExpanded = true) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    availableErrorsForMode(trainingMode).forEach { option ->
+                        val color = when (option.key) {
+                            in userSettings.mutedErrors -> AccentCoral
+                            in userSettings.emphasizedErrors -> AccentGold
+                            else -> MutedText
+                        }
+                        StatusPill(option.label, color)
                     }
-                    StatusPill(option.label, color)
-                }
-                if (availableErrorsForMode(trainingMode).size > 5) {
-                    StatusPill("+${availableErrorsForMode(trainingMode).size - 5}", MutedText)
                 }
             }
-            Spacer(Modifier.height(10.dp))
-            Text(
-                text = "${userSettings.emphasizedErrors.size} emphasized  |  ${userSettings.mutedErrors.size} muted  |  ${if (userSettings.onlyFocusedErrors) "focused only" else "all cues"}",
-                color = MutedText,
-                fontSize = BodyTextSize
-            )
         }
+        
+        // Start Button at the bottom
+        HudButton(
+            text = "Start Camera",
+            selected = true,
+            modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+            onClick = onStart
+        )
     }
 }
 
@@ -715,9 +709,10 @@ private fun PostgameScreen(
     ) {
         ScreenHeader(
             title = "Postgame",
-            subtitle = "${userSettings.name.ifBlank { "Fencer" }}  |  ${trainingMode.label}  |  ${userSettings.processingProfile}",
+            subtitle = "",
             onBack = onBack
         )
+        UserBox(userName = userSettings.name)
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -733,12 +728,7 @@ private fun PostgameScreen(
                     StatusPill(userSettings.processingProfile, AccentGold)
                     StatusPill(if (userSettings.useGeminiSummary) userSettings.llmProvider.label else "Playbook", AccentGold)
                 }
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    text = "Focus ${userSettings.emphasizedErrors.size}  |  Mute ${userSettings.mutedErrors.size}  |  ${if (userSettings.onlyFocusedErrors) "focused only" else "all errors"}",
-                    color = MutedText,
-                    fontSize = BodyTextSize
-                )
+
                 Spacer(Modifier.height(10.dp))
                 HudButton(text = "Edit Settings", selected = false, onClick = onSettings)
             }
@@ -1285,28 +1275,49 @@ private fun ScreenHeader(
     onBack: (() -> Unit)? = null
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 0.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (onBack != null) {
-            androidx.compose.material3.IconButton(
-                onClick = onBack,
-                modifier = Modifier.padding(end = 8.dp)
-            ) {
-                androidx.compose.material3.Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = Color.White
-                )
+            androidx.compose.material3.IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
             }
+            Spacer(Modifier.width(8.dp))
         }
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             if (subtitle.isNotBlank()) {
                 Spacer(Modifier.height(2.dp))
                 Text(subtitle, color = AccentGreen, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
             }
         }
+    }
+}
+
+@Composable
+private fun UserBox(userName: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier.size(36.dp).background(AccentGreen, androidx.compose.foundation.shape.CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = userName.take(1).uppercase(),
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = userName.ifBlank { "Fencer" },
+            color = Color.White,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }
 
@@ -2097,9 +2108,10 @@ private fun SegmentedGroup(
 }
 
 @Composable
-private fun HudButton(text: String, selected: Boolean, onClick: () -> Unit) {
+private fun HudButton(text: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Button(
         onClick = onClick,
+        modifier = modifier,
         shape = RoundedCornerShape(6.dp),
         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
         colors = ButtonDefaults.buttonColors(
