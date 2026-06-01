@@ -19,6 +19,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -73,12 +74,16 @@ import com.aifencingcoach.runtime.CoachFrameState
 import com.aifencingcoach.runtime.CoachingSummaryResult
 import com.aifencingcoach.runtime.FeedbackCue
 import com.aifencingcoach.runtime.LiveCoachPipeline
+import com.aifencingcoach.runtime.LlmProviderConfig
+import com.aifencingcoach.runtime.LlmProviderKind
 import com.aifencingcoach.runtime.PoseBackendKind
 import com.aifencingcoach.runtime.PracticeReport
 import com.aifencingcoach.runtime.Skeleton
 import com.aifencingcoach.runtime.SummarySource
 import com.aifencingcoach.runtime.TargetSide
 import com.aifencingcoach.runtime.TrainingMode
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -100,6 +105,9 @@ private data class UserSettings(
     val heightCm: String = "180",
     val processingProfile: String = "Balanced",
     val useGeminiSummary: Boolean = false,
+    val llmProvider: LlmProviderKind = LlmProviderKind.GEMINI,
+    val geminiApiKey: String = "",
+    val openAiApiKey: String = "",
     val onlyFocusedErrors: Boolean = false,
     val emphasizedErrors: Set<String> = emptySet(),
     val mutedErrors: Set<String> = emptySet(),
@@ -107,6 +115,18 @@ private data class UserSettings(
     val autoExportVideo: Boolean = false,
     val showSkeletonOverlay: Boolean = true
 )
+
+private fun UserSettings.llmConfig(): LlmProviderConfig {
+    val providerApiKey = when (llmProvider) {
+        LlmProviderKind.GEMINI -> geminiApiKey
+        LlmProviderKind.OPENAI -> openAiApiKey
+        LlmProviderKind.PLAYBOOK -> ""
+    }
+    return LlmProviderConfig(
+        provider = llmProvider,
+        apiKey = providerApiKey.trim()
+    )
+}
 
 class MainActivity : ComponentActivity() {
     private var tts: TextToSpeech? = null
@@ -199,7 +219,13 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
                 handedness = prefs.getString("handedness", "right") ?: "right",
                 heightCm = prefs.getString("height_cm", "180") ?: "180",
                 processingProfile = prefs.getString("processing_profile", "Balanced") ?: "Balanced",
-                useGeminiSummary = prefs.getBoolean("use_gemini_summary", false),
+                useGeminiSummary = prefs.getBoolean(
+                    "use_ai_summary",
+                    prefs.getBoolean("use_gemini_summary", false)
+                ),
+                llmProvider = LlmProviderKind.fromLabel(prefs.getString("llm_provider", LlmProviderKind.GEMINI.label)),
+                geminiApiKey = prefs.getString("gemini_api_key", "") ?: "",
+                openAiApiKey = prefs.getString("openai_api_key", "") ?: "",
                 onlyFocusedErrors = prefs.getBoolean("only_focused_errors", false),
                 emphasizedErrors = prefs.getStringSet("emphasized_errors", emptySet())?.toSet().orEmpty(),
                 mutedErrors = prefs.getStringSet("muted_errors", emptySet())?.toSet().orEmpty(),
@@ -216,7 +242,11 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             .putString("handedness", userSettings.handedness)
             .putString("height_cm", userSettings.heightCm.ifBlank { "180" })
             .putString("processing_profile", userSettings.processingProfile)
+            .putBoolean("use_ai_summary", userSettings.useGeminiSummary)
             .putBoolean("use_gemini_summary", userSettings.useGeminiSummary)
+            .putString("llm_provider", userSettings.llmProvider.label)
+            .putString("gemini_api_key", userSettings.geminiApiKey.trim())
+            .putString("openai_api_key", userSettings.openAiApiKey.trim())
             .putBoolean("only_focused_errors", userSettings.onlyFocusedErrors)
             .putStringSet("emphasized_errors", userSettings.emphasizedErrors)
             .putStringSet("muted_errors", userSettings.mutedErrors)
@@ -279,6 +309,7 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             sessionRepo = sessionRepository,
             geminiAgent = geminiAgent,
             useGeminiSummary = userSettings.useGeminiSummary,
+            llmConfig = userSettings.llmConfig(),
             selectedUser = selectedHistoryUser,
             onSelectedUserChange = { selectedHistoryUser = it },
             onBack = {
@@ -335,7 +366,7 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             onPracticeReport = { report ->
                 lastPracticeReport = report
                 
-                // Save immediately with the playbook summary, then let Gemini update history in the background.
+                // Save immediately with the playbook summary, then let AI update history in the background.
                 persistenceScope.launch {
                     val fallbackResult = geminiAgent.generateSummaryResult(
                         trainingMode = trainingMode.label,
@@ -343,7 +374,8 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
                         actionCounts = report.actionCounts,
                         cuesFired = report.cueTimeline,
                         userSettingsName = userSettings.name,
-                        preferGemini = false
+                        preferGemini = false,
+                        llmConfig = userSettings.llmConfig()
                     )
                     val fallbackSummary = fallbackResult.text
 
@@ -361,7 +393,8 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
                             actionCounts = report.actionCounts,
                             cuesFired = report.cueTimeline,
                             userSettingsName = userSettings.name,
-                            preferGemini = true
+                            preferGemini = true,
+                            llmConfig = userSettings.llmConfig()
                         )
                         sessionRepository.updateSummary(sessionId, geminiResult.text)
                     }
@@ -648,7 +681,7 @@ private fun PostgameScreen(
                     StatusPill(trainingMode.label, AccentGreen)
                     StatusPill("target ${targetSide.label}", AccentGreen)
                     StatusPill(userSettings.processingProfile, AccentGold)
-                    StatusPill(if (userSettings.useGeminiSummary) "Gemini" else "Playbook", AccentGold)
+                    StatusPill(if (userSettings.useGeminiSummary) userSettings.llmProvider.label else "Playbook", AccentGold)
                 }
                 Spacer(Modifier.height(10.dp))
                 Text(
@@ -723,6 +756,7 @@ private fun PostgameScreen(
                                     poseBackend = poseBackend,
                                     userSettingsName = userSettings.name,
                                     useGeminiSummary = userSettings.useGeminiSummary,
+                                    llmConfig = userSettings.llmConfig(),
                                     autoExport = userSettings.autoExportVideo
                                 )
                                 selectedVideoUris = emptyList() // clear after queuing
@@ -910,9 +944,50 @@ private fun UserSettingsScreen(
                     onClick = { onVoiceEnabled(!voiceEnabled) }
                 )
                 HudButton(
-                    text = if (userSettings.useGeminiSummary) "Gemini on" else "Playbook",
+                    text = if (userSettings.useGeminiSummary) "AI on" else "Playbook",
                     selected = userSettings.useGeminiSummary,
                     onClick = { onUserSettings(userSettings.copy(useGeminiSummary = !userSettings.useGeminiSummary)) }
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SegmentedGroup(
+                    labels = LlmProviderKind.entries.map { it.label },
+                    selected = userSettings.llmProvider.label,
+                    onSelected = { label ->
+                        onUserSettings(userSettings.copy(llmProvider = LlmProviderKind.fromLabel(label)))
+                    }
+                )
+                val keyStatus = when (userSettings.llmProvider) {
+                    LlmProviderKind.PLAYBOOK -> "offline"
+                    LlmProviderKind.GEMINI -> if (userSettings.geminiApiKey.isBlank()) "bundled key" else "user key"
+                    LlmProviderKind.OPENAI -> if (userSettings.openAiApiKey.isBlank()) "no key" else "user key"
+                }
+                StatusPill(keyStatus, if (keyStatus == "no key") AccentCoral else AccentGreen)
+            }
+            if (userSettings.llmProvider != LlmProviderKind.PLAYBOOK) {
+                Spacer(Modifier.height(10.dp))
+                val isOpenAi = userSettings.llmProvider == LlmProviderKind.OPENAI
+                OutlinedTextField(
+                    value = if (isOpenAi) userSettings.openAiApiKey else userSettings.geminiApiKey,
+                    onValueChange = { value ->
+                        onUserSettings(
+                            if (isOpenAi) {
+                                userSettings.copy(openAiApiKey = value.trim())
+                            } else {
+                                userSettings.copy(geminiApiKey = value.trim())
+                            }
+                        )
+                    },
+                    label = { Text("${userSettings.llmProvider.label} API key", color = MutedText) },
+                    textStyle = androidx.compose.ui.text.TextStyle(color = Color.White),
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
             Spacer(Modifier.height(8.dp))
@@ -1021,14 +1096,29 @@ private fun StatusPill(text: String, color: Color) {
 private fun summaryStatusText(result: CoachingSummaryResult): String =
     when (result.source) {
         SummarySource.GEMINI -> "Gemini summary ready."
+        SummarySource.OPENAI -> "OpenAI summary ready."
         SummarySource.PLAYBOOK -> "Playbook summary ready."
-        SummarySource.DISABLED -> "Gemini is not configured; showing playbook summary."
-        SummarySource.FAILED -> "Gemini failed; showing playbook summary."
+        SummarySource.DISABLED -> result.errorMessage ?: "AI is not configured; showing playbook summary."
+        SummarySource.FAILED -> "AI summary failed: ${summaryErrorLabel(result.errorMessage)}."
     }
+
+private fun summaryErrorLabel(errorMessage: String?): String {
+    val lower = errorMessage.orEmpty().lowercase()
+    return when {
+        lower.contains("quota") || lower.contains("rate") -> "quota/rate limit"
+        lower.contains("api key") || lower.contains("permission") || lower.contains("unauthorized") -> "API key rejected"
+        lower.contains("model") || lower.contains("not found") -> "model unavailable"
+        lower.contains("network") || lower.contains("timeout") || lower.contains("unable to resolve host") -> "network error"
+        else -> "see logcat"
+    }
+}
 
 private fun summaryStatusColor(status: String): Color =
     when {
-        status.contains("ready", ignoreCase = true) && status.contains("Gemini", ignoreCase = true) -> AccentGreen
+        status.contains("ready", ignoreCase = true) && (
+            status.contains("Gemini", ignoreCase = true) ||
+                status.contains("OpenAI", ignoreCase = true)
+            ) -> AccentGreen
         status.contains("Generating", ignoreCase = true) -> AccentGold
         status.contains("failed", ignoreCase = true) || status.contains("not configured", ignoreCase = true) -> AccentCoral
         else -> MutedText
@@ -1111,8 +1201,9 @@ private fun CoachScreen(
     var reviewSummaryStatus by remember { mutableStateOf<String?>(null) }
     var resetToken by remember { mutableStateOf(0) }
     var sessionRecorded by remember { mutableStateOf(false) }
+    val llmConfig = userSettings.llmConfig()
 
-    LaunchedEffect(reviewReport, userSettings.useGeminiSummary, geminiAgent.isEnabled) {
+    LaunchedEffect(reviewReport, userSettings.useGeminiSummary, llmConfig) {
         val report = reviewReport
         if (report != null) {
             val fallbackResult = geminiAgent.generateSummaryResult(
@@ -1121,25 +1212,28 @@ private fun CoachScreen(
                 actionCounts = report.actionCounts,
                 cuesFired = report.cueTimeline,
                 userSettingsName = userSettings.name,
-                preferGemini = false
+                preferGemini = false,
+                llmConfig = llmConfig
             )
             reviewSummary = fallbackResult.text
             reviewSummaryStatus = summaryStatusText(fallbackResult)
 
             if (userSettings.useGeminiSummary) {
-                reviewSummaryStatus = if (geminiAgent.isEnabled) {
-                    "Generating Gemini summary..."
+                val providerLabel = geminiAgent.providerLabel(llmConfig)
+                reviewSummaryStatus = if (geminiAgent.isEnabled(llmConfig)) {
+                    "Generating $providerLabel summary..."
                 } else {
-                    "Gemini is not configured; showing playbook summary."
+                    "$providerLabel is not configured; showing playbook summary."
                 }
-                if (geminiAgent.isEnabled) {
+                if (geminiAgent.isEnabled(llmConfig)) {
                     val geminiResult = geminiAgent.generateSummaryResult(
                         trainingMode = trainingMode.label,
                         targetSide = targetSide.label,
                         actionCounts = report.actionCounts,
                         cuesFired = report.cueTimeline,
                         userSettingsName = userSettings.name,
-                        preferGemini = true
+                        preferGemini = true,
+                        llmConfig = llmConfig
                     )
                     reviewSummary = geminiResult.text
                     reviewSummaryStatus = summaryStatusText(geminiResult)

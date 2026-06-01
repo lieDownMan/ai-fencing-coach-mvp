@@ -18,7 +18,10 @@ android {
     }
     val geminiApiKey = localProperties.getProperty("GEMINI_API_KEY").orEmpty().trim()
     val geminiModel = localProperties.getProperty("GEMINI_MODEL").orEmpty().trim()
-        .ifBlank { "gemini-2.5-flash" }
+        .ifBlank { "gemini-flash-lite-latest" }
+    val openAiApiKey = localProperties.getProperty("OPENAI_API_KEY").orEmpty().trim()
+    val openAiModel = localProperties.getProperty("OPENAI_MODEL").orEmpty().trim()
+        .ifBlank { "gpt-5.4-nano" }
 
     defaultConfig {
         applicationId = "com.aifencingcoach"
@@ -31,6 +34,8 @@ android {
         
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
         buildConfigField("String", "GEMINI_MODEL", "\"$geminiModel\"")
+        buildConfigField("String", "OPENAI_API_KEY", "\"$openAiApiKey\"")
+        buildConfigField("String", "OPENAI_MODEL", "\"$openAiModel\"")
     }
 
     buildTypes {
@@ -112,6 +117,7 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("androidx.test:core:1.6.1")
+    testImplementation("org.json:json:20240303")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
 }

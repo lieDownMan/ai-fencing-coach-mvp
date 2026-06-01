@@ -17,8 +17,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aifencingcoach.runtime.database.FullSessionData
@@ -30,6 +33,7 @@ import java.util.*
 import kotlin.math.roundToInt
 
 import com.aifencingcoach.runtime.GeminiAgent
+import com.aifencingcoach.runtime.LlmProviderConfig
 
 sealed class RecapConfig {
     data class ByCount(val count: Int) : RecapConfig()
@@ -42,6 +46,7 @@ fun HistoryScreen(
     sessionRepo: SessionRepository,
     geminiAgent: GeminiAgent,
     useGeminiSummary: Boolean,
+    llmConfig: LlmProviderConfig,
     selectedUser: String?,
     onSelectedUserChange: (String?) -> Unit,
     onBack: () -> Unit,
@@ -59,6 +64,7 @@ fun HistoryScreen(
             sessionRepo = sessionRepo,
             geminiAgent = geminiAgent,
             useGeminiSummary = useGeminiSummary,
+            llmConfig = llmConfig,
             onBack = { onSelectedUserChange(null) },
             onSessionSelected = onSessionSelected
         )
@@ -149,6 +155,7 @@ fun UserHistoryScreen(
     sessionRepo: SessionRepository,
     geminiAgent: GeminiAgent,
     useGeminiSummary: Boolean,
+    llmConfig: LlmProviderConfig,
     onBack: () -> Unit,
     onSessionSelected: (FullSessionData) -> Unit
 ) {
@@ -304,6 +311,7 @@ fun UserHistoryScreen(
                         recentSessions = fullRecentSessions,
                         geminiAgent = geminiAgent,
                         useGeminiSummary = useGeminiSummary,
+                        llmConfig = llmConfig,
                         userName = userName,
                         recapConfig = recapConfig,
                         onConfigChange = { recapConfig = it },
@@ -426,6 +434,7 @@ private fun UserRecapCard(
     recentSessions: List<FullSessionData>,
     geminiAgent: GeminiAgent,
     useGeminiSummary: Boolean,
+    llmConfig: LlmProviderConfig,
     userName: String,
     recapConfig: RecapConfig,
     onConfigChange: (RecapConfig) -> Unit,
@@ -441,9 +450,9 @@ private fun UserRecapCard(
         }
     }
 
-    LaunchedEffect(recapRefreshKey, geminiAgent.isEnabled, useGeminiSummary) {
+    LaunchedEffect(recapRefreshKey, llmConfig, useGeminiSummary) {
         val fallback = buildRecapFallback(recentSessions, geminiAgent, recapConfig)
-        if (useGeminiSummary && geminiAgent.isEnabled && allCues.isNotEmpty()) {
+        if (useGeminiSummary && geminiAgent.isEnabled(llmConfig) && allCues.isNotEmpty()) {
             isGenerating = true
             val recapFocus = when (recapConfig) {
                 is RecapConfig.ByCount -> "Focusing on the trend across the last ${recapConfig.count} sessions."
@@ -459,7 +468,8 @@ private fun UserRecapCard(
                 recapFocus = recapFocus,
                 recentErrorsText = buildRecentErrorPromptData(recentSessions, geminiAgent),
                 fallback = fallback,
-                preferGemini = useGeminiSummary
+                preferGemini = useGeminiSummary,
+                llmConfig = llmConfig
             )
             isGenerating = false
         } else {
@@ -543,9 +553,30 @@ private fun UserRecapCard(
             if (recentSessions.isEmpty()) {
                 Text("No sessions found for this filter.", color = Color.Gray)
             } else {
-                if (aiAnalysis != null) {
+                if (isGenerating) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color(0xFF64B5F6), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(12.dp))
+                        Text("Generating Recap...", color = Color.Gray, fontSize = 15.sp)
+                    }
+                    Spacer(Modifier.height(20.dp))
+                } else if (aiAnalysis != null) {
+                    val annotatedText = buildAnnotatedString {
+                        val text = aiAnalysis!!
+                        val highlightRegex = Regex("【 近期重點:.*?】")
+                        var lastIndex = 0
+                        for (match in highlightRegex.findAll(text)) {
+                            append(text.substring(lastIndex, match.range.first))
+                            withStyle(style = SpanStyle(color = Color(0xFFFFB74D), fontWeight = FontWeight.Bold)) {
+                                append(match.value)
+                            }
+                            lastIndex = match.range.last + 1
+                        }
+                        append(text.substring(lastIndex))
+                    }
+
                     Text(
-                        text = aiAnalysis!!,
+                        text = annotatedText,
                         color = Color(0xFFB6C2CC),
                         fontSize = 15.sp,
                         lineHeight = 22.sp
@@ -633,7 +664,7 @@ private fun buildRecapFallback(
     }
 
     val details = buildList {
-        add("【 近期重點: $label * ${topError.value} 】\n$trendText")
+        add("【 近期重點: $label】\n$trendText")
         if (!trendText.contains("資料還少") && (previousPeriodCount > 0 || recentPeriodCount > 0)) {
             add("近期 $recentPeriodCount 次，之前 $previousPeriodCount 次。")
         }

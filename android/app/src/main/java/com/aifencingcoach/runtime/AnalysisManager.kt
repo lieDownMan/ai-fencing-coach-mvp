@@ -18,6 +18,7 @@ data class AnalysisJob(
     val poseBackend: PoseBackendKind,
     val userSettingsName: String,
     val useGeminiSummary: Boolean,
+    val llmConfig: LlmProviderConfig,
     val autoExport: Boolean
 )
 
@@ -75,6 +76,7 @@ class AnalysisManager(
         poseBackend: PoseBackendKind,
         userSettingsName: String,
         useGeminiSummary: Boolean,
+        llmConfig: LlmProviderConfig,
         autoExport: Boolean
     ) {
         uris.forEach { uri ->
@@ -86,6 +88,7 @@ class AnalysisManager(
                     poseBackend = poseBackend,
                     userSettingsName = userSettingsName,
                     useGeminiSummary = useGeminiSummary,
+                    llmConfig = llmConfig,
                     autoExport = autoExport
                 )
             )
@@ -129,7 +132,8 @@ class AnalysisManager(
                 actionCounts = report.actionCounts,
                 cuesFired = report.cueTimeline,
                 userSettingsName = job.userSettingsName,
-                preferGemini = false
+                preferGemini = false,
+                llmConfig = job.llmConfig
             )
             val fallbackSummary = fallbackResult.text
 
@@ -147,10 +151,11 @@ class AnalysisManager(
             _lastSessionId.value = sessionId
 
             if (job.useGeminiSummary) {
-                _lastSummaryStatus.value = if (geminiAgent.isEnabled) {
-                    "Generating Gemini summary..."
+                val providerLabel = geminiAgent.providerLabel(job.llmConfig)
+                _lastSummaryStatus.value = if (geminiAgent.isEnabled(job.llmConfig)) {
+                    "Generating $providerLabel summary..."
                 } else {
-                    "Gemini is not configured; showing playbook summary."
+                    "$providerLabel is not configured; showing playbook summary."
                 }
                 scope.launch {
                     val geminiResult = geminiAgent.generateSummaryResult(
@@ -159,7 +164,8 @@ class AnalysisManager(
                         actionCounts = report.actionCounts,
                         cuesFired = report.cueTimeline,
                         userSettingsName = job.userSettingsName,
-                        preferGemini = true
+                        preferGemini = true,
+                        llmConfig = job.llmConfig
                     )
                     sessionRepository.updateSummary(sessionId, geminiResult.text)
                     if (_lastSessionId.value == sessionId) {
@@ -218,8 +224,20 @@ class AnalysisManager(
     private fun summaryStatus(result: CoachingSummaryResult): String =
         when (result.source) {
             SummarySource.GEMINI -> "Gemini summary ready."
+            SummarySource.OPENAI -> "OpenAI summary ready."
             SummarySource.PLAYBOOK -> "Playbook summary ready."
-            SummarySource.DISABLED -> "Gemini is not configured; showing playbook summary."
-            SummarySource.FAILED -> "Gemini failed; showing playbook summary."
+            SummarySource.DISABLED -> result.errorMessage ?: "AI is not configured; showing playbook summary."
+            SummarySource.FAILED -> "AI summary failed: ${summaryErrorLabel(result.errorMessage)}."
         }
+
+    private fun summaryErrorLabel(errorMessage: String?): String {
+        val lower = errorMessage.orEmpty().lowercase()
+        return when {
+            lower.contains("quota") || lower.contains("rate") -> "quota/rate limit"
+            lower.contains("api key") || lower.contains("permission") || lower.contains("unauthorized") -> "API key rejected"
+            lower.contains("model") || lower.contains("not found") -> "model unavailable"
+            lower.contains("network") || lower.contains("timeout") || lower.contains("unable to resolve host") -> "network error"
+            else -> "see logcat"
+        }
+    }
 }
