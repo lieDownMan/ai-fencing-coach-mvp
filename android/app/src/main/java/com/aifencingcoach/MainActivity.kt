@@ -102,6 +102,9 @@ import com.aifencingcoach.runtime.SummarySource
 import com.aifencingcoach.runtime.TargetSide
 import com.aifencingcoach.runtime.TrainingMode
 import com.aifencingcoach.runtime.normalizePlaybookLanguage
+import androidx.compose.ui.draw.paint
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -489,7 +492,8 @@ private fun HomeScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(PageBackground)
+            .paint(painterResource(id = R.drawable.app_bg), contentScale = ContentScale.Crop)
+            .background(Color.Black.copy(alpha = 0.5f))
     ) {
         Column(
             modifier = Modifier
@@ -603,7 +607,8 @@ private fun RealtimeSetupScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(PageBackground)
+            .paint(painterResource(id = R.drawable.app_bg), contentScale = ContentScale.Crop)
+            .background(Color.Black.copy(alpha = 0.5f))
             .padding(ScreenPadding),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
@@ -717,7 +722,8 @@ private fun PostgameScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(PageBackground)
+            .paint(painterResource(id = R.drawable.app_bg), contentScale = ContentScale.Crop)
+            .background(Color.Black.copy(alpha = 0.5f))
             .verticalScroll(rememberScrollState())
             .padding(ScreenPadding),
         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -1037,7 +1043,8 @@ private fun UserSettingsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .paint(painterResource(id = R.drawable.app_bg), contentScale = ContentScale.Crop)
+            .background(Color.Black.copy(alpha = 0.5f))
             .verticalScroll(rememberScrollState())
     ) {
         if (currentSubpage == null) {
