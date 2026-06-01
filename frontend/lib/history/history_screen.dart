@@ -633,14 +633,12 @@ class SessionDetailScreen extends StatelessWidget {
           // Error counts
           if (session.errorCounts.isNotEmpty) ...[
             _SectionTitle('Error Counts'),
-            _InfoCard(children: session.errorCounts.entries
-              .toList()
-              ..sort((a, b) => b.value.compareTo(a.value)),
-              // ignore: avoid_types_as_parameter_names
-            ).runtimeType == _InfoCard
-                ? _InfoCard(children: (session.errorCounts.entries.toList()..sort((a, b) => b.value.compareTo(a.value)))
-                    .map((e) => _InfoRow(e.key, '${e.value}x')).toList())
-                : const SizedBox.shrink(),
+            _InfoCard(
+              children: (session.errorCounts.entries.toList()
+                    ..sort((a, b) => b.value.compareTo(a.value)))
+                  .map((e) => _InfoRow(e.key, '${e.value}x'))
+                  .toList(),
+            ),
             const SizedBox(height: 16),
           ],
           // Cue timeline
