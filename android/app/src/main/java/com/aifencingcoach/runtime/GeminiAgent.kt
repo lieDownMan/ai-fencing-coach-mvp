@@ -1,12 +1,10 @@
 package com.aifencingcoach.runtime
 
-import android.content.Context
 import com.aifencingcoach.BuildConfig
 import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.content
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 
 data class PlaybookEntry(
     val label: String,
@@ -16,39 +14,41 @@ data class PlaybookEntry(
     val practice: String = ""
 )
 
-class GeminiAgent(context: Context? = null) {
+class GeminiAgent(private val playbookRepository: PlaybookRepository) {
     private val apiKey = BuildConfig.GEMINI_API_KEY
+    private val modelName = BuildConfig.GEMINI_MODEL
     val isEnabled: Boolean = apiKey.isNotBlank()
-
-    private val playbook: Map<String, PlaybookEntry> = if (context != null) loadPlaybook(context) else emptyMap()
 
     private val generativeModel by lazy {
         GenerativeModel(
-            modelName = "gemini-1.5-flash",
+            modelName = modelName,
             apiKey = apiKey
         )
     }
 
+    fun playbookEntry(errorKey: String): PlaybookEntry? = playbookRepository.getEntry(errorKey)
+
+    fun allPlaybookEntries(): Map<String, PlaybookEntry> = playbookRepository.getAllEntries()
+
     /**
      * Generate a structured coaching summary.
-     * If Gemini API is available, sends a rich prompt with playbook context.
-     * Otherwise, returns a structured rule-based summary using coach_playbook.json data.
      */
     suspend fun generateSummary(
         trainingMode: String,
         targetSide: String,
         actionCounts: List<ActionCountItem>,
         cuesFired: List<CueHistoryItem>,
-        userSettingsName: String
+        userSettingsName: String,
+        preferGemini: Boolean = true
     ): String = withContext(Dispatchers.IO) {
         val totalActions = actionCounts.sumOf { it.count }
         val aggregatedErrors = aggregateErrors(cuesFired)
+        val fallback = generateRuleBasedSummary(trainingMode, totalActions, aggregatedErrors)
 
-        if (!isEnabled) {
-            return@withContext generateRuleBasedSummary(trainingMode, totalActions, aggregatedErrors)
+        if (!preferGemini || !isEnabled) {
+            return@withContext fallback
         }
 
-        // Build rich prompt with playbook context
         val actionSummary = actionCounts
             .map { "${it.action}: ${it.count} times" }
             .joinToString("\n")
@@ -88,31 +88,54 @@ $playbookBlock
 Based on the stats and coach playbook context above, write a highly specific technical summary addressing the student directly.
 1. Acknowledge the volume/type of actions they practiced.
 2. List every detected problem and how many times it appeared.
-3. Use the playbook diagnosis, short cue, and practice recommendation when explaining each problem.
+3. For each problem, explicitly include the error_name, diagnosis, and **YOU MUST INCLUDE A BULLET POINT FOR 教練建議: [practice]**.
 4. If multiple problems were detected, prioritize the most frequent one at the end.
 5. Tone: Direct, professional, and encouraging.
 6. Constraint: Strictly under 160 words. Do NOT list timecodes. Please reply in Traditional Chinese.
 """
         try {
-            val response = generativeModel.generateContent(
-                content {
-                    text(prompt)
-                }
-            )
-            response.text ?: generateRuleBasedSummary(trainingMode, totalActions, aggregatedErrors)
+            val response = generativeModel.generateContent(content { text(prompt) })
+            response.text?.trim()?.ifBlank { null } ?: fallback
         } catch (e: Exception) {
-            val fallback = generateRuleBasedSummary(trainingMode, totalActions, aggregatedErrors)
-            "**Gemini API Error:** ${e.localizedMessage}\n\n$fallback"
+            "Gemini 連線失敗，已改用離線摘要。\n\n$fallback"
         }
     }
 
     /**
-     * Aggregate cue history items into error counts with playbook data.
+     * Generate an improvement analysis paragraph based on recent errors.
      */
+    suspend fun generateImprovementAnalysis(
+        userName: String,
+        recentErrorsText: String,
+        fallback: String,
+        preferGemini: Boolean = true
+    ): String = withContext(Dispatchers.IO) {
+        if (!preferGemini || !isEnabled) return@withContext fallback
+
+        val prompt = """You are an elite fencing coach. Analyze the user's recent progress based on error frequencies over the last 5 sessions.
+User: $userName
+Recent Errors Data:
+$recentErrorsText
+
+INSTRUCTIONS:
+1. Write a 2-3 sentence summary evaluating recent progress or consistency.
+2. Use the per-session error counts and percentages to discuss whether the most important issue is improving, stable, or getting worse.
+3. Mention the current focus area and the relevant practice recommendation when present.
+4. Be encouraging but direct.
+5. Reply in Traditional Chinese.
+"""
+        try {
+            val response = generativeModel.generateContent(content { text(prompt) })
+            response.text?.trim()?.ifBlank { null } ?: fallback
+        } catch (e: Exception) {
+            fallback
+        }
+    }
+
     private fun aggregateErrors(cues: List<CueHistoryItem>): List<AggregatedError> {
         val counts = cues.groupBy { it.errorKey }.mapValues { it.value.size }
         return counts.map { (key, count) ->
-            val entry = playbook[key]
+            val entry = playbookRepository.getEntry(key)
             AggregatedError(
                 key = key,
                 count = count,
@@ -124,42 +147,26 @@ Based on the stats and coach playbook context above, write a highly specific tec
         }.sortedByDescending { it.count }
     }
 
-    /**
-     * Generate a structured Chinese coaching summary without any LLM.
-     * Matches the logic from main branch's llm_agent.py: _generate_rule_based_summary()
-     */
     private fun generateRuleBasedSummary(
         trainingMode: String,
         totalActions: Long,
         errors: List<AggregatedError>
     ): String {
         val lines = mutableListOf("本次 $trainingMode 共辨識到 $totalActions 個動作。")
-
         if (errors.isEmpty()) {
             lines.add("未偵測到姿勢問題，表現良好！繼續保持！")
             return lines.joinToString("\n")
         }
-
         lines.add("偵測到的問題與頻率：")
         for (item in errors) {
-            val detail = StringBuilder("- ${item.errorName}：${item.count} 次")
-            if (item.diagnosis.isNotBlank()) {
-                detail.append("。${item.diagnosis}")
-            }
-            if (item.shortCue.isNotBlank()) {
-                detail.append(" 教練提示：${item.shortCue}")
-            }
-            if (item.practice.isNotBlank()) {
-                detail.append(" 練習建議：${item.practice}")
-            }
-            lines.add(detail.toString())
+            val detail = StringBuilder("- ${item.errorName}：${item.count} 次\n")
+            if (item.diagnosis.isNotBlank()) detail.append("  診斷：${item.diagnosis}\n")
+            if (item.practice.isNotBlank()) detail.append("  教練建議：${item.practice}\n")
+            lines.add(detail.toString().trimEnd())
         }
         return lines.joinToString("\n")
     }
 
-    /**
-     * Format playbook errors into a structured block for the LLM prompt.
-     */
     private fun formatPlaybookBlock(errors: List<AggregatedError>): String {
         if (errors.isEmpty()) return "No posture problems were detected."
         return errors.joinToString("\n") { item ->
@@ -182,23 +189,4 @@ Based on the stats and coach playbook context above, write a highly specific tec
         val shortCue: String,
         val practice: String
     )
-
-    companion object {
-        private fun loadPlaybook(context: Context): Map<String, PlaybookEntry> {
-            return runCatching {
-                val json = context.assets.open("coach_playbook.json").bufferedReader().use { it.readText() }
-                val root = JSONObject(json)
-                root.keys().asSequence().associateWith { key ->
-                    val obj = root.getJSONObject(key)
-                    PlaybookEntry(
-                        label = obj.optString("error_name", key),
-                        shortCue = obj.optString("short_cue", key),
-                        diagnosis = obj.optString("diagnosis", ""),
-                        practice = obj.optString("practice", ""),
-                        weight = 5f
-                    )
-                }
-            }.getOrDefault(emptyMap())
-        }
-    }
 }

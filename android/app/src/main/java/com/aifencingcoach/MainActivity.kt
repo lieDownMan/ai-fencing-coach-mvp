@@ -5,7 +5,9 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.speech.tts.TextToSpeech
+import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -30,6 +32,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -37,6 +40,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -96,7 +100,10 @@ private data class UserSettings(
     val useGeminiSummary: Boolean = false,
     val onlyFocusedErrors: Boolean = false,
     val emphasizedErrors: Set<String> = emptySet(),
-    val mutedErrors: Set<String> = emptySet()
+    val mutedErrors: Set<String> = emptySet(),
+    val language: String = "zh",
+    val autoExportVideo: Boolean = false,
+    val showSkeletonOverlay: Boolean = true
 )
 
 class MainActivity : ComponentActivity() {
@@ -108,7 +115,7 @@ class MainActivity : ComponentActivity() {
         tts = TextToSpeech(this) { status ->
             ttsReady = status == TextToSpeech.SUCCESS
             if (ttsReady) {
-                tts?.language = Locale.US
+                tts?.language = Locale.TAIWAN
             }
         }
 
@@ -170,7 +177,8 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
     }
     
     val sessionRepository = remember { com.aifencingcoach.runtime.database.SessionRepository(context) }
-    val geminiAgent = remember { com.aifencingcoach.runtime.GeminiAgent(context) }
+    val playbookRepository = remember { com.aifencingcoach.runtime.PlaybookRepository(context) }
+    val geminiAgent = remember { com.aifencingcoach.runtime.GeminiAgent(playbookRepository) }
     val analysisManager = remember { com.aifencingcoach.runtime.AnalysisManager(context, sessionRepository, geminiAgent) }
 
     var appScreen by remember { mutableStateOf(AppScreen.HOME) }
@@ -190,7 +198,10 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
                 useGeminiSummary = prefs.getBoolean("use_gemini_summary", false),
                 onlyFocusedErrors = prefs.getBoolean("only_focused_errors", false),
                 emphasizedErrors = prefs.getStringSet("emphasized_errors", emptySet())?.toSet().orEmpty(),
-                mutedErrors = prefs.getStringSet("muted_errors", emptySet())?.toSet().orEmpty()
+                mutedErrors = prefs.getStringSet("muted_errors", emptySet())?.toSet().orEmpty(),
+                language = prefs.getString("language", "zh") ?: "zh",
+                autoExportVideo = prefs.getBoolean("auto_export_video", false),
+                showSkeletonOverlay = prefs.getBoolean("show_skeleton_overlay", true)
             )
         )
     }
@@ -206,6 +217,9 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             .putStringSet("emphasized_errors", userSettings.emphasizedErrors)
             .putStringSet("muted_errors", userSettings.mutedErrors)
             .putBoolean("voice_enabled", voiceEnabled)
+            .putString("language", userSettings.language)
+            .putBoolean("auto_export_video", userSettings.autoExportVideo)
+            .putBoolean("show_skeleton_overlay", userSettings.showSkeletonOverlay)
             .apply()
     }
 
@@ -256,6 +270,8 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
         )
         AppScreen.HISTORY -> com.aifencingcoach.HistoryScreen(
             sessionRepo = sessionRepository,
+            geminiAgent = geminiAgent,
+            userName = userSettings.name,
             onBack = { appScreen = AppScreen.HOME },
             onSessionSelected = { fullSession ->
                 selectedSessionForDetail = fullSession
@@ -295,6 +311,7 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             poseBackend = poseBackend,
             voiceEnabled = voiceEnabled,
             userSettings = userSettings,
+            geminiAgent = geminiAgent,
             onVoiceEnabled = {
                 voiceEnabled = it
                 prefs.edit().putBoolean("voice_enabled", it).apply()
@@ -306,25 +323,36 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             onPracticeReport = { report ->
                 lastPracticeReport = report
                 
-                // Save to DB and generate Gemini summary in background
+                // Save immediately with the playbook summary, then let Gemini update history in the background.
                 val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default)
                 scope.launch {
-                    var geminiSummaryText = ""
-                    val geminiAgent = com.aifencingcoach.runtime.GeminiAgent(context)
-                    // Always generate summary: uses Gemini API if available, otherwise rule-based fallback
-                    geminiSummaryText = geminiAgent.generateSummary(
+                    val fallbackSummary = geminiAgent.generateSummary(
                         trainingMode = trainingMode.label,
                         targetSide = targetSide.label,
                         actionCounts = report.actionCounts,
                         cuesFired = report.cueTimeline,
-                        userSettingsName = userSettings.name
+                        userSettingsName = userSettings.name,
+                        preferGemini = false
                     )
 
-                    sessionRepository.savePracticeReport(
+                    val sessionId = sessionRepository.savePracticeReport(
                         report = report,
                         cuesFired = report.cueTimeline,
-                        llmSummary = geminiSummaryText.ifEmpty { "No summary available." }
+                        llmSummary = fallbackSummary.ifEmpty { "No summary available." },
+                        userName = userSettings.name
                     )
+
+                    if (userSettings.useGeminiSummary) {
+                        val geminiSummaryText = geminiAgent.generateSummary(
+                            trainingMode = trainingMode.label,
+                            targetSide = targetSide.label,
+                            actionCounts = report.actionCounts,
+                            cuesFired = report.cueTimeline,
+                            userSettingsName = userSettings.name,
+                            preferGemini = true
+                        )
+                        sessionRepository.updateSummary(sessionId, geminiSummaryText)
+                    }
                 }
             },
             onSpeak = onSpeak
@@ -558,21 +586,27 @@ private fun PostgameScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var selectedVideoUri by remember { mutableStateOf<Uri?>(null) }
-    var selectedVideo by remember { mutableStateOf<String?>(null) }
     val analysisRunning by analysisManager.isAnalyzing.collectAsStateWithLifecycle()
     val analysisProgress by analysisManager.analysisProgress.collectAsStateWithLifecycle()
     val analysisStatus by analysisManager.analysisStatus.collectAsStateWithLifecycle()
     val frameStates by analysisManager.frameStates.collectAsStateWithLifecycle()
     val lastReport by analysisManager.lastReport.collectAsStateWithLifecycle()
     val lastSessionId by analysisManager.lastSessionId.collectAsStateWithLifecycle()
+    val lastSummary by analysisManager.lastSummary.collectAsStateWithLifecycle()
+    val lastSourceUri by analysisManager.lastSourceUri.collectAsStateWithLifecycle()
 
+    val queueSize by analysisManager.queueSize.collectAsStateWithLifecycle()
+    var selectedVideoUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var isExporting by remember { mutableStateOf(false) }
     val videoAnnotator = remember { com.aifencingcoach.runtime.VideoAnnotator(context) }
-    val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        selectedVideoUri = uri
-        selectedVideo = uri?.lastPathSegment ?: uri?.toString()
-        analysisManager.reset()
+    val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        if (uris.isNotEmpty()) {
+            selectedVideoUris = (selectedVideoUris + uris).distinct()
+        }
+    }
+
+    LaunchedEffect(lastReport) {
+        lastReport?.let(onPracticeReport)
     }
 
     Column(
@@ -612,31 +646,73 @@ private fun PostgameScreen(
                 Spacer(Modifier.height(10.dp))
                 HudButton(text = "Edit Settings", selected = false, onClick = onSettings)
             }
-            MenuPanel("Video", Modifier.weight(2f)) {
+            MenuPanel("Video Queue", Modifier.weight(2f)) {
+                val statusText = if (selectedVideoUris.isEmpty()) {
+                    "No videos selected"
+                } else {
+                    "${selectedVideoUris.size} video(s) selected"
+                }
                 Text(
-                    text = selectedVideo ?: "No clip selected",
-                    color = if (selectedVideo == null) MutedText else Color.White,
+                    text = statusText,
+                    color = if (selectedVideoUris.isEmpty()) MutedText else Color.White,
                     fontSize = BodyTextSize
+                )
+                if (selectedVideoUris.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    selectedVideoUris.take(5).forEach { uri ->
+                        val name = remember(uri) { videoDisplayName(context, uri) }
+                        Text(
+                            text = "Selected: $name",
+                            color = AccentGreen,
+                            fontSize = 12.sp,
+                            maxLines = 1
+                        )
+                    }
+                    if (selectedVideoUris.size > 5) {
+                        Text(
+                            text = "+${selectedVideoUris.size - 5} more selected",
+                            color = MutedText,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+                if (queueSize > 0) {
+                    Text(
+                        text = "$queueSize video(s) remaining in queue",
+                        color = AccentGold,
+                        fontSize = BodyTextSize,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                StatusPill(
+                    if (userSettings.autoExportVideo) "auto export on" else "manual export",
+                    if (userSettings.autoExportVideo) AccentGreen else MutedText
                 )
                 Spacer(Modifier.height(10.dp))
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    HudButton(text = "Choose Video", selected = false, onClick = { videoPicker.launch("video/*") })
+                    HudButton(text = "Add Videos", selected = false, onClick = { videoPicker.launch("video/*") })
+                    if (selectedVideoUris.isNotEmpty()) {
+                        HudButton(text = "Clear Selection", selected = false, onClick = { selectedVideoUris = emptyList() })
+                    }
                     HudButton(
-                        text = if (analysisRunning) "Processing" else "Run Analysis",
-                        selected = selectedVideoUri != null && !analysisRunning,
+                        text = if (analysisRunning) "Add to Queue" else "Process ${selectedVideoUris.size} Video(s)",
+                        selected = selectedVideoUris.isNotEmpty(),
                         onClick = {
-                            selectedVideoUri?.let { uri ->
-                                analysisManager.startAnalysis(
-                                    uri = uri,
+                            if (selectedVideoUris.isNotEmpty()) {
+                                analysisManager.enqueueAnalysis(
+                                    uris = selectedVideoUris,
                                     targetSide = targetSide,
                                     trainingMode = trainingMode,
                                     poseBackend = poseBackend,
                                     userSettingsName = userSettings.name,
-                                    useGeminiSummary = userSettings.useGeminiSummary
+                                    useGeminiSummary = userSettings.useGeminiSummary,
+                                    autoExport = userSettings.autoExportVideo
                                 )
+                                selectedVideoUris = emptyList() // clear after queuing
                             }
                         }
                     )
@@ -663,12 +739,14 @@ private fun PostgameScreen(
             if (reportToShow == null) {
                 Text("No practice report yet", color = MutedText, fontSize = BodyTextSize)
             } else {
-                if (lastReport != null) onPracticeReport(reportToShow)
-                
-                PracticeReportSummary(report = reportToShow)
+                PracticeReportSummary(
+                    report = reportToShow,
+                    summary = if (lastReport != null) lastSummary else null
+                )
                 
                 val currentFrameStates = frameStates
-                if (currentFrameStates != null && selectedVideoUri != null) {
+                val currentSourceUri = lastSourceUri
+                if (currentFrameStates != null && currentSourceUri != null) {
                     Spacer(Modifier.height(16.dp))
                     HudButton(
                         text = if (isExporting) "Exporting Video..." else "Save Annotated Video",
@@ -677,32 +755,37 @@ private fun PostgameScreen(
                             if (!isExporting) {
                                 isExporting = true
                                 scope.launch {
-                                    videoAnnotator.exportVideo(
-                                        sourceUri = selectedVideoUri!!,
-                                        frameStates = currentFrameStates,
-                                        videoWidth = 720,
-                                        videoHeight = 1280
-                                    ).collect { progress ->
-                                        when (progress) {
-                                            is com.aifencingcoach.runtime.ExportProgress.Completed -> {
-                                                isExporting = false
-                                                val outputPath = progress.filePath
-                                                
-                                                val currentSessionId = lastSessionId
-                                                scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                                                    if (currentSessionId != null) {
-                                                        com.aifencingcoach.runtime.database.AppDatabase.getDatabase(context)
-                                                            .sessionDao().updateSessionVideoPath(currentSessionId, outputPath)
+                                    try {
+                                        videoAnnotator.exportVideo(
+                                            sourceUri = currentSourceUri,
+                                            frameStates = currentFrameStates,
+                                            videoWidth = 720,
+                                            videoHeight = 1280
+                                        ).collect { progress ->
+                                            when (progress) {
+                                                is com.aifencingcoach.runtime.ExportProgress.Completed -> {
+                                                    isExporting = false
+                                                    val outputPath = progress.filePath
+
+                                                    val currentSessionId = lastSessionId
+                                                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                                        if (currentSessionId != null) {
+                                                            com.aifencingcoach.runtime.database.AppDatabase.getDatabase(context)
+                                                                .sessionDao().updateSessionVideoPath(currentSessionId, outputPath)
+                                                        }
                                                     }
+
+                                                    android.widget.Toast.makeText(context, "Annotated video saved.", android.widget.Toast.LENGTH_LONG).show()
                                                 }
-                                                
-                                                android.widget.Toast.makeText(context, "Video saved to Gallery!", android.widget.Toast.LENGTH_LONG).show()
-                                            }
-                                            is com.aifencingcoach.runtime.ExportProgress.Error -> {
-                                                isExporting = false
-                                                android.widget.Toast.makeText(context, "Export failed: ${progress.exception.message}", android.widget.Toast.LENGTH_LONG).show()
+                                                is com.aifencingcoach.runtime.ExportProgress.Error -> {
+                                                    isExporting = false
+                                                    android.widget.Toast.makeText(context, "Export failed: ${progress.exception.message}", android.widget.Toast.LENGTH_LONG).show()
+                                                }
                                             }
                                         }
+                                    } catch (e: Exception) {
+                                        isExporting = false
+                                        android.widget.Toast.makeText(context, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
                                     }
                                 }
                             }
@@ -784,6 +867,11 @@ private fun UserSettingsScreen(
                     selected = targetSide.label,
                     onSelected = { onTargetSide(TargetSide.fromLabel(it)) }
                 )
+                SegmentedGroup(
+                    labels = listOf("zh", "en"),
+                    selected = userSettings.language,
+                    onSelected = { onUserSettings(userSettings.copy(language = it)) }
+                )
             }
         }
 
@@ -813,6 +901,17 @@ private fun UserSettingsScreen(
                     onClick = { onUserSettings(userSettings.copy(useGeminiSummary = !userSettings.useGeminiSummary)) }
                 )
             }
+            Spacer(Modifier.height(8.dp))
+            CheckboxLine(
+                label = "Auto-export annotated postgame videos",
+                checked = userSettings.autoExportVideo,
+                onCheckedChange = { onUserSettings(userSettings.copy(autoExportVideo = it)) }
+            )
+            CheckboxLine(
+                label = "Show skeleton overlay in realtime",
+                checked = userSettings.showSkeletonOverlay,
+                onCheckedChange = { onUserSettings(userSettings.copy(showSkeletonOverlay = it)) }
+            )
         }
 
         MenuPanel("Feedback Controls", Modifier.fillMaxWidth()) {
@@ -907,38 +1006,8 @@ private fun StatusPill(text: String, color: Color) {
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
-private fun PracticeReportSummary(report: PracticeReport) {
-    Text(report.primaryTakeaway, color = AccentGold, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-    Spacer(Modifier.height(12.dp))
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        MetricBlock("time", formatSeconds(report.elapsedSeconds))
-        MetricBlock("active", "${report.activeSeconds}s ${report.activePercent}%")
-        MetricBlock("checks", report.inferenceCount.toString())
-        MetricBlock("cues", report.cueCount.toString())
-        MetricBlock("top", report.topAction)
-    }
-    if (report.topCues.isNotEmpty()) {
-        Spacer(Modifier.height(14.dp))
-        report.topCues.take(3).forEach { cue ->
-            Text(
-                text = "${cue.count}x ${cue.label}",
-                color = AccentGold,
-                fontSize = BodyTextSize,
-                fontWeight = FontWeight.SemiBold
-            )
-            if (cue.message.isNotBlank()) {
-                Text(
-                    text = cue.message,
-                    color = MutedText,
-                    fontSize = 11.sp
-                )
-            }
-            Spacer(Modifier.height(6.dp))
-        }
-    }
+private fun PracticeReportSummary(report: PracticeReport, summary: String? = null) {
+    SessionFeedbackPanel(report = report, summary = summary)
 }
 
 @Composable
@@ -990,6 +1059,7 @@ private fun CoachScreen(
     poseBackend: PoseBackendKind,
     voiceEnabled: Boolean,
     userSettings: UserSettings,
+    geminiAgent: com.aifencingcoach.runtime.GeminiAgent,
     onVoiceEnabled: (Boolean) -> Unit,
     onBackToMenu: () -> Unit,
     onPracticeReport: (PracticeReport) -> Unit,
@@ -998,7 +1068,25 @@ private fun CoachScreen(
     var analysisPaused by remember { mutableStateOf(false) }
     var frameState by remember { mutableStateOf(CoachFrameState()) }
     var reviewReport by remember { mutableStateOf<PracticeReport?>(null) }
+    var reviewSummary by remember { mutableStateOf<String?>(null) }
     var resetToken by remember { mutableStateOf(0) }
+    var sessionRecorded by remember { mutableStateOf(false) }
+
+    LaunchedEffect(reviewReport) {
+        if (reviewReport != null) {
+            reviewSummary = "Generating Coach Summary..."
+            reviewSummary = geminiAgent.generateSummary(
+                trainingMode = trainingMode.label,
+                targetSide = targetSide.label,
+                actionCounts = reviewReport!!.actionCounts,
+                cuesFired = reviewReport!!.cueTimeline,
+                userSettingsName = userSettings.name,
+                preferGemini = userSettings.useGeminiSummary
+            )
+        } else {
+            reviewSummary = null
+        }
+    }
 
     val pipeline = remember(poseBackend, targetSide, trainingMode, resetToken) {
         LiveCoachPipeline(context, poseBackend, targetSide, trainingMode)
@@ -1013,6 +1101,24 @@ private fun CoachScreen(
         isReviewing -> frameState.copy(state = "REVIEW", cue = "Practice complete")
         analysisPaused -> frameState.copy(state = "PAUSED", cue = "Analysis paused")
         else -> frameState
+    }
+
+    fun recordCurrentSessionIfNeeded() {
+        if (sessionRecorded) return
+        val report = reviewReport ?: pipeline.practiceReport()
+        reviewReport = report
+        onPracticeReport(report)
+        sessionRecorded = true
+    }
+
+    fun leaveRealtime() {
+        recordCurrentSessionIfNeeded()
+        analysisPaused = true
+        onBackToMenu()
+    }
+
+    BackHandler {
+        leaveRealtime()
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
@@ -1031,7 +1137,9 @@ private fun CoachScreen(
                         if (voiceEnabled && cue != null) onSpeak(cue.shortCue.ifBlank { cue.message })
                     }
                 )
-                SkeletonOverlay(state = displayedState)
+                if (userSettings.showSkeletonOverlay) {
+                    SkeletonOverlay(state = displayedState)
+                }
 
                 // Action pill overlay (top center, like Flutter)
                 Box(
@@ -1074,14 +1182,18 @@ private fun CoachScreen(
                 onFinishPractice = {
                     val report = pipeline.practiceReport()
                     reviewReport = report
-                    onPracticeReport(report)
+                    if (!sessionRecorded) {
+                        onPracticeReport(report)
+                        sessionRecorded = true
+                    }
                     analysisPaused = true
                 },
                 onReset = {
                     pipeline.reset()
                     resetToken += 1
+                    sessionRecorded = false
                 },
-                onBackToMenu = onBackToMenu,
+                onBackToMenu = { leaveRealtime() },
                 modifier = Modifier.weight(0.4f)
             )
         }
@@ -1095,10 +1207,13 @@ private fun CoachScreen(
                 onNewSession = {
                     reviewReport = null
                     analysisPaused = false
+                    sessionRecorded = false
                     frameState = CoachFrameState()
                     pipeline.reset()
                     resetToken += 1
-                }
+                },
+                onHome = { leaveRealtime() },
+                llmSummary = reviewSummary
             )
         }
     }
@@ -1136,8 +1251,12 @@ private fun CameraPreview(
                 analysis.setAnalyzer(analyzerExecutor) { imageProxy ->
                     try {
                         if (pausedState.value) return@setAnalyzer
-                        val (state, cue) = pipeline.process(imageProxy)
-                        mainExecutor.execute { onFrameState(state, cue) }
+                        try {
+                            val (state, cue) = pipeline.process(imageProxy)
+                            mainExecutor.execute { onFrameState(state, cue) }
+                        } catch (e: Exception) {
+                            // Ignore pipeline exceptions (e.g. MediaPipe paused state) to prevent crashing
+                        }
                     } finally {
                         imageProxy.close()
                     }
@@ -1474,7 +1593,9 @@ private fun ErrorCard(label: String, message: String, isPrimary: Boolean) {
 private fun PostPracticeReview(
     report: PracticeReport,
     onResume: () -> Unit,
-    onNewSession: () -> Unit
+    onNewSession: () -> Unit,
+    onHome: () -> Unit,
+    llmSummary: String? = null
 ) {
     Box(
         modifier = Modifier
@@ -1486,7 +1607,9 @@ private fun PostPracticeReview(
         Column(
             modifier = Modifier
                 .fillMaxWidth(0.9f)
+                .fillMaxHeight(0.9f)
                 .background(Color(0xF0141A20), RoundedCornerShape(8.dp))
+                .verticalScroll(rememberScrollState())
                 .padding(12.dp)
         ) {
             Row(
@@ -1509,6 +1632,8 @@ private fun PostPracticeReview(
                     )
                 }
                 Row {
+                    HudButton(text = "Home", selected = false, onClick = onHome)
+                    Spacer(Modifier.width(8.dp))
                     HudButton(text = "Resume", selected = false, onClick = onResume)
                     Spacer(Modifier.width(8.dp))
                     HudButton(text = "New", selected = true, onClick = onNewSession)
@@ -1516,100 +1641,8 @@ private fun PostPracticeReview(
             }
 
             Spacer(Modifier.height(14.dp))
-            Text(
-                text = report.primaryTakeaway,
-                color = Color(0xFFFFE066),
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(Modifier.height(14.dp))
-
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                MetricBlock("time", formatSeconds(report.elapsedSeconds))
-                MetricBlock("active", "${report.activeSeconds}s ${report.activePercent}%")
-                MetricBlock("checks", report.inferenceCount.toString())
-                MetricBlock("cues", report.cueCount.toString())
-                MetricBlock("top", report.topAction)
-            }
-
+            SessionFeedbackPanel(report = report, summary = llmSummary)
             Spacer(Modifier.height(16.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Actions",
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    if (report.actionCounts.isEmpty()) {
-                        Text("No model actions yet", color = Color(0xFFB6C2CC), fontSize = BodyTextSize)
-                    } else {
-                        report.actionCounts.take(5).forEach { item ->
-                            ActionRow(item.action, item.count, item.percent)
-                        }
-                    }
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Cues",
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    if (report.topCues.isEmpty()) {
-                        Text("No repeated cues yet", color = Color(0xFFB6C2CC), fontSize = BodyTextSize)
-                    } else {
-                        report.topCues.take(5).forEach { cue ->
-                            Text(
-                                text = "${cue.count}x  ${cue.label}",
-                                color = Color(0xFFFFE066),
-                                fontSize = BodyTextSize,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                text = cue.message,
-                                color = Color(0xFFB6C2CC),
-                                fontSize = 12.sp
-                            )
-                            Spacer(Modifier.height(7.dp))
-                        }
-                    }
-                }
-            }
-
-            if (report.cueTimeline.isNotEmpty()) {
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    text = "Timeline",
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Spacer(Modifier.height(6.dp))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    report.cueTimeline.take(8).forEach { item ->
-                        Text(
-                            text = "${item.frameIndex}: ${item.label}",
-                            color = Color(0xFFB6C2CC),
-                            fontSize = 12.sp,
-                            modifier = Modifier
-                                .background(Color(0xFF263039), RoundedCornerShape(6.dp))
-                                .padding(horizontal = 8.dp, vertical = 5.dp)
-                        )
-                    }
-                }
-            }
         }
     }
 }
@@ -1724,6 +1757,16 @@ private fun postgameSummary(report: PracticeReport?): String =
 
 private fun settingsSummary(settings: UserSettings): String =
     "${settings.handedness}, ${settings.heightCm.ifBlank { "180" }}cm, ${settings.emphasizedErrors.size} focus, ${settings.mutedErrors.size} muted."
+
+private fun videoDisplayName(context: Context, uri: Uri): String {
+    context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+        val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        if (index >= 0 && cursor.moveToFirst()) {
+            cursor.getString(index)?.takeIf { it.isNotBlank() }?.let { return it }
+        }
+    }
+    return uri.lastPathSegment ?: uri.toString()
+}
 
 private data class FeedbackErrorOption(
     val key: String,

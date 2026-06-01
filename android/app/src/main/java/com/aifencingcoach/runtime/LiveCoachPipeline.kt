@@ -17,7 +17,8 @@ class LiveCoachPipeline(
     private val targetTracker = TargetTracker(targetSide)
     private val normalizer = SpatialNormalizer()
     private val heuristics = HeuristicsEngine(targetSide, trainingMode)
-    private val scheduler = FeedbackScheduler(appContext, trainingMode)
+    private val playbookRepo = PlaybookRepository(appContext)
+    private val scheduler = FeedbackScheduler(playbookRepo, trainingMode)
     private val rawSkeletons = ArrayDeque<Skeleton>()
     private val normalizedFrames = ArrayDeque<FloatArray>()
     private val cueHistory = ArrayDeque<CueHistoryItem>()
@@ -341,7 +342,9 @@ class LiveCoachPipeline(
                 errorKey = cue.errorKey,
                 label = cue.label,
                 message = cue.message,
-                priority = cue.priority
+                priority = cue.priority,
+                diagnosis = cue.diagnosis,
+                practice = cue.practice
             )
         )
         while (cueHistory.size > MaxCueHistory) cueHistory.removeFirst()
@@ -352,7 +355,9 @@ class LiveCoachPipeline(
             errorKey = cue.errorKey,
             label = cue.label,
             message = cue.message,
-            count = (previous?.count ?: 0L) + 1L
+            count = (previous?.count ?: 0L) + 1L,
+            diagnosis = cue.diagnosis,
+            practice = cue.practice
         )
         cueCount += 1
     }

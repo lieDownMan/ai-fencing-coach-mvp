@@ -78,6 +78,8 @@ class MediaPipePoseBackend(context: Context) : PoseBackend {
         }
     }
 
+    private var lastTimestampMs = -1L
+
     override fun detectBitmap(
         bitmap: Bitmap,
         targetSide: TargetSide,
@@ -85,19 +87,31 @@ class MediaPipePoseBackend(context: Context) : PoseBackend {
         timestampNs: Long
     ): PoseBackendResult {
         val landmarker = poseLandmarker ?: return PoseBackendResult(null, null)
+        val timestampMs = timestampNs / 1_000_000
+
+        // MediaPipe requires strictly increasing timestamps
+        if (timestampMs <= lastTimestampMs) {
+            return PoseBackendResult(null, null)
+        }
+        lastTimestampMs = timestampMs
+
         val mpImage = BitmapImageBuilder(bitmap).build()
         val processingOptions = ImageProcessingOptions.builder()
             .setRotationDegrees(rotationDegrees)
             .build()
-        val timestampMs = timestampNs / 1_000_000
-        val result = landmarker.detectForVideo(mpImage, processingOptions, timestampMs)
-        val detections = mapper.mapDetections(
-            poses = result.landmarks(),
-            frameWidth = bitmap.width,
-            frameHeight = bitmap.height,
-            targetSide = targetSide
-        )
-        return PoseBackendResult(null, null, detections)
+
+        return try {
+            val result = landmarker.detectForVideo(mpImage, processingOptions, timestampMs)
+            val detections = mapper.mapDetections(
+                poses = result.landmarks(),
+                frameWidth = bitmap.width,
+                frameHeight = bitmap.height,
+                targetSide = targetSide
+            )
+            PoseBackendResult(null, null, detections)
+        } catch (e: Exception) {
+            PoseBackendResult(null, null)
+        }
     }
 
     override fun close() {

@@ -19,6 +19,12 @@ abstract class SessionDao {
     @Query("SELECT * FROM sessions ORDER BY timestamp DESC")
     abstract suspend fun getAllSessions(): List<SessionEntity>
 
+    @Query("SELECT DISTINCT userName FROM sessions ORDER BY userName ASC")
+    abstract suspend fun getDistinctUsers(): List<String>
+
+    @Query("SELECT * FROM sessions WHERE userName = :userName ORDER BY timestamp DESC")
+    abstract suspend fun getSessionsByUser(userName: String): List<SessionEntity>
+
     @Query("SELECT * FROM sessions WHERE id = :sessionId LIMIT 1")
     abstract suspend fun getSessionById(sessionId: Long): SessionEntity?
 

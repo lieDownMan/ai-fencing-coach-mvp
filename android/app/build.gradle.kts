@@ -27,6 +27,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
         buildConfigField("String", "GEMINI_API_KEY", "\"${localProperties.getProperty("GEMINI_API_KEY") ?: ""}\"")
+        buildConfigField("String", "GEMINI_MODEL", "\"${localProperties.getProperty("GEMINI_MODEL") ?: "gemini-2.5-flash"}\"")
     }
 
     buildTypes {
@@ -96,7 +97,7 @@ dependencies {
     // it suggests the compiler was expecting Java but maybe KSP was confused.
 
     // Google Generative AI (Gemini)
-    implementation("com.google.ai.client.generativeai:generativeai:0.2.2")
+    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
 
     // Media3 Transformer for Video Export & ExoPlayer for playback
     val media3Version = "1.4.1"

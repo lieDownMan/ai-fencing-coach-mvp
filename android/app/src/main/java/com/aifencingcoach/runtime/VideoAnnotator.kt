@@ -118,17 +118,30 @@ class VideoAnnotator(private val context: Context) {
 
     private fun drawSkeleton(canvas: Canvas, skeleton: Skeleton, width: Int, height: Int, paint: Paint) {
         val connections = listOf(
-            "11" to "12", "11" to "13", "13" to "15", "12" to "14", "14" to "16", // Upper body
-            "11" to "23", "12" to "24", "23" to "24", // Torso
-            "23" to "25", "25" to "27", "27" to "31", "24" to "26", "26" to "28", "28" to "32" // Lower body
+            "left_shoulder" to "right_shoulder",
+            "front_shoulder" to "front_elbow",
+            "front_elbow" to "front_wrist",
+            "left_shoulder" to "left_hip",
+            "right_shoulder" to "right_hip",
+            "left_hip" to "right_hip",
+            "left_hip" to "left_knee",
+            "left_knee" to "left_ankle",
+            "right_hip" to "right_knee",
+            "right_knee" to "right_ankle"
         )
+        val sourceWidth = skeleton.values.maxOfOrNull { it.x }?.coerceAtLeast(1f) ?: 1f
+        val sourceHeight = skeleton.values.maxOfOrNull { it.y }?.coerceAtLeast(1f) ?: 1f
+        val scaleX = width / sourceWidth
+        val scaleY = height / sourceHeight
         for ((p1, p2) in connections) {
             val k1 = skeleton[p1]
             val k2 = skeleton[p2]
             if (k1 != null && k2 != null) {
                 canvas.drawLine(
-                    k1.x * width, k1.y * height,
-                    k2.x * width, k2.y * height,
+                    k1.x * scaleX,
+                    k1.y * scaleY,
+                    k2.x * scaleX,
+                    k2.y * scaleY,
                     paint
                 )
             }
@@ -136,7 +149,8 @@ class VideoAnnotator(private val context: Context) {
     }
 
     private fun createOutputFile(): File {
-        val moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+        val moviesDir = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES)
+            ?: context.cacheDir
         val fencingDir = File(moviesDir, "AiFencingCoach").apply { mkdirs() }
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         return File(fencingDir, "Session_$timeStamp.mp4")
