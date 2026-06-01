@@ -10,6 +10,8 @@ import java.net.URL
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -80,7 +82,21 @@ data class CoachingSummaryResult(
     val errorMessage: String? = null
 )
 
+fun formatLlmErrorMessage(errorMessage: String?): String {
+    val lower = errorMessage.orEmpty().lowercase()
+    return when {
+        "quota" in lower || "rate" in lower || "429" in lower || "too many requests" in lower -> "usage limited"
+        "network error" in lower || "timeout" in lower || "unable to resolve host" in lower -> "network error"
+        "api key" in lower || "permission" in lower || "unauthorized" in lower || "401" in lower || "403" in lower -> "API key rejected"
+        "model" in lower || "not found" in lower || "404" in lower -> "model unavailable"
+        else -> "API error (see logs)"
+    }
+}
+
 class GeminiAgent(private val playbookRepository: PlaybookRepository) {
+    private val _lastApiError = MutableStateFlow<String?>(null)
+    val lastApiError: StateFlow<String?> = _lastApiError
+
     val isEnabled: Boolean
         get() = isEnabled(LlmProviderConfig())
 
@@ -230,6 +246,7 @@ $recentErrorsText
                 ).generateContent(content { text(prompt) })
                 val text = response.text?.trim()
                 if (!text.isNullOrBlank()) {
+                    _lastApiError.value = null
                     return GeminiGeneration(text = text, source = SummarySource.GEMINI)
                 }
                 failures.add("$candidateModel: empty response")
@@ -242,7 +259,9 @@ $recentErrorsText
                 Log.w(LLM_TAG, "Gemini model $candidateModel failed: $summary", e)
             }
         }
-        return GeminiGeneration(text = null, errorMessage = failures.joinToString("; "))
+        val errMessage = failures.joinToString("; ")
+        _lastApiError.value = formatLlmErrorMessage(errMessage)
+        return GeminiGeneration(text = null, errorMessage = errMessage)
     }
 
     private fun generateOpenAiTextWithFallback(
@@ -255,6 +274,7 @@ $recentErrorsText
             try {
                 val text = requestOpenAiText(apiKey, candidateModel, prompt)
                 if (!text.isNullOrBlank()) {
+                    _lastApiError.value = null
                     return GeminiGeneration(text = text, source = SummarySource.OPENAI)
                 }
                 failures.add("$candidateModel: empty response")
@@ -267,7 +287,9 @@ $recentErrorsText
                 Log.w(LLM_TAG, "OpenAI model $candidateModel failed: $summary", e)
             }
         }
-        return GeminiGeneration(text = null, errorMessage = failures.joinToString("; "))
+        val errMessage = failures.joinToString("; ")
+        _lastApiError.value = formatLlmErrorMessage(errMessage)
+        return GeminiGeneration(text = null, errorMessage = errMessage)
     }
 
     private fun requestOpenAiText(apiKey: String, modelName: String, prompt: String): String? {

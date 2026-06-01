@@ -34,6 +34,7 @@ import kotlin.math.roundToInt
 
 import com.aifencingcoach.runtime.GeminiAgent
 import com.aifencingcoach.runtime.LlmProviderConfig
+import com.aifencingcoach.runtime.LlmProviderKind
 
 sealed class RecapConfig {
     data class ByCount(val count: Int) : RecapConfig()
@@ -445,6 +446,8 @@ private fun UserRecapCard(
     val allCues = recentSessions.flatMap { it.cues }
     var aiAnalysis by remember { mutableStateOf<String?>(null) }
     var isGenerating by remember { mutableStateOf(false) }
+    val lastApiError by geminiAgent.lastApiError.collectAsState()
+
     val recapRefreshKey = remember(recentSessions) {
         recentSessions.joinToString("|") { session ->
             "${session.session.id}:${session.session.timestamp}:${session.cues.size}"
@@ -582,6 +585,12 @@ private fun UserRecapCard(
                         fontSize = 15.sp,
                         lineHeight = 22.sp
                     )
+                    
+                    if (lastApiError != null && useGeminiSummary && llmConfig.provider != LlmProviderKind.PLAYBOOK) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("API Error: $lastApiError", color = Color(0xFFE57373), fontSize = 12.sp)
+                    }
+                    
                     Spacer(Modifier.height(20.dp))
                 }
 

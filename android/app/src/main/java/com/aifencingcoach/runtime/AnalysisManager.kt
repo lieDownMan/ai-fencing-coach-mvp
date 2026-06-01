@@ -227,17 +227,8 @@ class AnalysisManager(
             SummarySource.OPENAI -> "OpenAI summary ready."
             SummarySource.PLAYBOOK -> "Playbook summary ready."
             SummarySource.DISABLED -> result.errorMessage ?: "AI is not configured; showing playbook summary."
-            SummarySource.FAILED -> "AI summary failed: ${summaryErrorLabel(result.errorMessage)}."
+            SummarySource.FAILED -> "AI summary failed: ${formatLlmErrorMessage(result.errorMessage)}."
         }
 
-    private fun summaryErrorLabel(errorMessage: String?): String {
-        val lower = errorMessage.orEmpty().lowercase()
-        return when {
-            lower.contains("quota") || lower.contains("rate") -> "quota/rate limit"
-            lower.contains("api key") || lower.contains("permission") || lower.contains("unauthorized") -> "API key rejected"
-            lower.contains("model") || lower.contains("not found") -> "model unavailable"
-            lower.contains("network") || lower.contains("timeout") || lower.contains("unable to resolve host") -> "network error"
-            else -> "see logcat"
-        }
-    }
+
 }
