@@ -16,6 +16,9 @@ android {
     if (localPropertiesFile.exists()) {
         localProperties.load(localPropertiesFile.inputStream())
     }
+    val geminiApiKey = localProperties.getProperty("GEMINI_API_KEY").orEmpty().trim()
+    val geminiModel = localProperties.getProperty("GEMINI_MODEL").orEmpty().trim()
+        .ifBlank { "gemini-2.5-flash" }
 
     defaultConfig {
         applicationId = "com.aifencingcoach"
@@ -26,8 +29,8 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
-        buildConfigField("String", "GEMINI_API_KEY", "\"${localProperties.getProperty("GEMINI_API_KEY") ?: ""}\"")
-        buildConfigField("String", "GEMINI_MODEL", "\"${localProperties.getProperty("GEMINI_MODEL") ?: "gemini-2.5-flash"}\"")
+        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
+        buildConfigField("String", "GEMINI_MODEL", "\"$geminiModel\"")
     }
 
     buildTypes {

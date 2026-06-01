@@ -53,6 +53,9 @@ class AnalysisManager(
     private val _lastSummary = MutableStateFlow<String?>(null)
     val lastSummary: StateFlow<String?> = _lastSummary
 
+    private val _lastSummaryStatus = MutableStateFlow<String?>(null)
+    val lastSummaryStatus: StateFlow<String?> = _lastSummaryStatus
+
     private val _lastSourceUri = MutableStateFlow<Uri?>(null)
     val lastSourceUri: StateFlow<Uri?> = _lastSourceUri
 
@@ -98,6 +101,7 @@ class AnalysisManager(
         _lastReport.value = null
         _lastSessionId.value = null
         _lastSummary.value = null
+        _lastSummaryStatus.value = null
         _lastSourceUri.value = job.uri
 
         try {
@@ -119,7 +123,7 @@ class AnalysisManager(
             _analysisStatus.value = "Saving to database..."
 
             _analysisStatus.value = "Saving to database..."
-            val fallbackSummary = geminiAgent.generateSummary(
+            val fallbackResult = geminiAgent.generateSummaryResult(
                 trainingMode = job.trainingMode.label,
                 targetSide = job.targetSide.label,
                 actionCounts = report.actionCounts,
@@ -127,8 +131,10 @@ class AnalysisManager(
                 userSettingsName = job.userSettingsName,
                 preferGemini = false
             )
+            val fallbackSummary = fallbackResult.text
 
             _lastSummary.value = fallbackSummary
+            _lastSummaryStatus.value = "Playbook summary ready."
 
             val sessionId = sessionRepository.savePracticeReport(
                 report = report,
@@ -141,8 +147,13 @@ class AnalysisManager(
             _lastSessionId.value = sessionId
 
             if (job.useGeminiSummary) {
+                _lastSummaryStatus.value = if (geminiAgent.isEnabled) {
+                    "Generating Gemini summary..."
+                } else {
+                    "Gemini is not configured; showing playbook summary."
+                }
                 scope.launch {
-                    val geminiSummaryText = geminiAgent.generateSummary(
+                    val geminiResult = geminiAgent.generateSummaryResult(
                         trainingMode = job.trainingMode.label,
                         targetSide = job.targetSide.label,
                         actionCounts = report.actionCounts,
@@ -150,8 +161,11 @@ class AnalysisManager(
                         userSettingsName = job.userSettingsName,
                         preferGemini = true
                     )
-                    _lastSummary.value = geminiSummaryText
-                    sessionRepository.updateSummary(sessionId, geminiSummaryText)
+                    sessionRepository.updateSummary(sessionId, geminiResult.text)
+                    if (_lastSessionId.value == sessionId) {
+                        _lastSummary.value = geminiResult.text
+                        _lastSummaryStatus.value = summaryStatus(geminiResult)
+                    }
                 }
             }
 
@@ -197,6 +211,15 @@ class AnalysisManager(
         _lastReport.value = null
         _lastSessionId.value = null
         _lastSummary.value = null
+        _lastSummaryStatus.value = null
         _lastSourceUri.value = null
     }
+
+    private fun summaryStatus(result: CoachingSummaryResult): String =
+        when (result.source) {
+            SummarySource.GEMINI -> "Gemini summary ready."
+            SummarySource.PLAYBOOK -> "Playbook summary ready."
+            SummarySource.DISABLED -> "Gemini is not configured; showing playbook summary."
+            SummarySource.FAILED -> "Gemini failed; showing playbook summary."
+        }
 }

@@ -5,20 +5,17 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="7772a4c1-5bfe-42da-8646-8f15c07ec445" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/build.gradle.kts" beforeDir="false" afterPath="$PROJECT_DIR$/build.gradle.kts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/AndroidManifest.xml" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/AndroidManifest.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/assets/coach_playbook.json" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/assets/coach_playbook.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/main/java/com/aifencingcoach/HistoryScreen.kt" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/aifencingcoach/HistoryScreen.kt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/main/java/com/aifencingcoach/MainActivity.kt" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/aifencingcoach/MainActivity.kt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/java/com/aifencingcoach/runtime/ActivityGatekeeper.kt" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/aifencingcoach/runtime/ActivityGatekeeper.kt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/java/com/aifencingcoach/runtime/FeedbackScheduler.kt" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/aifencingcoach/runtime/FeedbackScheduler.kt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/aifencingcoach/SessionDetailScreen.kt" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/aifencingcoach/SessionDetailScreen.kt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/java/com/aifencingcoach/runtime/AnalysisManager.kt" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/aifencingcoach/runtime/AnalysisManager.kt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/main/java/com/aifencingcoach/runtime/GeminiAgent.kt" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/aifencingcoach/runtime/GeminiAgent.kt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/java/com/aifencingcoach/runtime/HeuristicsEngine.kt" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/aifencingcoach/runtime/HeuristicsEngine.kt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/java/com/aifencingcoach/runtime/LiveCoachPipeline.kt" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/aifencingcoach/runtime/LiveCoachPipeline.kt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/java/com/aifencingcoach/runtime/PoseBackend.kt" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/aifencingcoach/runtime/PoseBackend.kt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/java/com/aifencingcoach/runtime/database/SessionDao.kt" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/aifencingcoach/runtime/database/SessionDao.kt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/../build.gradle.kts" beforeDir="false" afterPath="$PROJECT_DIR$/../build.gradle.kts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/../gradle/wrapper/gradle-wrapper.properties" beforeDir="false" afterPath="$PROJECT_DIR$/../gradle/wrapper/gradle-wrapper.properties" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../llm_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/../llm_agent.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../coach_playbook.json" beforeDir="false" afterPath="$PROJECT_DIR$/../../coach_playbook.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../llm_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../llm_agent.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

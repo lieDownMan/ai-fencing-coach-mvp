@@ -70,11 +70,13 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.aifencingcoach.runtime.CoachFrameState
+import com.aifencingcoach.runtime.CoachingSummaryResult
 import com.aifencingcoach.runtime.FeedbackCue
 import com.aifencingcoach.runtime.LiveCoachPipeline
 import com.aifencingcoach.runtime.PoseBackendKind
 import com.aifencingcoach.runtime.PracticeReport
 import com.aifencingcoach.runtime.Skeleton
+import com.aifencingcoach.runtime.SummarySource
 import com.aifencingcoach.runtime.TargetSide
 import com.aifencingcoach.runtime.TrainingMode
 import java.util.Locale
@@ -180,9 +182,11 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
     val playbookRepository = remember { com.aifencingcoach.runtime.PlaybookRepository(context) }
     val geminiAgent = remember { com.aifencingcoach.runtime.GeminiAgent(playbookRepository) }
     val analysisManager = remember { com.aifencingcoach.runtime.AnalysisManager(context, sessionRepository, geminiAgent) }
+    val persistenceScope = rememberCoroutineScope()
 
     var appScreen by remember { mutableStateOf(AppScreen.HOME) }
     var selectedSessionForDetail by remember { mutableStateOf<com.aifencingcoach.runtime.database.FullSessionData?>(null) }
+    var selectedHistoryUser by remember { mutableStateOf<String?>(null) }
     var targetSide by remember { mutableStateOf(TargetSide.LEFT) }
     var trainingMode by remember { mutableStateOf(TrainingMode.FREE_BOUTING) }
     var poseBackend by remember { mutableStateOf(PoseBackendKind.MEDIAPIPE) }
@@ -233,7 +237,10 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
             lastPracticeReport = lastPracticeReport,
             onRealtime = { appScreen = AppScreen.REALTIME },
             onPostgame = { appScreen = AppScreen.POSTGAME },
-            onHistory = { appScreen = AppScreen.HISTORY },
+            onHistory = {
+                selectedHistoryUser = null
+                appScreen = AppScreen.HISTORY
+            },
             onSettings = { appScreen = AppScreen.SETTINGS }
         )
         AppScreen.REALTIME -> RealtimeSetupScreen(
@@ -271,8 +278,13 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
         AppScreen.HISTORY -> com.aifencingcoach.HistoryScreen(
             sessionRepo = sessionRepository,
             geminiAgent = geminiAgent,
-            userName = userSettings.name,
-            onBack = { appScreen = AppScreen.HOME },
+            useGeminiSummary = userSettings.useGeminiSummary,
+            selectedUser = selectedHistoryUser,
+            onSelectedUserChange = { selectedHistoryUser = it },
+            onBack = {
+                selectedHistoryUser = null
+                appScreen = AppScreen.HOME
+            },
             onSessionSelected = { fullSession ->
                 selectedSessionForDetail = fullSession
                 appScreen = AppScreen.SESSION_DETAIL
@@ -324,9 +336,8 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
                 lastPracticeReport = report
                 
                 // Save immediately with the playbook summary, then let Gemini update history in the background.
-                val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default)
-                scope.launch {
-                    val fallbackSummary = geminiAgent.generateSummary(
+                persistenceScope.launch {
+                    val fallbackResult = geminiAgent.generateSummaryResult(
                         trainingMode = trainingMode.label,
                         targetSide = targetSide.label,
                         actionCounts = report.actionCounts,
@@ -334,6 +345,7 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
                         userSettingsName = userSettings.name,
                         preferGemini = false
                     )
+                    val fallbackSummary = fallbackResult.text
 
                     val sessionId = sessionRepository.savePracticeReport(
                         report = report,
@@ -343,7 +355,7 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
                     )
 
                     if (userSettings.useGeminiSummary) {
-                        val geminiSummaryText = geminiAgent.generateSummary(
+                        val geminiResult = geminiAgent.generateSummaryResult(
                             trainingMode = trainingMode.label,
                             targetSide = targetSide.label,
                             actionCounts = report.actionCounts,
@@ -351,7 +363,7 @@ private fun FencingCoachScreen(onSpeak: (String) -> Unit) {
                             userSettingsName = userSettings.name,
                             preferGemini = true
                         )
-                        sessionRepository.updateSummary(sessionId, geminiSummaryText)
+                        sessionRepository.updateSummary(sessionId, geminiResult.text)
                     }
                 }
             },
@@ -593,6 +605,7 @@ private fun PostgameScreen(
     val lastReport by analysisManager.lastReport.collectAsStateWithLifecycle()
     val lastSessionId by analysisManager.lastSessionId.collectAsStateWithLifecycle()
     val lastSummary by analysisManager.lastSummary.collectAsStateWithLifecycle()
+    val lastSummaryStatus by analysisManager.lastSummaryStatus.collectAsStateWithLifecycle()
     val lastSourceUri by analysisManager.lastSourceUri.collectAsStateWithLifecycle()
 
     val queueSize by analysisManager.queueSize.collectAsStateWithLifecycle()
@@ -741,7 +754,8 @@ private fun PostgameScreen(
             } else {
                 PracticeReportSummary(
                     report = reportToShow,
-                    summary = if (lastReport != null) lastSummary else null
+                    summary = if (lastReport != null) lastSummary else null,
+                    summaryStatus = if (lastReport != null) lastSummaryStatus else null
                 )
                 
                 val currentFrameStates = frameStates
@@ -1004,10 +1018,35 @@ private fun StatusPill(text: String, color: Color) {
     )
 }
 
+private fun summaryStatusText(result: CoachingSummaryResult): String =
+    when (result.source) {
+        SummarySource.GEMINI -> "Gemini summary ready."
+        SummarySource.PLAYBOOK -> "Playbook summary ready."
+        SummarySource.DISABLED -> "Gemini is not configured; showing playbook summary."
+        SummarySource.FAILED -> "Gemini failed; showing playbook summary."
+    }
+
+private fun summaryStatusColor(status: String): Color =
+    when {
+        status.contains("ready", ignoreCase = true) && status.contains("Gemini", ignoreCase = true) -> AccentGreen
+        status.contains("Generating", ignoreCase = true) -> AccentGold
+        status.contains("failed", ignoreCase = true) || status.contains("not configured", ignoreCase = true) -> AccentCoral
+        else -> MutedText
+    }
+
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
-private fun PracticeReportSummary(report: PracticeReport, summary: String? = null) {
-    SessionFeedbackPanel(report = report, summary = summary)
+private fun PracticeReportSummary(
+    report: PracticeReport,
+    summary: String? = null,
+    summaryStatus: String? = null
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (!summaryStatus.isNullOrBlank()) {
+            StatusPill(summaryStatus, summaryStatusColor(summaryStatus))
+        }
+        SessionFeedbackPanel(report = report, summary = summary)
+    }
 }
 
 @Composable
@@ -1069,22 +1108,46 @@ private fun CoachScreen(
     var frameState by remember { mutableStateOf(CoachFrameState()) }
     var reviewReport by remember { mutableStateOf<PracticeReport?>(null) }
     var reviewSummary by remember { mutableStateOf<String?>(null) }
+    var reviewSummaryStatus by remember { mutableStateOf<String?>(null) }
     var resetToken by remember { mutableStateOf(0) }
     var sessionRecorded by remember { mutableStateOf(false) }
 
-    LaunchedEffect(reviewReport) {
-        if (reviewReport != null) {
-            reviewSummary = "Generating Coach Summary..."
-            reviewSummary = geminiAgent.generateSummary(
+    LaunchedEffect(reviewReport, userSettings.useGeminiSummary, geminiAgent.isEnabled) {
+        val report = reviewReport
+        if (report != null) {
+            val fallbackResult = geminiAgent.generateSummaryResult(
                 trainingMode = trainingMode.label,
                 targetSide = targetSide.label,
-                actionCounts = reviewReport!!.actionCounts,
-                cuesFired = reviewReport!!.cueTimeline,
+                actionCounts = report.actionCounts,
+                cuesFired = report.cueTimeline,
                 userSettingsName = userSettings.name,
-                preferGemini = userSettings.useGeminiSummary
+                preferGemini = false
             )
+            reviewSummary = fallbackResult.text
+            reviewSummaryStatus = summaryStatusText(fallbackResult)
+
+            if (userSettings.useGeminiSummary) {
+                reviewSummaryStatus = if (geminiAgent.isEnabled) {
+                    "Generating Gemini summary..."
+                } else {
+                    "Gemini is not configured; showing playbook summary."
+                }
+                if (geminiAgent.isEnabled) {
+                    val geminiResult = geminiAgent.generateSummaryResult(
+                        trainingMode = trainingMode.label,
+                        targetSide = targetSide.label,
+                        actionCounts = report.actionCounts,
+                        cuesFired = report.cueTimeline,
+                        userSettingsName = userSettings.name,
+                        preferGemini = true
+                    )
+                    reviewSummary = geminiResult.text
+                    reviewSummaryStatus = summaryStatusText(geminiResult)
+                }
+            }
         } else {
             reviewSummary = null
+            reviewSummaryStatus = null
         }
     }
 
@@ -1213,7 +1276,8 @@ private fun CoachScreen(
                     resetToken += 1
                 },
                 onHome = { leaveRealtime() },
-                llmSummary = reviewSummary
+                llmSummary = reviewSummary,
+                summaryStatus = reviewSummaryStatus
             )
         }
     }
@@ -1595,7 +1659,8 @@ private fun PostPracticeReview(
     onResume: () -> Unit,
     onNewSession: () -> Unit,
     onHome: () -> Unit,
-    llmSummary: String? = null
+    llmSummary: String? = null,
+    summaryStatus: String? = null
 ) {
     Box(
         modifier = Modifier
@@ -1641,7 +1706,11 @@ private fun PostPracticeReview(
             }
 
             Spacer(Modifier.height(14.dp))
-            SessionFeedbackPanel(report = report, summary = llmSummary)
+            PracticeReportSummary(
+                report = report,
+                summary = llmSummary,
+                summaryStatus = summaryStatus
+            )
             Spacer(Modifier.height(16.dp))
         }
     }

@@ -118,10 +118,8 @@ class LLMAgent:
             detail = f"- {item['error_name']}：{item['count']} 次"
             if item["diagnosis"]:
                 detail += f"。{item['diagnosis']}"
-            if item["short_cue"]:
-                detail += f" 教練提示：{item['short_cue']}"
             if item["practice"]:
-                detail += f" 練習建議：{item['practice']}"
+                detail += f" 教練提示：{item['practice']}"
             lines.append(detail)
         return "\n".join(lines)
 
