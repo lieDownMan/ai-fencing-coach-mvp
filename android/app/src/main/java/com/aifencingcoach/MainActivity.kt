@@ -944,7 +944,7 @@ private fun IgTextFieldRow(label: String, value: String, isPassword: Boolean = f
 private enum class SettingsSubpage {
     USER_INFORMATION,
     PRACTICE_INFORMATION,
-    APP_DEFAULT,
+    APP_PREFERENCES,
     FEEDBACK_CONTROL,
     AI_SUMMARY_SETTINGS,
     HAND_SELECTION,
@@ -1049,14 +1049,14 @@ private fun UserSettingsScreen(
 
             IgCategoryRow("User Information") { subpageStack.add(SettingsSubpage.USER_INFORMATION) }
             IgCategoryRow("Practice Information") { subpageStack.add(SettingsSubpage.PRACTICE_INFORMATION) }
-            IgCategoryRow("App Default") { subpageStack.add(SettingsSubpage.APP_DEFAULT) }
+            IgCategoryRow("App Preferences") { subpageStack.add(SettingsSubpage.APP_PREFERENCES) }
             IgCategoryRow("Feedback Control") { subpageStack.add(SettingsSubpage.FEEDBACK_CONTROL) }
         } else {
             ScreenHeader(
                 title = when (currentSubpage) {
                     SettingsSubpage.USER_INFORMATION -> "User Information"
                     SettingsSubpage.PRACTICE_INFORMATION -> "Practice Information"
-                    SettingsSubpage.APP_DEFAULT -> "App Default"
+                    SettingsSubpage.APP_PREFERENCES -> "App Preferences"
                     SettingsSubpage.FEEDBACK_CONTROL -> "Feedback Control"
                     SettingsSubpage.AI_SUMMARY_SETTINGS -> "AI Summary"
                     SettingsSubpage.HAND_SELECTION -> "Hand"
@@ -1086,7 +1086,7 @@ private fun UserSettingsScreen(
                     IgCategoryRow("Training Mode", trainingMode.label) { subpageStack.add(SettingsSubpage.TRAINING_MODE_SELECTION) }
                     IgCategoryRow("Target Side", targetSide.label) { subpageStack.add(SettingsSubpage.TARGET_SIDE_SELECTION) }
                 }
-                SettingsSubpage.APP_DEFAULT -> {
+                SettingsSubpage.APP_PREFERENCES -> {
                     IgCategoryRow("Pose Engine", poseBackend.label) { subpageStack.add(SettingsSubpage.POSE_ENGINE_SELECTION) }
                     IgCategoryRow("Efficiency", userSettings.processingProfile) { subpageStack.add(SettingsSubpage.EFFICIENCY_SELECTION) }
                     IgSettingRow("Voice Cues") {
