@@ -42,6 +42,7 @@ fun SessionDetailScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                modifier = Modifier.padding(top = 16.dp),
                 title = { Text(dateString, color = Color.White, fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {

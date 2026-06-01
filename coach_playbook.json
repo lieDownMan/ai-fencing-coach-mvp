@@ -9,7 +9,7 @@
         "error_name": "持劍手掉落",
         "diagnosis": "攻擊或防守時手放太低，劍尖沒有威脅對手，且有效部位完全暴露給對手。",
         "short_cue": "手抬起來，劍尖指著對手",
-        "practice": ""
+        "practice": "以後多注意"
     },
     "bounce_excessive": {
         "error_name": "步伐上下浮動",
@@ -41,7 +41,6 @@
         "short_cue": "換側小一點！用手指頭控制劍尖，不要動到整支手臂和手肘！",
         "practice": "重複換側練習"
     },
-    
     "incomplete_arm_extension": {
         "error_name": "刺的時候手沒有伸直",
         "diagnosis": "手臂沒有完全伸直會讓你平白損失攻擊距離，導致原本能擊中的攻擊落空。",
@@ -52,13 +51,13 @@
         "error_name": "步伐太大",
         "diagnosis": "雙腳間距過大影響移動和動作發動",
         "short_cue": "腳打太開",
-        "practice": ""
+        "practice": "以後多注意"
     },
     "narrow_step": {
         "error_name": "步伐太小",
         "diagnosis": "雙腳間距過小會影響移動和動作發動",
         "short_cue": "腳打太窄",
-        "practice": ""
+        "practice": "以後多注意"
     },
     "center_of_mass_in_front": {
         "error_name": "重心向前移動",

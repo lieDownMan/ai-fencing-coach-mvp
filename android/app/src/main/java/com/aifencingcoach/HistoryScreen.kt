@@ -8,12 +8,20 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aifencingcoach.runtime.database.FullSessionData
@@ -22,33 +30,43 @@ import com.aifencingcoach.runtime.database.SessionRepository
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.math.roundToInt
 
 import com.aifencingcoach.runtime.GeminiAgent
+import com.aifencingcoach.runtime.LlmProviderConfig
+import com.aifencingcoach.runtime.LlmProviderKind
+
+sealed class RecapConfig {
+    data class ByCount(val count: Int) : RecapConfig()
+    data class ByTime(val hours: Double) : RecapConfig()
+    data class CustomSelection(val sessionIds: Set<Long>) : RecapConfig()
+}
 
 @Composable
 fun HistoryScreen(
     sessionRepo: SessionRepository,
     geminiAgent: GeminiAgent,
-    userName: String,
+    useGeminiSummary: Boolean,
+    llmConfig: LlmProviderConfig,
+    selectedUser: String?,
+    onSelectedUserChange: (String?) -> Unit,
     onBack: () -> Unit,
     onSessionSelected: (FullSessionData) -> Unit
 ) {
-    var selectedUser by remember { mutableStateOf<String?>(userName) }
-
-    if (selectedUser == null || selectedUser!!.isEmpty()) {
+    if (selectedUser.isNullOrEmpty()) {
         UserSelectionScreen(
             sessionRepo = sessionRepo,
             onBack = onBack,
-            onUserSelected = { selectedUser = it }
+            onUserSelected = onSelectedUserChange
         )
     } else {
         UserHistoryScreen(
-            userName = selectedUser!!,
+            userName = selectedUser,
             sessionRepo = sessionRepo,
             geminiAgent = geminiAgent,
-            onBack = {
-                if (userName.isEmpty()) selectedUser = null else onBack()
-            },
+            useGeminiSummary = useGeminiSummary,
+            llmConfig = llmConfig,
+            onBack = { onSelectedUserChange(null) },
             onSessionSelected = onSessionSelected
         )
     }
@@ -72,6 +90,7 @@ fun UserSelectionScreen(
     Scaffold(
         topBar = {
             TopAppBar(
+                modifier = Modifier.padding(top = 24.dp),
                 title = { Text("Select User", color = Color.White) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -137,28 +156,135 @@ fun UserHistoryScreen(
     userName: String,
     sessionRepo: SessionRepository,
     geminiAgent: GeminiAgent,
+    useGeminiSummary: Boolean,
+    llmConfig: LlmProviderConfig,
     onBack: () -> Unit,
     onSessionSelected: (FullSessionData) -> Unit
 ) {
     var sessions by remember { mutableStateOf<List<SessionEntity>>(emptyList()) }
     var fullRecentSessions by remember { mutableStateOf<List<FullSessionData>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
+    var refreshToken by remember { mutableStateOf(0) }
+    var selectionMode by remember { mutableStateOf(false) }
+    var selectedSessionIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showCustomCountDialog by remember { mutableStateOf(false) }
+    var showCustomTimeDialog by remember { mutableStateOf(false) }
+    var recapConfig by remember { mutableStateOf<RecapConfig>(RecapConfig.ByCount(5)) }
+    var isHistoryExpanded by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(userName) {
+    LaunchedEffect(userName, refreshToken, recapConfig) {
+        isLoading = true
         sessions = sessionRepo.getSessionsByUser(userName)
-        val recentFull = sessions.take(5).mapNotNull { sessionRepo.getSessionDetails(it.id) }
+        val sessionsToRecap = when (val config = recapConfig) {
+            is RecapConfig.ByCount -> sessions.take(config.count)
+            is RecapConfig.ByTime -> {
+                val cutoff = System.currentTimeMillis() - (config.hours * 3600 * 1000).toLong()
+                sessions.filter { it.timestamp >= cutoff }
+            }
+            is RecapConfig.CustomSelection -> sessions.filter { it.id in config.sessionIds }
+        }
+        val recentFull = sessionsToRecap.mapNotNull { sessionRepo.getSessionDetails(it.id) }
         fullRecentSessions = recentFull
+        selectedSessionIds = selectedSessionIds.intersect(sessions.map { it.id }.toSet())
+        if (sessions.isEmpty()) {
+            selectionMode = false
+            selectedSessionIds = emptySet()
+        }
         isLoading = false
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete selected history?") },
+            text = { Text("Delete ${selectedSessionIds.size} selected session(s). This cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val idsToDelete = selectedSessionIds
+                        showDeleteConfirm = false
+                        scope.launch {
+                            idsToDelete.forEach { sessionRepo.deleteSession(it) }
+                            selectedSessionIds = emptySet()
+                            selectionMode = false
+                            refreshToken += 1
+                        }
+                    }
+                ) {
+                    Text("Delete", color = Color(0xFFFF6B6B))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("$userName's History", color = Color.White) },
+                modifier = Modifier.padding(top = 24.dp),
+                title = {
+                    Text(
+                        text = if (selectionMode) "${selectedSessionIds.size} selected" else "$userName's History",
+                        color = Color.White
+                    )
+                },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = {
+                            if (selectionMode) {
+                                selectionMode = false
+                                selectedSessionIds = emptySet()
+                            } else {
+                                onBack()
+                            }
+                        }
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    }
+                },
+                actions = {
+                    if (selectionMode) {
+                        TextButton(
+                            onClick = { selectedSessionIds = sessions.map { it.id }.toSet() },
+                            enabled = sessions.isNotEmpty()
+                        ) {
+                            Text("All", color = Color.White)
+                        }
+                        TextButton(
+                            onClick = {
+                                recapConfig = RecapConfig.CustomSelection(selectedSessionIds)
+                                selectionMode = false
+                                selectedSessionIds = emptySet()
+                            },
+                            enabled = selectedSessionIds.isNotEmpty()
+                        ) {
+                            Text(
+                                text = "Recap",
+                                color = if (selectedSessionIds.isNotEmpty()) Color(0xFF64B5F6) else Color.Gray
+                            )
+                        }
+                        TextButton(
+                            onClick = { showDeleteConfirm = true },
+                            enabled = selectedSessionIds.isNotEmpty()
+                        ) {
+                            Text(
+                                text = "Delete",
+                                color = if (selectedSessionIds.isNotEmpty()) Color(0xFFFF6B6B) else Color.Gray
+                            )
+                        }
+                    } else {
+                        TextButton(
+                            onClick = { selectionMode = true },
+                            enabled = sessions.isNotEmpty()
+                        ) {
+                            Text("Select", color = if (sessions.isNotEmpty()) Color.White else Color.Gray)
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF1E262F))
@@ -183,34 +309,125 @@ fun UserHistoryScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 item {
-                    UserRecapCard(fullRecentSessions, geminiAgent, userName)
+                    UserRecapCard(
+                        recentSessions = fullRecentSessions,
+                        geminiAgent = geminiAgent,
+                        useGeminiSummary = useGeminiSummary,
+                        llmConfig = llmConfig,
+                        userName = userName,
+                        recapConfig = recapConfig,
+                        onConfigChange = { recapConfig = it },
+                        onRequestCustomCount = { showCustomCountDialog = true },
+                        onRequestCustomTime = { showCustomTimeDialog = true }
+                    )
                 }
 
                 item {
-                    Text(
-                        text = "Session History",
-                        color = Color.White,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp, bottom = 8.dp)
+                            .background(Color(0xFF1E262F), RoundedCornerShape(8.dp))
+                            .clickable { isHistoryExpanded = !isHistoryExpanded }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Session History",
+                            color = Color(0xFF64B5F6),
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 0.5.sp
+                        )
+                        Icon(
+                            imageVector = if (isHistoryExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = "Expand/Collapse",
+                            tint = Color(0xFF64B5F6)
+                        )
+                    }
                 }
 
-                items(sessions) { session ->
-                    SessionCard(
-                        session = session,
-                        onClick = {
-                            scope.launch {
-                                val fullData = sessionRepo.getSessionDetails(session.id)
-                                if (fullData != null) {
-                                    onSessionSelected(fullData)
+                if (isHistoryExpanded) {
+                    items(sessions) { session ->
+                        SessionCard(
+                            session = session,
+                            selectionMode = selectionMode,
+                            selected = session.id in selectedSessionIds,
+                            onSelectedChange = { selected ->
+                                selectedSessionIds = if (selected) {
+                                    selectedSessionIds + session.id
+                                } else {
+                                    selectedSessionIds - session.id
+                                }
+                            },
+                            onClick = {
+                                scope.launch {
+                                    val fullData = sessionRepo.getSessionDetails(session.id)
+                                    if (fullData != null) {
+                                        onSessionSelected(fullData)
+                                    }
                                 }
                             }
-                        }
-                    )
+                        )
+                    }
                 }
             }
         }
+    }
+
+    if (showCustomCountDialog) {
+        var input by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showCustomCountDialog = false },
+            title = { Text("Custom Session Count") },
+            text = {
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    label = { Text("Number of sessions") }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    input.toIntOrNull()?.let { count ->
+                        if (count > 0) recapConfig = RecapConfig.ByCount(count)
+                    }
+                    showCustomCountDialog = false
+                }) { Text("Apply") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomCountDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (showCustomTimeDialog) {
+        var input by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showCustomTimeDialog = false },
+            title = { Text("Custom Days") },
+            text = {
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    label = { Text("Days") }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    input.toDoubleOrNull()?.let { days ->
+                        if (days > 0.0) recapConfig = RecapConfig.ByTime(days * 24.0)
+                    }
+                    showCustomTimeDialog = false
+                }) { Text("Apply") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomTimeDialog = false }) { Text("Cancel") }
+            }
+        )
     }
 }
 
@@ -218,25 +435,65 @@ fun UserHistoryScreen(
 private fun UserRecapCard(
     recentSessions: List<FullSessionData>,
     geminiAgent: GeminiAgent,
-    userName: String
+    useGeminiSummary: Boolean,
+    llmConfig: LlmProviderConfig,
+    userName: String,
+    recapConfig: RecapConfig,
+    onConfigChange: (RecapConfig) -> Unit,
+    onRequestCustomCount: () -> Unit,
+    onRequestCustomTime: () -> Unit
 ) {
-    if (recentSessions.isEmpty()) return
-
     val allCues = recentSessions.flatMap { it.cues }
     var aiAnalysis by remember { mutableStateOf<String?>(null) }
+    var isGenerating by remember { mutableStateOf(false) }
+    val lastApiError by geminiAgent.lastApiError.collectAsState()
 
-    LaunchedEffect(allCues) {
-        val fallback = buildRecapFallback(recentSessions, geminiAgent)
-        aiAnalysis = if (geminiAgent.isEnabled && allCues.isNotEmpty()) {
-            "Generating AI Analysis..."
-            geminiAgent.generateImprovementAnalysis(
-                userName = userName,
-                recentErrorsText = buildRecentErrorPromptData(recentSessions, geminiAgent),
-                fallback = fallback
-            )
-        } else {
-            fallback
+    val recapRefreshKey = remember(recentSessions) {
+        recentSessions.joinToString("|") { session ->
+            "${session.session.id}:${session.session.timestamp}:${session.cues.size}"
         }
+    }
+
+    LaunchedEffect(recapRefreshKey, llmConfig, useGeminiSummary) {
+        val fallback = buildRecapFallback(recentSessions, geminiAgent, recapConfig)
+        if (useGeminiSummary && geminiAgent.isEnabled(llmConfig) && allCues.isNotEmpty()) {
+            isGenerating = true
+            val recapFocus = when (recapConfig) {
+                is RecapConfig.ByCount -> "Focusing on the trend across the last ${recapConfig.count} sessions."
+                is RecapConfig.ByTime -> {
+                    val hours = recapConfig.hours
+                    if (hours >= 24.0 && hours % 24.0 == 0.0) "Focusing on the trend over the last ${(hours / 24.0).toInt()} days."
+                    else "Focusing on the trend over the last $hours hours."
+                }
+                is RecapConfig.CustomSelection -> "Focusing on the trend across these specifically selected sessions."
+            }
+            aiAnalysis = geminiAgent.generateImprovementAnalysis(
+                userName = userName,
+                recapFocus = recapFocus,
+                recentErrorsText = buildRecentErrorPromptData(recentSessions, geminiAgent),
+                fallback = fallback,
+                preferGemini = useGeminiSummary,
+                llmConfig = llmConfig
+            )
+            isGenerating = false
+        } else {
+            aiAnalysis = fallback
+            isGenerating = false
+        }
+    }
+
+    val titleText = when (recapConfig) {
+        is RecapConfig.ByCount -> "Last ${recapConfig.count} Sessions Recap"
+        is RecapConfig.ByTime -> {
+            val hours = recapConfig.hours
+            if (hours >= 24.0 && hours % 24.0 == 0.0) {
+                val days = (hours / 24.0).toInt()
+                if (days == 1) "Last 1 Day Recap" else "Last $days Days Recap"
+            } else {
+                if (hours == 1.0) "Last 1 Hour Recap" else "Last ${if (hours % 1.0 == 0.0) hours.toInt().toString() else hours.toString()} Hours Recap"
+            }
+        }
+        is RecapConfig.CustomSelection -> "Selected Sessions Recap"
     }
 
     Card(
@@ -246,21 +503,102 @@ private fun UserRecapCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
-            Text("Last ${recentSessions.size} Sessions Recap", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text(titleText, color = Color(0xFF64B5F6), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.5.sp, modifier = Modifier.weight(1f))
+                
+                var expanded by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { expanded = true }) {
+                        Icon(Icons.Filled.Settings, contentDescription = "Settings", tint = Color.White)
+                    }
+                    DropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false },
+                        modifier = Modifier.background(Color(0xFF263647))
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Last 5 Sessions", color = Color.White) },
+                            onClick = { onConfigChange(RecapConfig.ByCount(5)); expanded = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Last 10 Sessions", color = Color.White) },
+                            onClick = { onConfigChange(RecapConfig.ByCount(10)); expanded = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Last 15 Sessions", color = Color.White) },
+                            onClick = { onConfigChange(RecapConfig.ByCount(15)); expanded = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Custom Session Count...", color = Color.White) },
+                            onClick = { onRequestCustomCount(); expanded = false }
+                        )
+                        HorizontalDivider(color = Color.Gray)
+                        DropdownMenuItem(
+                            text = { Text("Last 1 Hour", color = Color.White) },
+                            onClick = { onConfigChange(RecapConfig.ByTime(1.0)); expanded = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Last 3 Hours", color = Color.White) },
+                            onClick = { onConfigChange(RecapConfig.ByTime(3.0)); expanded = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Last 1 Day", color = Color.White) },
+                            onClick = { onConfigChange(RecapConfig.ByTime(24.0)); expanded = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Custom Days...", color = Color.White) },
+                            onClick = { onRequestCustomTime(); expanded = false }
+                        )
+                    }
+                }
+            }
             Spacer(Modifier.height(16.dp))
 
-            if (aiAnalysis != null) {
-                Text(
-                    text = aiAnalysis!!,
-                    color = Color(0xFFB6C2CC),
-                    fontSize = 15.sp,
-                    lineHeight = 22.sp
-                )
-                Spacer(Modifier.height(20.dp))
-            }
+            if (recentSessions.isEmpty()) {
+                Text("No sessions found for this filter.", color = Color.Gray)
+            } else {
+                if (isGenerating) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color(0xFF64B5F6), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(12.dp))
+                        Text("Generating Recap...", color = Color.Gray, fontSize = 15.sp)
+                    }
+                    Spacer(Modifier.height(20.dp))
+                } else if (aiAnalysis != null) {
+                    val annotatedText = buildAnnotatedString {
+                        val text = aiAnalysis!!
+                        val highlightRegex = Regex("【 近期重點:.*?】")
+                        var lastIndex = 0
+                        for (match in highlightRegex.findAll(text)) {
+                            append(text.substring(lastIndex, match.range.first))
+                            withStyle(style = SpanStyle(color = Color(0xFFFFB74D), fontWeight = FontWeight.Bold)) {
+                                append(match.value)
+                            }
+                            lastIndex = match.range.last + 1
+                        }
+                        append(text.substring(lastIndex))
+                    }
 
-            if (allCues.isNotEmpty()) {
-                ActionPieChart(cues = allCues)
+                    Text(
+                        text = annotatedText,
+                        color = Color(0xFFB6C2CC),
+                        fontSize = 15.sp,
+                        lineHeight = 22.sp
+                    )
+                    
+                    if (lastApiError != null && useGeminiSummary && llmConfig.provider != LlmProviderKind.PLAYBOOK) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("API Error: $lastApiError", color = Color(0xFFE57373), fontSize = 12.sp)
+                    }
+                    
+                    Spacer(Modifier.height(20.dp))
+                }
+
+                if (allCues.isNotEmpty()) {
+                    Text("Mistake Breakdown", color = Color(0xFF64B5F6), fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.5.sp)
+                    Spacer(Modifier.height(8.dp))
+                    ActionPieChart(cues = allCues)
+                }
             }
         }
     }
@@ -268,43 +606,77 @@ private fun UserRecapCard(
 
 private fun buildRecapFallback(
     recentSessions: List<FullSessionData>,
-    geminiAgent: GeminiAgent
+    geminiAgent: GeminiAgent,
+    recapConfig: RecapConfig
 ): String {
     val allCues = recentSessions.flatMap { it.cues }
     if (allCues.isEmpty()) {
-        return "最近五場沒有明顯重複錯誤，保持目前節奏。"
+        return "最近沒有明顯重複錯誤，保持目前節奏。"
     }
 
     val topError = allCues
         .groupingBy { it.errorKey }
         .eachCount()
         .maxByOrNull { it.value }
-        ?: return "最近五場沒有明顯重複錯誤，保持目前節奏。"
+        ?: return "最近沒有明顯重複錯誤，保持目前節奏。"
 
     val entry = geminiAgent.playbookEntry(topError.key)
     val label = entry?.label ?: allCues.firstOrNull { it.errorKey == topError.key }?.errorName ?: topError.key
-    val lastTwoCount = recentSessions.take(2).sumOf { session ->
-        session.cues.count { it.errorKey == topError.key }
+
+    val (recentPeriodCount, previousPeriodCount, trendText) = when (recapConfig) {
+        is RecapConfig.ByTime -> {
+            val cutoffTime = System.currentTimeMillis() - (recapConfig.hours * 3600 * 1000).toLong()
+            val totalDuration = System.currentTimeMillis() - cutoffTime
+            val recentDuration = (totalDuration * 0.4).toLong()
+            val midTime = System.currentTimeMillis() - recentDuration
+            
+            val latestSessions = recentSessions.filter { it.session.timestamp >= midTime }
+            val pastSessions = recentSessions.filter { it.session.timestamp < midTime }
+
+            val rCount = latestSessions.sumOf { s -> s.cues.count { it.errorKey == topError.key } }
+            val pCount = pastSessions.sumOf { s -> s.cues.count { it.errorKey == topError.key } }
+            
+            val rAvg = if (latestSessions.isNotEmpty()) rCount.toFloat() / latestSessions.size else 0f
+            val pAvg = if (pastSessions.isNotEmpty()) pCount.toFloat() / pastSessions.size else 0f
+            
+            val pct = if (pAvg > 0) (((pAvg - rAvg) / pAvg) * 100f).roundToInt() else 0
+            
+            val tText = when {
+                pastSessions.isEmpty() -> "資料還少，先專注在這個問題就好!"
+                pct > 0 -> "近期平均比之前改善 $pct%。"
+                pct < 0 -> "近期平均比之前增加 ${-pct}%，需要優先處理。"
+                else -> "近期和之前大致持平。"
+            }
+            Triple(rCount, pCount, tText)
+        }
+        else -> {
+            val totalSessions = recentSessions.size
+            val recentCount = maxOf(1, (totalSessions * 0.4).roundToInt())
+            val latestSessions = recentSessions.take(recentCount)
+            val pastSessions = recentSessions.drop(recentCount)
+
+            val rCount = latestSessions.sumOf { s -> s.cues.count { it.errorKey == topError.key } }
+            val pCount = pastSessions.sumOf { s -> s.cues.count { it.errorKey == topError.key } }
+            
+            val rAvg = if (latestSessions.isNotEmpty()) rCount.toFloat() / latestSessions.size else 0f
+            val pAvg = if (pastSessions.isNotEmpty()) pCount.toFloat() / pastSessions.size else 0f
+            
+            val pct = if (pAvg > 0) (((pAvg - rAvg) / pAvg) * 100f).roundToInt() else 0
+            
+            val tText = when {
+                pastSessions.isEmpty() -> "不過資料還少，先專注在這個問題就好!"
+                pct > 0 -> "近期(${recentCount}場)平均比之前(${totalSessions - recentCount}場)改善 $pct%。"
+                pct < 0 -> "近期(${recentCount}場)平均比之前(${totalSessions - recentCount}場)增加 ${-pct}%，需要優先處理。"
+                else -> "近期(${recentCount}場)和之前(${totalSessions - recentCount}場)大致持平。"
+            }
+            Triple(rCount, pCount, tText)
+        }
     }
-    val previousThreeCount = recentSessions.drop(2).take(3).sumOf { session ->
-        session.cues.count { it.errorKey == topError.key }
-    }
-    val improvementPercent = improvementPercent(
-        recentCount = lastTwoCount,
-        recentSessions = minOf(2, recentSessions.size),
-        previousCount = previousThreeCount,
-        previousSessions = minOf(3, (recentSessions.size - 2).coerceAtLeast(0))
-    )
-    val trend = when {
-        recentSessions.size < 3 -> "資料還少，先把這個問題當作近期主軸。"
-        improvementPercent > 0 -> "近兩場平均比前三場改善 $improvementPercent%。"
-        improvementPercent < 0 -> "近兩場平均比前三場增加 ${-improvementPercent}%，需要優先處理。"
-        else -> "近兩場和前三場大致持平。"
-    }
+
     val details = buildList {
-        add("近期重點：$label，共 ${topError.value} 次。$trend")
-        if (recentSessions.size >= 3) {
-            add("近兩場 $lastTwoCount 次，前三場 $previousThreeCount 次。")
+        add("【 近期重點: $label】\n$trendText")
+        if (!trendText.contains("資料還少") && (previousPeriodCount > 0 || recentPeriodCount > 0)) {
+            add("近期 $recentPeriodCount 次，之前 $previousPeriodCount 次。")
         }
         entry?.diagnosis?.takeIf { it.isNotBlank() }?.let { add("診斷：$it") }
         entry?.practice?.takeIf { it.isNotBlank() }?.let { add("練習建議：$it") }
@@ -316,7 +688,9 @@ private fun buildRecentErrorPromptData(
     recentSessions: List<FullSessionData>,
     geminiAgent: GeminiAgent
 ): String {
-    return recentSessions.mapIndexed { index, session ->
+    val formatter = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.getDefault())
+    return recentSessions.reversed().map { session ->
+        val dateString = formatter.format(Date(session.session.timestamp))
         val total = session.cues.size.coerceAtLeast(1)
         val counts = session.cues
             .groupingBy { it.errorKey }
@@ -328,59 +702,55 @@ private fun buildRecentErrorPromptData(
                 val percent = (count * 100) / total
                 "$label($key): $count/$total, $percent%"
             }
-        "Session ${index + 1}: ${counts.ifBlank { "no errors" }}"
-    }.joinToString("\n") + "\n\nImprovement:\n" + buildImprovementPromptLine(recentSessions, geminiAgent) +
-        "\n\nFocus details:\n" + geminiAgent.allPlaybookEntries()
+        "Session on $dateString: ${counts.ifBlank { "no errors" }}"
+    }.joinToString("\n") + "\n\nFocus details:\n" + geminiAgent.allPlaybookEntries()
         .entries
         .joinToString("\n") { (key, entry) ->
             "$key: ${entry.label}; diagnosis=${entry.diagnosis}; practice=${entry.practice}"
         }
 }
 
-private fun buildImprovementPromptLine(
-    recentSessions: List<FullSessionData>,
-    geminiAgent: GeminiAgent
-): String {
-    val allCues = recentSessions.flatMap { it.cues }
-    val topError = allCues.groupingBy { it.errorKey }.eachCount().maxByOrNull { it.value } ?: return "No repeated error."
-    val lastTwoCount = recentSessions.take(2).sumOf { session -> session.cues.count { it.errorKey == topError.key } }
-    val previousThreeCount = recentSessions.drop(2).take(3).sumOf { session -> session.cues.count { it.errorKey == topError.key } }
-    val percent = improvementPercent(
-        recentCount = lastTwoCount,
-        recentSessions = minOf(2, recentSessions.size),
-        previousCount = previousThreeCount,
-        previousSessions = minOf(3, (recentSessions.size - 2).coerceAtLeast(0))
-    )
-    val label = geminiAgent.playbookEntry(topError.key)?.label ?: topError.key
-    return "$label: last_two_count=$lastTwoCount, previous_three_count=$previousThreeCount, improvement_percent=$percent"
-}
-
-private fun improvementPercent(
-    recentCount: Int,
-    recentSessions: Int,
-    previousCount: Int,
-    previousSessions: Int
-): Int {
-    if (recentSessions <= 0 || previousSessions <= 0 || previousCount <= 0) return 0
-    val recentAverage = recentCount.toFloat() / recentSessions.toFloat()
-    val previousAverage = previousCount.toFloat() / previousSessions.toFloat()
-    if (previousAverage <= 0f) return 0
-    return (((previousAverage - recentAverage) / previousAverage) * 100f).toInt()
-}
-
 @Composable
-private fun SessionCard(session: SessionEntity, onClick: () -> Unit) {
+private fun SessionCard(
+    session: SessionEntity,
+    selectionMode: Boolean,
+    selected: Boolean,
+    onSelectedChange: (Boolean) -> Unit,
+    onClick: () -> Unit
+) {
     val formatter = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.getDefault())
     val dateString = formatter.format(Date(session.timestamp))
-    
+    val clickAction = {
+        if (selectionMode) {
+            onSelectedChange(!selected)
+        } else {
+            onClick()
+        }
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E262F)),
+            .clickable(onClick = clickAction),
+        colors = CardDefaults.cardColors(
+            containerColor = if (selected) Color(0xFF263647) else Color(0xFF1E262F)
+        ),
         shape = RoundedCornerShape(12.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (selectionMode) {
+                Checkbox(
+                    checked = selected,
+                    onCheckedChange = onSelectedChange,
+                    colors = CheckboxDefaults.colors(checkedColor = Color(0xFF00D4FF))
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -419,6 +789,7 @@ private fun SessionCard(session: SessionEntity, onClick: () -> Unit) {
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
                 )
+            }
             }
         }
     }
