@@ -17,7 +17,8 @@ class LiveCoachPipeline(
     private val targetTracker = TargetTracker(targetSide)
     private val normalizer = SpatialNormalizer()
     private val heuristics = HeuristicsEngine(targetSide, trainingMode)
-    private val scheduler = FeedbackScheduler(appContext, trainingMode)
+    private val playbookRepo = PlaybookRepository(appContext)
+    private val scheduler = FeedbackScheduler(playbookRepo, trainingMode)
     private val rawSkeletons = ArrayDeque<Skeleton>()
     private val normalizedFrames = ArrayDeque<FloatArray>()
     private val cueHistory = ArrayDeque<CueHistoryItem>()
@@ -98,13 +99,18 @@ class LiveCoachPipeline(
             generatedAtFrame = frameIndex
         )
 
-    fun process(imageProxy: ImageProxy): Pair<CoachFrameState, FeedbackCue?> =
-        processFrame(
-            width = imageProxy.width,
-            height = imageProxy.height,
+    fun process(imageProxy: ImageProxy): Pair<CoachFrameState, FeedbackCue?> {
+        val rotation = imageProxy.imageInfo.rotationDegrees
+        val swapped = rotation == 90 || rotation == 270
+        val w = if (swapped) imageProxy.height else imageProxy.width
+        val h = if (swapped) imageProxy.width else imageProxy.height
+        return processFrame(
+            width = w,
+            height = h,
             timestampNs = imageProxy.imageInfo.timestamp,
             detectPose = { poseBackend.detect(imageProxy, targetSide) }
         )
+    }
 
     fun processBitmap(
         bitmap: Bitmap,
@@ -218,11 +224,7 @@ class LiveCoachPipeline(
                     lastConfidence = prediction.confidence
                     inferenceCount += 1
                     actionCounts[prediction.action] = (actionCounts[prediction.action] ?: 0L) + 1L
-                    val activeErrors = if (prediction.action != "Idle") {
-                        heuristics.evaluate(prediction.action, rawSkeletons.toList())
-                    } else {
-                        emptyList()
-                    }
+                    val activeErrors = heuristics.evaluate(prediction.action, rawSkeletons.toList())
                     decision = scheduler.update(
                         activeErrorKeys = activeErrors,
                         nowSeconds = timestampNs / 1_000_000_000.0
@@ -277,7 +279,7 @@ class LiveCoachPipeline(
         }.getOrNull() ?: return
 
         rawSkeletons.addLast(targetSkeleton)
-        if (rawSkeletons.size > FenceNetClassifier.WindowSize) rawSkeletons.removeFirst()
+        if (rawSkeletons.size > 60) rawSkeletons.removeFirst()
         normalizedFrames.addLast(modelFrame)
         if (normalizedFrames.size > FenceNetClassifier.WindowSize) normalizedFrames.removeFirst()
     }
@@ -340,7 +342,9 @@ class LiveCoachPipeline(
                 errorKey = cue.errorKey,
                 label = cue.label,
                 message = cue.message,
-                priority = cue.priority
+                priority = cue.priority,
+                diagnosis = cue.diagnosis,
+                practice = cue.practice
             )
         )
         while (cueHistory.size > MaxCueHistory) cueHistory.removeFirst()
@@ -351,7 +355,9 @@ class LiveCoachPipeline(
             errorKey = cue.errorKey,
             label = cue.label,
             message = cue.message,
-            count = (previous?.count ?: 0L) + 1L
+            count = (previous?.count ?: 0L) + 1L,
+            diagnosis = cue.diagnosis,
+            practice = cue.practice
         )
         cueCount += 1
     }

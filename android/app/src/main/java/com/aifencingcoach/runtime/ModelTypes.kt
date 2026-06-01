@@ -134,7 +134,9 @@ data class CueHistoryItem(
     val errorKey: String,
     val label: String,
     val message: String,
-    val priority: String
+    val priority: String,
+    val diagnosis: String = "",
+    val practice: String = ""
 )
 
 data class ActionCountItem(
@@ -147,7 +149,9 @@ data class CueCountItem(
     val errorKey: String,
     val label: String,
     val message: String,
-    val count: Long
+    val count: Long,
+    val diagnosis: String = "",
+    val practice: String = ""
 )
 
 data class PracticeReport(

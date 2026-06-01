@@ -6,39 +6,45 @@ import androidx.room.Query
 import androidx.room.Transaction
 
 @Dao
-interface SessionDao {
+abstract class SessionDao {
     @Insert
-    suspend fun insertSession(session: SessionEntity): Long
+    abstract suspend fun insertSession(session: SessionEntity): Long
 
     @Insert
-    suspend fun insertActionCounts(segments: List<ActionCountEntity>)
+    abstract suspend fun insertActionCounts(segments: List<ActionCountEntity>)
 
     @Insert
-    suspend fun insertCueHistory(cues: List<CueHistoryEntity>)
+    abstract suspend fun insertCueHistory(cues: List<CueHistoryEntity>)
 
     @Query("SELECT * FROM sessions ORDER BY timestamp DESC")
-    suspend fun getAllSessions(): List<SessionEntity>
+    abstract suspend fun getAllSessions(): List<SessionEntity>
+
+    @Query("SELECT DISTINCT userName FROM sessions ORDER BY userName ASC")
+    abstract suspend fun getDistinctUsers(): List<String>
+
+    @Query("SELECT * FROM sessions WHERE userName = :userName ORDER BY timestamp DESC")
+    abstract suspend fun getSessionsByUser(userName: String): List<SessionEntity>
 
     @Query("SELECT * FROM sessions WHERE id = :sessionId LIMIT 1")
-    suspend fun getSessionById(sessionId: Long): SessionEntity?
+    abstract suspend fun getSessionById(sessionId: Long): SessionEntity?
 
     @Query("SELECT * FROM action_counts WHERE sessionId = :sessionId")
-    suspend fun getActionCountsForSession(sessionId: Long): List<ActionCountEntity>
+    abstract suspend fun getActionCountsForSession(sessionId: Long): List<ActionCountEntity>
 
     @Query("SELECT * FROM cue_history WHERE sessionId = :sessionId ORDER BY timestamp ASC")
-    suspend fun getCueHistoryForSession(sessionId: Long): List<CueHistoryEntity>
+    abstract suspend fun getCueHistoryForSession(sessionId: Long): List<CueHistoryEntity>
 
     @Query("UPDATE sessions SET geminiSummary = :summary WHERE id = :sessionId")
-    suspend fun updateSessionSummary(sessionId: Long, summary: String)
+    abstract suspend fun updateSessionSummary(sessionId: Long, summary: String)
 
     @Query("UPDATE sessions SET exportedVideoPath = :videoPath WHERE id = :sessionId")
-    suspend fun updateSessionVideoPath(sessionId: Long, videoPath: String)
+    abstract suspend fun updateSessionVideoPath(sessionId: Long, videoPath: String)
     
     @Query("DELETE FROM sessions WHERE id = :sessionId")
-    suspend fun deleteSession(sessionId: Long)
+    abstract suspend fun deleteSession(sessionId: Long)
 
     @Transaction
-    suspend fun getFullSession(sessionId: Long): FullSessionData? {
+    open suspend fun getFullSession(sessionId: Long): FullSessionData? {
         val session = getSessionById(sessionId) ?: return null
         val counts = getActionCountsForSession(sessionId)
         val cues = getCueHistoryForSession(sessionId)

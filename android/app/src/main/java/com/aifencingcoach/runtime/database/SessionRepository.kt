@@ -1,26 +1,36 @@
 package com.aifencingcoach.runtime.database
 
 import android.content.Context
+import com.aifencingcoach.runtime.PlaybookRepository
 import com.aifencingcoach.runtime.PracticeReport
-import com.aifencingcoach.runtime.FeedbackCue
 import com.aifencingcoach.runtime.CueHistoryItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class SessionRepository(private val context: Context) {
     private val dao = AppDatabase.getDatabase(context).sessionDao()
+    private val playbookRepository = PlaybookRepository(context)
 
     suspend fun savePracticeReport(
         report: PracticeReport,
-        cuesFired: List<CueHistoryItem> // Using the PracticeReport model directly
+        cuesFired: List<CueHistoryItem>, // Using the PracticeReport model directly
+        llmSummary: String? = null,
+        userName: String = "Fencer",
+        source: String = "Realtime"
     ): Long = withContext(Dispatchers.IO) {
         val sessionEntity = SessionEntity(
             timestamp = System.currentTimeMillis(),
             trainingMode = report.trainingMode.label,
             targetSide = report.targetSide.label,
             totalActiveSeconds = report.activeSeconds.toFloat(),
-            geminiSummary = null,
-            exportedVideoPath = null
+            elapsedSeconds = report.elapsedSeconds,
+            inferenceCount = report.inferenceCount,
+            cueCount = report.cueCount,
+            topAction = report.topAction,
+            geminiSummary = llmSummary,
+            exportedVideoPath = null,
+            userName = userName,
+            source = source
         )
         val sessionId = dao.insertSession(sessionEntity)
 
@@ -36,12 +46,15 @@ class SessionRepository(private val context: Context) {
         }
 
         val cueEntities = cuesFired.map { cue ->
+            val playbookEntry = playbookRepository.getEntry(cue.errorKey)
             CueHistoryEntity(
                 sessionId = sessionId,
                 timestamp = cue.frameIndex / 30f,
                 errorKey = cue.errorKey,
-                errorName = cue.label,
-                practiceSuggestion = cue.message
+                errorName = playbookEntry?.label ?: cue.label,
+                practiceSuggestion = cue.practice.ifBlank {
+                    playbookEntry?.practice ?: cue.message
+                }
             )
         }
         if (cueEntities.isNotEmpty()) {
@@ -61,6 +74,14 @@ class SessionRepository(private val context: Context) {
 
     suspend fun getRecentSessions(): List<SessionEntity> = withContext(Dispatchers.IO) {
         dao.getAllSessions()
+    }
+
+    suspend fun getDistinctUsers(): List<String> = withContext(Dispatchers.IO) {
+        dao.getDistinctUsers()
+    }
+
+    suspend fun getSessionsByUser(userName: String): List<SessionEntity> = withContext(Dispatchers.IO) {
+        dao.getSessionsByUser(userName)
     }
 
     suspend fun getSessionDetails(sessionId: Long): FullSessionData? = withContext(Dispatchers.IO) {

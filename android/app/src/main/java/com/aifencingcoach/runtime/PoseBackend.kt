@@ -2,6 +2,7 @@ package com.aifencingcoach.runtime
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Matrix
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
@@ -61,18 +62,23 @@ class MediaPipePoseBackend(context: Context) : PoseBackend {
         imageProxy: ImageProxy,
         targetSide: TargetSide
     ): PoseBackendResult {
-        val bitmap = imageProxy.toBitmapOrNull() ?: return PoseBackendResult(null, null)
+        val rawBitmap = imageProxy.toBitmapOrNull() ?: return PoseBackendResult(null, null)
+        val rotation = imageProxy.imageInfo.rotationDegrees
+        val bitmap = if (rotation != 0) rotateBitmap(rawBitmap, rotation) else rawBitmap
         return try {
             detectBitmap(
                 bitmap = bitmap,
                 targetSide = targetSide,
-                rotationDegrees = imageProxy.imageInfo.rotationDegrees,
+                rotationDegrees = 0,  // already rotated
                 timestampNs = imageProxy.imageInfo.timestamp
             )
         } finally {
             bitmap.recycle()
+            if (bitmap !== rawBitmap) rawBitmap.recycle()
         }
     }
+
+    private var lastTimestampMs = -1L
 
     override fun detectBitmap(
         bitmap: Bitmap,
@@ -81,19 +87,31 @@ class MediaPipePoseBackend(context: Context) : PoseBackend {
         timestampNs: Long
     ): PoseBackendResult {
         val landmarker = poseLandmarker ?: return PoseBackendResult(null, null)
+        val timestampMs = timestampNs / 1_000_000
+
+        // MediaPipe requires strictly increasing timestamps
+        if (timestampMs <= lastTimestampMs) {
+            return PoseBackendResult(null, null)
+        }
+        lastTimestampMs = timestampMs
+
         val mpImage = BitmapImageBuilder(bitmap).build()
         val processingOptions = ImageProcessingOptions.builder()
             .setRotationDegrees(rotationDegrees)
             .build()
-        val timestampMs = timestampNs / 1_000_000
-        val result = landmarker.detectForVideo(mpImage, processingOptions, timestampMs)
-        val detections = mapper.mapDetections(
-            poses = result.landmarks(),
-            frameWidth = bitmap.width,
-            frameHeight = bitmap.height,
-            targetSide = targetSide
-        )
-        return PoseBackendResult(null, null, detections)
+
+        return try {
+            val result = landmarker.detectForVideo(mpImage, processingOptions, timestampMs)
+            val detections = mapper.mapDetections(
+                poses = result.landmarks(),
+                frameWidth = bitmap.width,
+                frameHeight = bitmap.height,
+                targetSide = targetSide
+            )
+            PoseBackendResult(null, null, detections)
+        } catch (e: Exception) {
+            PoseBackendResult(null, null)
+        }
     }
 
     override fun close() {
@@ -133,11 +151,14 @@ class YoloPoseBackend(context: Context) : PoseBackend {
         imageProxy: ImageProxy,
         targetSide: TargetSide
     ): PoseBackendResult {
-        val bitmap = imageProxy.toBitmapOrNull() ?: return PoseBackendResult(null, null)
+        val rawBitmap = imageProxy.toBitmapOrNull() ?: return PoseBackendResult(null, null)
+        val rotation = imageProxy.imageInfo.rotationDegrees
+        val bitmap = if (rotation != 0) rotateBitmap(rawBitmap, rotation) else rawBitmap
         return try {
-            detectBitmap(bitmap, targetSide, imageProxy.imageInfo.rotationDegrees, imageProxy.imageInfo.timestamp)
+            detectBitmap(bitmap, targetSide, 0, imageProxy.imageInfo.timestamp)  // already rotated
         } finally {
             bitmap.recycle()
+            if (bitmap !== rawBitmap) rawBitmap.recycle()
         }
     }
 
@@ -315,11 +336,11 @@ class YoloPoseBackend(context: Context) : PoseBackend {
             val leftAnkle = point(15) ?: return null
             val rightAnkle = point(16) ?: return null
 
-            val frontWrist = if (targetSide == TargetSide.LEFT) rightWrist else leftWrist
-            val frontElbow = if (targetSide == TargetSide.LEFT) rightElbow else leftElbow
-            val frontShoulder = if (targetSide == TargetSide.LEFT) rightShoulder else leftShoulder
-            val frontAnkle = if (targetSide == TargetSide.LEFT) rightAnkle else leftAnkle
-            val backWrist = if (targetSide == TargetSide.LEFT) leftWrist else rightWrist
+            val frontWrist = rightWrist
+            val frontElbow = rightElbow
+            val frontShoulder = rightShoulder
+            val frontAnkle = rightAnkle
+            val backWrist = leftWrist
             if (frontWrist == null || frontElbow == null || frontShoulder == null) return null
 
             val skeleton = linkedMapOf(
@@ -425,4 +446,10 @@ private fun copyInterleavedChroma(
             out[outputIndex++] = uBuffer.get(row * uPlane.rowStride + col * uPlane.pixelStride)
         }
     }
+}
+
+private fun rotateBitmap(bitmap: Bitmap, degrees: Int): Bitmap {
+    if (degrees == 0) return bitmap
+    val matrix = Matrix().apply { postRotate(degrees.toFloat()) }
+    return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
 }

@@ -13,8 +13,14 @@ data class SessionEntity(
     val trainingMode: String,
     val targetSide: String,
     val totalActiveSeconds: Float,
+    val elapsedSeconds: Long = 0,
+    val inferenceCount: Long = 0,
+    val cueCount: Long = 0,
+    val topAction: String = "Idle",
     val geminiSummary: String?, // Null until API returns
-    val exportedVideoPath: String? // Null if no video was exported
+    val exportedVideoPath: String?, // Null if no video was exported
+    val userName: String = "Fencer",
+    val source: String = "Realtime" // "Realtime" or "Postgame"
 )
 
 @Entity(
