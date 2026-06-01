@@ -22,7 +22,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Widget build(BuildContext context) {
     if (_selectedUser == null) {
       return UserSelectionScreen(
-        onBack: () => Navigator.of(context).pop(),
+        onBack: null, // no back button — this is the root of the History tab
         onUserSelected: (user) => setState(() => _selectedUser = user),
       );
     }
@@ -38,7 +38,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
 // ---------------------------------------------------------------------------
 
 class UserSelectionScreen extends StatefulWidget {
-  final VoidCallback onBack;
+  final VoidCallback? onBack; // null = no back button
   final void Function(String user) onUserSelected;
 
   const UserSelectionScreen({
@@ -72,10 +72,13 @@ class _UserSelectionScreenState extends State<UserSelectionScreen> {
       backgroundColor: const Color(0xFF101418),
       appBar: AppBar(
         backgroundColor: const Color(0xFF1E262F),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: widget.onBack,
-        ),
+        automaticallyImplyLeading: false,
+        leading: widget.onBack != null
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back, color: Colors.white),
+                onPressed: widget.onBack,
+              )
+            : null,
         title: const Text('Select User', style: TextStyle(color: Colors.white)),
       ),
       body: _loading
