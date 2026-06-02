@@ -2,6 +2,7 @@ package com.aifencingcoach
 
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.paint
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -40,19 +41,22 @@ fun SessionDetailScreen(
     val errorColor = Color(0xFFFF3D3D)
 
     Scaffold(
+        modifier = Modifier
+            .paint(androidx.compose.ui.res.painterResource(id = R.drawable.app_bg), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+            .background(Color.Black.copy(alpha = 0.5f)),
         topBar = {
             TopAppBar(
-                modifier = Modifier.padding(top = 16.dp),
+                modifier = Modifier.padding(top = 32.dp),
                 title = { Text(dateString, color = Color.White, fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = primaryColor)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = bgColor)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
             )
         },
-        containerColor = bgColor
+        containerColor = Color.Transparent
     ) { padding ->
         LazyColumn(
             modifier = Modifier

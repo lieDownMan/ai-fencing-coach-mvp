@@ -8,17 +8,22 @@ import kotlin.system.measureNanoTime
 
 class LiveCoachPipeline(
     context: Context,
-    private var poseBackendKind: PoseBackendKind = PoseBackendKind.MEDIAPIPE,
+    private var poseBackendKind: PoseBackendKind = PoseBackendKind.YOLO,
     private var targetSide: TargetSide = TargetSide.LEFT,
-    private var trainingMode: TrainingMode = TrainingMode.FREE_BOUTING
+    private var trainingMode: TrainingMode = TrainingMode.FREE_BOUTING,
+    private var focusErrors: Set<String> = emptySet(),
+    private var muteErrors: Set<String> = emptySet(),
+    private var onlyErrors: Set<String> = emptySet(),
+    playbookLanguage: String = PlaybookRepository.DEFAULT_LANGUAGE
 ) : AutoCloseable {
     private val appContext = context.applicationContext
+    private val language = normalizePlaybookLanguage(playbookLanguage)
     private val gatekeeper = ActivityGatekeeper(fps = 30)
     private val targetTracker = TargetTracker(targetSide)
     private val normalizer = SpatialNormalizer()
     private val heuristics = HeuristicsEngine(targetSide, trainingMode)
-    private val playbookRepo = PlaybookRepository(appContext)
-    private val scheduler = FeedbackScheduler(playbookRepo, trainingMode)
+    private val playbookRepo = PlaybookRepository(appContext, playbookLanguage)
+    private val scheduler = FeedbackScheduler(playbookRepo, trainingMode, focusErrors, muteErrors, onlyErrors)
     private val rawSkeletons = ArrayDeque<Skeleton>()
     private val normalizedFrames = ArrayDeque<FloatArray>()
     private val cueHistory = ArrayDeque<CueHistoryItem>()
@@ -47,12 +52,21 @@ class LiveCoachPipeline(
     val ready: Boolean
         get() = poseBackend.ready && classifier != null
 
-    fun configure(targetSide: TargetSide, trainingMode: TrainingMode) {
+    fun configure(
+        targetSide: TargetSide,
+        trainingMode: TrainingMode,
+        focusErrors: Set<String> = this.focusErrors,
+        muteErrors: Set<String> = this.muteErrors,
+        onlyErrors: Set<String> = this.onlyErrors
+    ) {
         this.targetSide = targetSide
         this.trainingMode = trainingMode
+        this.focusErrors = focusErrors
+        this.muteErrors = muteErrors
+        this.onlyErrors = onlyErrors
         targetTracker.configure(targetSide)
         heuristics.configure(targetSide, trainingMode)
-        scheduler.configure(trainingMode)
+        scheduler.configure(trainingMode, focusErrors, muteErrors, onlyErrors)
         reset()
     }
 
@@ -60,6 +74,7 @@ class LiveCoachPipeline(
         gatekeeper.reset()
         targetTracker.reset()
         normalizer.reset()
+        heuristics.reset()
         clearMotionBuffers()
         scheduler.reset()
         cueHistory.clear()
@@ -200,6 +215,7 @@ class LiveCoachPipeline(
         if (active && !previousActive) {
             clearMotionBuffers()
             normalizer.reset()
+            heuristics.reset()
         } else if (!active && previousActive) {
             clearMotionBuffers()
             lastAction = "Idle"
@@ -317,17 +333,23 @@ class LiveCoachPipeline(
     ): String {
         decision.voiceCue?.message?.let { return it }
         decision.visualCues.firstOrNull()?.message?.let { return it }
-        if (targetSkeleton == null) return "Find target"
+        if (targetSkeleton == null) {
+            return if (language == PlaybookRepository.ENGLISH_LANGUAGE) "Find target" else "尋找目標"
+        }
         if (!active) {
             return if (gatekeeper.state == ActivityGatekeeper.StateChecking) {
-                "Hold en garde"
+                if (language == PlaybookRepository.ENGLISH_LANGUAGE) "Hold en garde" else "保持 en garde"
             } else {
-                "Find stance"
+                if (language == PlaybookRepository.ENGLISH_LANGUAGE) "Find stance" else "尋找姿勢"
             }
         }
         val fill = normalizedFrames.size
         if (fill < FenceNetClassifier.WindowSize) {
-            return "Warming up $fill/${FenceNetClassifier.WindowSize}"
+            return if (language == PlaybookRepository.ENGLISH_LANGUAGE) {
+                "Warming up $fill/${FenceNetClassifier.WindowSize}"
+            } else {
+                "暖機中 $fill/${FenceNetClassifier.WindowSize}"
+            }
         }
         return ""
     }

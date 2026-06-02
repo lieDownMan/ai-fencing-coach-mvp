@@ -160,7 +160,7 @@ fun mapToUICues(cues: List<Any>, playbookRepository: PlaybookRepository? = null)
                 UICue(
                     timestampStr = String.format("%.1fs", it.frameIndex / 30f),
                     errorKey = it.errorKey,
-                    errorName = entry?.label ?: it.label,
+                    errorName = it.label.ifBlank { entry?.label ?: it.errorKey },
                     shortCue = it.message.ifBlank { entry?.shortCue.orEmpty() },
                     diagnosis = it.diagnosis.ifBlank { entry?.diagnosis.orEmpty() },
                     practice = it.practice.ifBlank { entry?.practice ?: it.message }
@@ -171,9 +171,9 @@ fun mapToUICues(cues: List<Any>, playbookRepository: PlaybookRepository? = null)
                 UICue(
                     timestampStr = String.format("%.1fs", it.timestamp),
                     errorKey = it.errorKey,
-                    errorName = entry?.label ?: it.errorName,
-                    shortCue = entry?.shortCue ?: it.practiceSuggestion,
-                    diagnosis = entry?.diagnosis.orEmpty(),
+                    errorName = it.errorName.ifBlank { entry?.label ?: it.errorKey },
+                    shortCue = it.practiceSuggestion.ifBlank { entry?.shortCue.orEmpty() },
+                    diagnosis = "",
                     practice = it.practiceSuggestion.ifBlank { entry?.practice.orEmpty() }
                 )
             }

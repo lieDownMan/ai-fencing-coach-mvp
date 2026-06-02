@@ -1,6 +1,7 @@
 package com.aifencingcoach
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.paint
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -35,6 +36,8 @@ import kotlin.math.roundToInt
 import com.aifencingcoach.runtime.GeminiAgent
 import com.aifencingcoach.runtime.LlmProviderConfig
 import com.aifencingcoach.runtime.LlmProviderKind
+import com.aifencingcoach.runtime.PlaybookRepository
+import com.aifencingcoach.runtime.normalizePlaybookLanguage
 
 sealed class RecapConfig {
     data class ByCount(val count: Int) : RecapConfig()
@@ -88,19 +91,22 @@ fun UserSelectionScreen(
     }
 
     Scaffold(
+        modifier = Modifier
+            .paint(androidx.compose.ui.res.painterResource(id = R.drawable.app_bg), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+            .background(Color.Black.copy(alpha = 0.5f)),
         topBar = {
             TopAppBar(
-                modifier = Modifier.padding(top = 24.dp),
+                modifier = Modifier.padding(top = 32.dp),
                 title = { Text("Select User", color = Color.White) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF1E262F))
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
             )
         },
-        containerColor = Color(0xFF101418)
+        containerColor = Color.Transparent
     ) { padding ->
         if (isLoading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -225,9 +231,12 @@ fun UserHistoryScreen(
     }
 
     Scaffold(
+        modifier = Modifier
+            .paint(androidx.compose.ui.res.painterResource(id = R.drawable.app_bg), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+            .background(Color.Black.copy(alpha = 0.5f)),
         topBar = {
             TopAppBar(
-                modifier = Modifier.padding(top = 24.dp),
+                modifier = Modifier.padding(top = 32.dp),
                 title = {
                     Text(
                         text = if (selectionMode) "${selectedSessionIds.size} selected" else "$userName's History",
@@ -287,10 +296,10 @@ fun UserHistoryScreen(
                         }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF1E262F))
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
             )
         },
-        containerColor = Color(0xFF101418)
+        containerColor = Color.Transparent
     ) { padding ->
         if (isLoading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -453,24 +462,54 @@ private fun UserRecapCard(
             "${session.session.id}:${session.session.timestamp}:${session.cues.size}"
         }
     }
+    val topErrorKeys = remember(recapRefreshKey) {
+        allCues
+            .groupingBy { it.errorKey }
+            .eachCount()
+            .entries
+            .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+            .take(3)
+            .map { it.key }
+            .toSet()
+    }
+    val aiWarning = aiRecapWarning(
+        useGeminiSummary = useGeminiSummary,
+        llmConfig = llmConfig,
+        lastApiError = lastApiError,
+        configError = geminiAgent.configurationError(llmConfig)
+    )
 
     LaunchedEffect(recapRefreshKey, llmConfig, useGeminiSummary) {
-        val fallback = buildRecapFallback(recentSessions, geminiAgent, recapConfig)
+        val fallback = buildRecapFallback(recentSessions, geminiAgent, recapConfig, llmConfig.language)
         if (useGeminiSummary && geminiAgent.isEnabled(llmConfig) && allCues.isNotEmpty()) {
             isGenerating = true
+            val english = normalizePlaybookLanguage(llmConfig.language) == PlaybookRepository.ENGLISH_LANGUAGE
             val recapFocus = when (recapConfig) {
-                is RecapConfig.ByCount -> "Focusing on the trend across the last ${recapConfig.count} sessions."
+                is RecapConfig.ByCount -> if (english) {
+                    "Focusing on the trend across the last ${recapConfig.count} sessions."
+                } else {
+                    "聚焦最近 ${recapConfig.count} 場的趨勢。"
+                }
                 is RecapConfig.ByTime -> {
                     val hours = recapConfig.hours
-                    if (hours >= 24.0 && hours % 24.0 == 0.0) "Focusing on the trend over the last ${(hours / 24.0).toInt()} days."
-                    else "Focusing on the trend over the last $hours hours."
+                    if (english) {
+                        if (hours >= 24.0 && hours % 24.0 == 0.0) "Focusing on the trend over the last ${(hours / 24.0).toInt()} days."
+                        else "Focusing on the trend over the last $hours hours."
+                    } else {
+                        if (hours >= 24.0 && hours % 24.0 == 0.0) "聚焦最近 ${(hours / 24.0).toInt()} 天的趨勢。"
+                        else "聚焦最近 $hours 小時的趨勢。"
+                    }
                 }
-                is RecapConfig.CustomSelection -> "Focusing on the trend across these specifically selected sessions."
+                is RecapConfig.CustomSelection -> if (english) {
+                    "Focusing on the trend across these specifically selected sessions."
+                } else {
+                    "聚焦選取場次的趨勢。"
+                }
             }
             aiAnalysis = geminiAgent.generateImprovementAnalysis(
                 userName = userName,
                 recapFocus = recapFocus,
-                recentErrorsText = buildRecentErrorPromptData(recentSessions, geminiAgent),
+                recentErrorsText = buildRecentErrorPromptData(recentSessions, geminiAgent, topErrorKeys),
                 fallback = fallback,
                 preferGemini = useGeminiSummary,
                 llmConfig = llmConfig
@@ -557,6 +596,10 @@ private fun UserRecapCard(
             if (recentSessions.isEmpty()) {
                 Text("No sessions found for this filter.", color = Color.Gray)
             } else {
+                if (aiWarning != null) {
+                    Text(aiWarning, color = Color(0xFFE57373), fontSize = 12.sp)
+                    Spacer(Modifier.height(10.dp))
+                }
                 if (isGenerating) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color(0xFF64B5F6), strokeWidth = 2.dp)
@@ -586,9 +629,9 @@ private fun UserRecapCard(
                         lineHeight = 22.sp
                     )
                     
-                    if (lastApiError != null && useGeminiSummary && llmConfig.provider != LlmProviderKind.PLAYBOOK) {
+                    if (lastApiError != null && useGeminiSummary && llmConfig.provider != LlmProviderKind.PLAYBOOK && aiWarning == null) {
                         Spacer(Modifier.height(8.dp))
-                        Text("API Error: $lastApiError", color = Color(0xFFE57373), fontSize = 12.sp)
+                        Text("AI unavailable: $lastApiError", color = Color(0xFFE57373), fontSize = 12.sp)
                     }
                     
                     Spacer(Modifier.height(20.dp))
@@ -604,21 +647,53 @@ private fun UserRecapCard(
     }
 }
 
+private fun aiRecapWarning(
+    useGeminiSummary: Boolean,
+    llmConfig: LlmProviderConfig,
+    lastApiError: String?,
+    configError: String?
+): String? {
+    if (llmConfig.provider == LlmProviderKind.PLAYBOOK) return null
+    val provider = llmConfig.provider.label
+    return when {
+        !useGeminiSummary ->
+            "AI Summary is off. $provider is selected, but the recap will use playbook analysis until AI Summary is enabled."
+        configError != null ->
+            "AI unavailable for $provider: $configError The recap is using playbook analysis."
+        lastApiError != null ->
+            "AI unavailable for $provider: $lastApiError The recap is using playbook analysis."
+        else -> null
+    }
+}
+
 private fun buildRecapFallback(
     recentSessions: List<FullSessionData>,
     geminiAgent: GeminiAgent,
-    recapConfig: RecapConfig
+    recapConfig: RecapConfig,
+    language: String
 ): String {
+    val english = normalizePlaybookLanguage(language) == PlaybookRepository.ENGLISH_LANGUAGE
     val allCues = recentSessions.flatMap { it.cues }
     if (allCues.isEmpty()) {
-        return "最近沒有明顯重複錯誤，保持目前節奏。"
+        return if (english) {
+            "No repeated mistake stands out recently. Keep the current rhythm."
+        } else {
+            "最近沒有明顯重複錯誤，保持目前節奏。"
+        }
     }
 
-    val topError = allCues
+    val topErrors = allCues
         .groupingBy { it.errorKey }
         .eachCount()
-        .maxByOrNull { it.value }
-        ?: return "最近沒有明顯重複錯誤，保持目前節奏。"
+        .entries
+        .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+        .take(3)
+    val topError = topErrors.firstOrNull()
+        ?: return if (english) {
+            "No repeated mistake stands out recently. Keep the current rhythm."
+        } else {
+            "最近沒有明顯重複錯誤，保持目前節奏。"
+        }
 
     val entry = geminiAgent.playbookEntry(topError.key)
     val label = entry?.label ?: allCues.firstOrNull { it.errorKey == topError.key }?.errorName ?: topError.key
@@ -642,10 +717,26 @@ private fun buildRecapFallback(
             val pct = if (pAvg > 0) (((pAvg - rAvg) / pAvg) * 100f).roundToInt() else 0
             
             val tText = when {
-                pastSessions.isEmpty() -> "資料還少，先專注在這個問題就好!"
-                pct > 0 -> "近期平均比之前改善 $pct%。"
-                pct < 0 -> "近期平均比之前增加 ${-pct}%，需要優先處理。"
-                else -> "近期和之前大致持平。"
+                pastSessions.isEmpty() -> if (english) {
+                    "There is not much prior data yet, so make this the first focus."
+                } else {
+                    "資料還少，先專注在這個問題就好!"
+                }
+                pct > 0 -> if (english) {
+                    "The recent average improved by $pct% compared with before."
+                } else {
+                    "近期平均比之前改善 $pct%。"
+                }
+                pct < 0 -> if (english) {
+                    "The recent average increased by ${-pct}% compared with before, so prioritize it."
+                } else {
+                    "近期平均比之前增加 ${-pct}%，需要優先處理。"
+                }
+                else -> if (english) {
+                    "The recent average is roughly unchanged."
+                } else {
+                    "近期和之前大致持平。"
+                }
             }
             Triple(rCount, pCount, tText)
         }
@@ -664,35 +755,81 @@ private fun buildRecapFallback(
             val pct = if (pAvg > 0) (((pAvg - rAvg) / pAvg) * 100f).roundToInt() else 0
             
             val tText = when {
-                pastSessions.isEmpty() -> "不過資料還少，先專注在這個問題就好!"
-                pct > 0 -> "近期(${recentCount}場)平均比之前(${totalSessions - recentCount}場)改善 $pct%。"
-                pct < 0 -> "近期(${recentCount}場)平均比之前(${totalSessions - recentCount}場)增加 ${-pct}%，需要優先處理。"
-                else -> "近期(${recentCount}場)和之前(${totalSessions - recentCount}場)大致持平。"
+                pastSessions.isEmpty() -> if (english) {
+                    "There is not much prior data yet, so make this the first focus."
+                } else {
+                    "不過資料還少，先專注在這個問題就好!"
+                }
+                pct > 0 -> if (english) {
+                    "Recent sessions ($recentCount) improved by $pct% versus the earlier ${totalSessions - recentCount} sessions."
+                } else {
+                    "近期(${recentCount}場)平均比之前(${totalSessions - recentCount}場)改善 $pct%。"
+                }
+                pct < 0 -> if (english) {
+                    "Recent sessions ($recentCount) increased by ${-pct}% versus the earlier ${totalSessions - recentCount} sessions, so prioritize it."
+                } else {
+                    "近期(${recentCount}場)平均比之前(${totalSessions - recentCount}場)增加 ${-pct}%，需要優先處理。"
+                }
+                else -> if (english) {
+                    "Recent sessions ($recentCount) are roughly level with the earlier ${totalSessions - recentCount} sessions."
+                } else {
+                    "近期(${recentCount}場)和之前(${totalSessions - recentCount}場)大致持平。"
+                }
             }
             Triple(rCount, pCount, tText)
         }
     }
 
     val details = buildList {
-        add("【 近期重點: $label】\n$trendText")
-        if (!trendText.contains("資料還少") && (previousPeriodCount > 0 || recentPeriodCount > 0)) {
-            add("近期 $recentPeriodCount 次，之前 $previousPeriodCount 次。")
+        if (english) {
+            add("Recent focus: $label\n$trendText")
+        } else {
+            add("【 近期重點: $label】\n$trendText")
         }
-        entry?.diagnosis?.takeIf { it.isNotBlank() }?.let { add("診斷：$it") }
-        entry?.practice?.takeIf { it.isNotBlank() }?.let { add("練習建議：$it") }
+        if (topErrors.size > 1) {
+            val topList = topErrors.joinToString(if (english) "; " else "；") { (key, count) ->
+                val topLabel = geminiAgent.playbookEntry(key)?.label
+                    ?: allCues.firstOrNull { it.errorKey == key }?.errorName
+                    ?: key
+                if (english) "$topLabel: $count" else "$topLabel：$count 次"
+            }
+            add(if (english) "Top 3 errors: $topList." else "前三個錯誤：$topList。")
+        }
+        val hasPriorData = if (english) {
+            !trendText.contains("not much prior data")
+        } else {
+            !trendText.contains("資料還少")
+        }
+        if (hasPriorData && (previousPeriodCount > 0 || recentPeriodCount > 0)) {
+            add(
+                if (english) {
+                    "Recent count: $recentPeriodCount. Previous count: $previousPeriodCount."
+                } else {
+                    "近期 $recentPeriodCount 次，之前 $previousPeriodCount 次。"
+                }
+            )
+        }
+        entry?.diagnosis?.takeIf { it.isNotBlank() }?.let {
+            add(if (english) "Diagnosis: $it" else "診斷：$it")
+        }
+        entry?.practice?.takeIf { it.isNotBlank() }?.let {
+            add(if (english) "Practice: $it" else "練習建議：$it")
+        }
     }
     return details.joinToString("\n")
 }
 
 private fun buildRecentErrorPromptData(
     recentSessions: List<FullSessionData>,
-    geminiAgent: GeminiAgent
+    geminiAgent: GeminiAgent,
+    focusErrorKeys: Set<String>
 ): String {
     val formatter = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.getDefault())
     return recentSessions.reversed().map { session ->
         val dateString = formatter.format(Date(session.session.timestamp))
         val total = session.cues.size.coerceAtLeast(1)
         val counts = session.cues
+            .filter { focusErrorKeys.isEmpty() || it.errorKey in focusErrorKeys }
             .groupingBy { it.errorKey }
             .eachCount()
             .entries
@@ -705,6 +842,7 @@ private fun buildRecentErrorPromptData(
         "Session on $dateString: ${counts.ifBlank { "no errors" }}"
     }.joinToString("\n") + "\n\nFocus details:\n" + geminiAgent.allPlaybookEntries()
         .entries
+        .filter { focusErrorKeys.isEmpty() || it.key in focusErrorKeys }
         .joinToString("\n") { (key, entry) ->
             "$key: ${entry.label}; diagnosis=${entry.diagnosis}; practice=${entry.practice}"
         }

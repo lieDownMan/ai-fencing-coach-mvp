@@ -18,10 +18,17 @@ class PostgameVideoAnalyzer(private val context: Context) {
         targetSide: TargetSide,
         trainingMode: TrainingMode,
         poseBackend: PoseBackendKind,
+        playbookLanguage: String = PlaybookRepository.DEFAULT_LANGUAGE,
         onProgress: suspend (PostgameAnalysisProgress) -> Unit
     ): Pair<PracticeReport, Map<Long, CoachFrameState>> = withContext(Dispatchers.Default) {
         val retriever = MediaMetadataRetriever()
-        val pipeline = LiveCoachPipeline(context, poseBackend, targetSide, trainingMode)
+        val pipeline = LiveCoachPipeline(
+            context = context,
+            poseBackendKind = poseBackend,
+            targetSide = targetSide,
+            trainingMode = trainingMode,
+            playbookLanguage = playbookLanguage
+        )
         val frameStates = mutableMapOf<Long, CoachFrameState>()
 
         try {

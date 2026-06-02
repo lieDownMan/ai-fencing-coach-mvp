@@ -1,75 +1,86 @@
 {
-    "lunge_overextension": {
-        "error_name": "長刺過度前傾",
-        "diagnosis": "重心衝太快，前腳發力不夠，容易傷膝蓋且無法快速收步。",
-        "short_cue": "注意前腳不要壓膝蓋，長刺打到90度就好",
-        "practice": "長刺（lunge）重複練習"
-    },
-    "guard_dropped": {
-        "error_name": "持劍手掉落",
-        "diagnosis": "攻擊或防守時手放太低，劍尖沒有威脅對手，且有效部位完全暴露給對手。",
-        "short_cue": "手抬起來，劍尖指著對手",
-        "practice": ""
-    },
-    "bounce_excessive": {
-        "error_name": "步伐上下浮動",
-        "diagnosis": "在走腳步的時候大腿肌力或是控制力不足導致身體重心不穩，影響攻擊刺點",
-        "short_cue": "重心壓低蹲好，不要上下移動!",
-        "practice": "連續前進、後退以穩定腳步"
-    },
-    "foot_before_hand": {
-        "error_name": "手腳順序錯誤",
-        "diagnosis": "腳先動了，劍尖還沒出去，這樣會先把自己的身體送出去給對方打，容易被得分。",
-        "short_cue": "手要先伸",
-        "practice": "長刺（lunge）前進長刺（step lunge）重複練習"
-    },
-    "over_parrying": {
-        "error_name": "防守動作太大且太頻繁",
-        "diagnosis": "撥擋（Parry）的動作超過身體輪廓太多，導致防守後露出太多有效部位。對手很容易做一個簡單的轉移刺（Disengage）擊中你，且動作太大會導致回防速度變慢。",
-        "short_cue": "防守小一點，不要亂撈劍，用手指頭控制劍尖不要用整個手腕",
-        "practice": "重複防守（Parry）練習"
-    },
-    "stance_too_high": {
-        "error_name": "預備姿勢沒蹲好",
-        "diagnosis": "重心太高會導致啟動速度變慢，無法瞬間爆發，也容易在快速移動中失去平衡。",
-        "short_cue": "重心壓低，蹲好！",
-        "practice": "預備姿勢（en guard）練習"
-    },
-    "wide_disengage": {
-        "error_name": "換側動作太大",
-        "diagnosis": "繞劍幅度過大會浪費攻擊時間，不僅容易被對手直接反擊，也容易讓自己的劍尖偏離有效部位。",
-        "short_cue": "換側小一點！用手指頭控制劍尖，不要動到整支手臂和手肘！",
-        "practice": "重複換側練習"
-    },
-    
-    "incomplete_arm_extension": {
-        "error_name": "刺的時候手沒有伸直",
-        "diagnosis": "手臂沒有完全伸直會讓你平白損失攻擊距離，導致原本能擊中的攻擊落空。",
-        "short_cue": "刺的時候手伸直！",
-        "practice": "重複長刺（lunge）練習"
-    },
-    "wide_step": {
-        "error_name": "步伐太大",
-        "diagnosis": "雙腳間距過大影響移動和動作發動",
-        "short_cue": "腳打太開",
-        "practice": "以後多注意"
-    },
-    "narrow_step": {
-        "error_name": "步伐太小",
-        "diagnosis": "雙腳間距過小會影響移動和動作發動",
-        "short_cue": "腳打太窄",
-        "practice": "以後注意"
-    },
-    "center_of_mass_in_front": {
-        "error_name": "重心向前移動",
-        "diagnosis": "姿勢不標準，會無法有正確迅速確實的發力過程",
-        "short_cue": "重心太靠前",
-        "practice": "提供身體應有基準給選手參考"
-    },
-    "center_of_mass_leaning_backward": {
-        "error_name": "重心向後傾斜",
-        "diagnosis": "姿勢不標準，會無法有正確迅速確實的發力過程",
-        "short_cue": "重心太靠後",
-        "practice": "提供身體應有基準給選手參考"
-    }
+  "foot_before_hand": {
+    "error_name": "腳先於手",
+    "diagnosis": "前腳在武器手形成威脅前就先移動，讓進攻更容易被看出。",
+    "short_cue": "手先出。",
+    "practice": "慢速一步弓步：先伸手，再移動前腳。",
+    "weight": 5.0
+  },
+  "lunge_overextension": {
+    "error_name": "弓步過度伸展",
+    "diagnosis": "前膝在進攻或姿勢轉換時低於安全技術角度，容易失去支撐。",
+    "short_cue": "前膝不要塌。",
+    "practice": "對準標記點做控制弓步，落地後定住，確認膝蓋在腳掌上方。",
+    "weight": 9.5
+  },
+  "incomplete_arm_extension": {
+    "error_name": "手臂伸展不足",
+    "diagnosis": "攻擊動作最高點時，武器手沒有完成有威脅性的充分伸展。",
+    "short_cue": "手臂伸直。",
+    "practice": "牆靶伸手練習：先完成手臂，再加入步伐。",
+    "weight": 9.0
+  },
+  "guard_dropped": {
+    "error_name": "護手下掉",
+    "diagnosis": "武器手長時間低於骨盆線，讓有效目標暴露。",
+    "short_cue": "護手抬高。",
+    "practice": "持續 en garde，加入短進退步，保持手在腰線以上。",
+    "weight": 9.7
+  },
+  "stance_too_high": {
+    "error_name": "姿勢太高",
+    "diagnosis": "前膝過直，降低平衡與變向準備。",
+    "short_cue": "再低一點。",
+    "practice": "進退步組合中維持前膝彎曲，頭部高度保持安靜穩定。",
+    "weight": 10.0
+  },
+  "bounce_excessive": {
+    "error_name": "彈跳過多",
+    "diagnosis": "骨盆上下起伏過大，浪費能量，也會提前暴露步伐節奏。",
+    "short_cue": "保持水平。",
+    "practice": "沿線做步伐，專注頭部水平提示，前後移動時不要升高。",
+    "weight": 6.5
+  },
+  "center_of_mass_in_front": {
+    "error_name": "重心過前",
+    "diagnosis": "軀幹或前肩過度前傾，重量跑到支撐面前方。",
+    "short_cue": "重心置中。",
+    "practice": "鏡前 en garde 檢查：每一步前先讓肩膀疊在髖部上方。",
+    "weight": 6.0
+  },
+  "center_of_mass_leaning_backward": {
+    "error_name": "重心後仰",
+    "diagnosis": "軀幹或前肩向後傾，會拖慢攻擊啟動與回復。",
+    "short_cue": "不要後仰。",
+    "practice": "小進步接弓步，保持胸口平衡在雙腳上方。",
+    "weight": 6.0
+  },
+  "over_parrying": {
+    "error_name": "格擋過大",
+    "diagnosis": "武器手相對肩寬掃動太大，格擋後容易打開線路。",
+    "short_cue": "格擋小一點。",
+    "practice": "同伴點劍練習：用最小格擋關閉線路。",
+    "weight": 5.0
+  },
+  "wide_step": {
+    "error_name": "步幅過大",
+    "diagnosis": "雙腳距離相對肩髖參考變得太大，影響回復與連續動作。",
+    "short_cue": "步子短一點。",
+    "practice": "用膠帶標記腳步目標，做固定步長的步伐重複。",
+    "weight": 4.0
+  },
+  "narrow_step": {
+    "error_name": "步距過窄",
+    "diagnosis": "雙腳太靠近，降低底盤穩定與回復選項。",
+    "short_cue": "站寬一點。",
+    "practice": "每次進退步後重設 en garde，檢查是否保有肩寬間距。",
+    "weight": 9.0
+  },
+  "hand_too_high": {
+    "error_name": "手位過高",
+    "diagnosis": "武器手明顯高於手肘，讓防守線變得低效，也暴露下方線路。",
+    "short_cue": "武器手放低。",
+    "practice": "守備線保持練習：讓手腕、手肘、肩膀維持緊湊的擊劍線。",
+    "weight": 8.0
+  }
 }

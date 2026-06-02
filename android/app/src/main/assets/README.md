@@ -5,7 +5,8 @@ Required runtime assets:
 - `pose_landmarker_lite.task`
 - `fencenet_v2.onnx`
 - `yolo_pose.onnx`
-- `coach_playbook.json`
+- `coach_playbook.json` (Traditional Chinese)
+- `coach_playbook_en.json` (English)
 
 Generate `fencenet_v2.onnx` from the repo root:
 

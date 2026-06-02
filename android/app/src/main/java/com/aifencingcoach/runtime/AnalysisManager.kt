@@ -114,6 +114,7 @@ class AnalysisManager(
                 targetSide = job.targetSide,
                 trainingMode = job.trainingMode,
                 poseBackend = job.poseBackend,
+                playbookLanguage = job.llmConfig.language,
                 onProgress = { progress ->
                     _analysisProgress.value = progress.fraction
                     _analysisStatus.value = progress.status
@@ -138,14 +139,19 @@ class AnalysisManager(
             val fallbackSummary = fallbackResult.text
 
             _lastSummary.value = fallbackSummary
-            _lastSummaryStatus.value = "Playbook summary ready."
+            _lastSummaryStatus.value = if (!job.useGeminiSummary && job.llmConfig.provider != LlmProviderKind.PLAYBOOK) {
+                "AI Summary is off. ${job.llmConfig.provider.label} is selected; showing playbook summary."
+            } else {
+                "Playbook summary ready."
+            }
 
             val sessionId = sessionRepository.savePracticeReport(
                 report = report,
                 cuesFired = report.cueTimeline,
                 llmSummary = fallbackSummary.ifEmpty { "No summary available." },
                 userName = job.userSettingsName,
-                source = "Postgame"
+                source = "Postgame",
+                playbookLanguage = job.llmConfig.language
             )
 
             _lastSessionId.value = sessionId
@@ -155,7 +161,7 @@ class AnalysisManager(
                 _lastSummaryStatus.value = if (geminiAgent.isEnabled(job.llmConfig)) {
                     "Generating $providerLabel summary..."
                 } else {
-                    "$providerLabel is not configured; showing playbook summary."
+                    "AI unavailable for $providerLabel: ${geminiAgent.configurationError(job.llmConfig) ?: "$providerLabel is not configured."} Showing playbook summary."
                 }
                 scope.launch {
                     val geminiResult = geminiAgent.generateSummaryResult(
@@ -227,7 +233,7 @@ class AnalysisManager(
             SummarySource.OPENAI -> "OpenAI summary ready."
             SummarySource.PLAYBOOK -> "Playbook summary ready."
             SummarySource.DISABLED -> result.errorMessage ?: "AI is not configured; showing playbook summary."
-            SummarySource.FAILED -> "AI summary failed: ${formatLlmErrorMessage(result.errorMessage)}."
+            SummarySource.FAILED -> "AI summary failed: ${formatLlmErrorMessage(result.errorMessage)}"
         }
 
 

@@ -56,4 +56,17 @@ class GeminiAgentTest {
 
         assertEquals("First line.\nSecond line.", openAiOutputTextFromResponse(response))
     }
+
+    @Test
+    fun mapsLanguageToPlaybookAsset() {
+        assertEquals("coach_playbook.json", playbookAssetNameForLanguage("zh"))
+        assertEquals("coach_playbook_en.json", playbookAssetNameForLanguage("en"))
+        assertEquals("coach_playbook_en.json", playbookAssetNameForLanguage("English(en)"))
+    }
+
+    @Test
+    fun formatsNetworkAndQuotaErrorsForUi() {
+        assertEquals("No internet connection.", formatLlmErrorMessage("network error: timeout"))
+        assertEquals("API quota or rate limit reached.", formatLlmErrorMessage("HTTP 429 quota exceeded"))
+    }
 }

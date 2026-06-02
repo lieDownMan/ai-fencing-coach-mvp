@@ -336,6 +336,7 @@ class YoloPoseBackend(context: Context) : PoseBackend {
             val leftAnkle = point(15) ?: return null
             val rightAnkle = point(16) ?: return null
 
+            // YOLO mirrors the Flutter/iOS path: sword/front side is the COCO right side.
             val frontWrist = rightWrist
             val frontElbow = rightElbow
             val frontShoulder = rightShoulder

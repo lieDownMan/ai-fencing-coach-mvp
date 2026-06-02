@@ -76,7 +76,7 @@ enum class PoseBackendKind(val label: String) {
 
     companion object {
         fun fromLabel(label: String): PoseBackendKind =
-            entries.firstOrNull { it.label == label } ?: MEDIAPIPE
+            entries.firstOrNull { it.label == label } ?: YOLO
     }
 }
 
@@ -156,7 +156,7 @@ data class CueCountItem(
 
 data class PracticeReport(
     val trainingMode: TrainingMode = TrainingMode.FREE_BOUTING,
-    val poseBackend: PoseBackendKind = PoseBackendKind.MEDIAPIPE,
+    val poseBackend: PoseBackendKind = PoseBackendKind.YOLO,
     val targetSide: TargetSide = TargetSide.LEFT,
     val elapsedSeconds: Long = 0,
     val activeSeconds: Long = 0,
@@ -176,7 +176,7 @@ data class CoachFrameState(
     val action: String = "Idle",
     val confidence: Float = 0f,
     val cue: String = "",
-    val poseBackend: PoseBackendKind = PoseBackendKind.MEDIAPIPE,
+    val poseBackend: PoseBackendKind = PoseBackendKind.YOLO,
     val visualCues: List<FeedbackCue> = emptyList(),
     val cueHistory: List<CueHistoryItem> = emptyList(),
     val targetSkeleton: Skeleton? = null,

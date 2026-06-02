@@ -19,6 +19,7 @@ internal const val DEFAULT_GEMINI_MODEL_NAME = "gemini-flash-lite-latest"
 internal const val DEFAULT_OPENAI_MODEL_NAME = "gpt-5.4-nano"
 
 private const val LLM_TAG = "LlmCoachAgent"
+private const val SummaryTopErrorLimit = 3
 private val FALLBACK_GEMINI_MODEL_NAMES = listOf(
     DEFAULT_GEMINI_MODEL_NAME,
     "gemini-2.0-flash-lite"
@@ -56,6 +57,7 @@ data class LlmProviderConfig(
     val provider: LlmProviderKind = LlmProviderKind.GEMINI,
     val apiKey: String = "",
     val modelName: String = "",
+    val language: String = PlaybookRepository.DEFAULT_LANGUAGE,
     val useBundledGeminiKey: Boolean = true,
     val useBundledOpenAiKey: Boolean = true
 )
@@ -85,11 +87,19 @@ data class CoachingSummaryResult(
 fun formatLlmErrorMessage(errorMessage: String?): String {
     val lower = errorMessage.orEmpty().lowercase()
     return when {
-        "quota" in lower || "rate" in lower || "429" in lower || "too many requests" in lower -> "usage limited"
-        "network error" in lower || "timeout" in lower || "unable to resolve host" in lower -> "network error"
+        "quota" in lower || "rate" in lower || "429" in lower || "too many requests" in lower ->
+            "API quota or rate limit reached."
+        "network error" in lower ||
+            "timeout" in lower ||
+            "unable to resolve host" in lower ||
+            "unknown host" in lower ||
+            "failed to connect" in lower ||
+            "connectexception" in lower ||
+            "socket" in lower ->
+            "No internet connection."
         "api key" in lower || "permission" in lower || "unauthorized" in lower || "401" in lower || "403" in lower -> "API key rejected"
-        "model" in lower || "not found" in lower || "404" in lower -> "model unavailable"
-        else -> "API error (see logs)"
+        "model" in lower || "not found" in lower || "404" in lower -> "Model unavailable."
+        else -> "AI request failed; check internet connection, API key, or quota."
     }
 }
 
@@ -104,6 +114,15 @@ class GeminiAgent(private val playbookRepository: PlaybookRepository) {
         config.provider != LlmProviderKind.PLAYBOOK &&
             effectiveApiKey(config).isNotBlank() &&
             effectiveModelName(config).isNotBlank()
+
+    fun configurationError(config: LlmProviderConfig): String? {
+        if (config.provider == LlmProviderKind.PLAYBOOK) return null
+        return when {
+            effectiveApiKey(config).isBlank() -> "API key is missing."
+            effectiveModelName(config).isBlank() -> "model is missing."
+            else -> null
+        }
+    }
 
     fun providerLabel(config: LlmProviderConfig): String = config.provider.label
 
@@ -143,13 +162,17 @@ class GeminiAgent(private val playbookRepository: PlaybookRepository) {
     ): CoachingSummaryResult = withContext(Dispatchers.IO) {
         val totalActions = actionCounts.sumOf { it.count }
         val aggregatedErrors = aggregateErrors(cuesFired)
-        val fallback = generateRuleBasedSummary(trainingMode, totalActions, aggregatedErrors)
+        val summaryErrors = aggregatedErrors.take(SummaryTopErrorLimit)
+        val language = normalizePlaybookLanguage(llmConfig.language)
+        val fallback = generateRuleBasedSummary(trainingMode, totalActions, summaryErrors, language)
 
         if (!preferGemini || !isEnabled(llmConfig)) {
             return@withContext CoachingSummaryResult(
                 text = fallback,
                 source = if (preferGemini) SummarySource.DISABLED else SummarySource.PLAYBOOK,
-                errorMessage = if (preferGemini) "${providerLabel(llmConfig)} is not configured." else null
+                errorMessage = if (preferGemini) {
+                    "AI unavailable for ${providerLabel(llmConfig)}: ${configurationError(llmConfig) ?: "${providerLabel(llmConfig)} is not configured."}"
+                } else null
             )
         }
 
@@ -158,7 +181,7 @@ class GeminiAgent(private val playbookRepository: PlaybookRepository) {
             .map { "- ${it.action}: ${it.count} times (${it.percent}%)" }
             .joinToString("\n")
 
-        val playbookBlock = formatPlaybookBlock(aggregatedErrors)
+        val playbookBlock = formatPlaybookBlock(summaryErrors, language)
         val prompt = buildSessionSummaryPrompt(
             userName = userSettingsName,
             trainingMode = trainingMode,
@@ -166,7 +189,8 @@ class GeminiAgent(private val playbookRepository: PlaybookRepository) {
             totalActions = totalActions,
             actionSummary = actionSummary,
             playbookBlock = playbookBlock,
-            detectedProblemCount = aggregatedErrors.sumOf { it.count }
+            detectedProblemCount = aggregatedErrors.sumOf { it.count },
+            language = language
         )
         val generation = generateTextWithFallback(prompt, llmConfig)
         if (generation.text.isNullOrBlank()) {
@@ -192,6 +216,30 @@ class GeminiAgent(private val playbookRepository: PlaybookRepository) {
         llmConfig: LlmProviderConfig = LlmProviderConfig()
     ): String = withContext(Dispatchers.IO) {
         if (!preferGemini || !isEnabled(llmConfig)) return@withContext fallback
+        val language = normalizePlaybookLanguage(llmConfig.language)
+        val outputRules = if (language == PlaybookRepository.ENGLISH_LANGUAGE) {
+            """
+- Reply in English.
+- Write 2-3 concise sentences.
+- Analyze the timeline of sessions (listed oldest to newest) to identify key trends.
+- Focus on major mistakes, major improvements, or major declines across all errors. You do not need to focus on a single mistake.
+- Do not define trends by percentage only; also define them by the absolute number of times (frequency).
+- Focus your analysis context specifically on the timeframe or selection described in [RECAP FOCUS].
+- End with one concrete practice recommendation from the playbook when present.
+- Keep it under 120 words if possible.
+""".trimIndent()
+        } else {
+            """
+- Reply in Traditional Chinese.
+- Write 2-3 concise sentences.
+- Analyze the timeline of sessions (listed oldest to newest) to identify key trends.
+- Focus on major mistakes, major improvements, or major declines across all errors. You do not need to focus on a single mistake.
+- Do not define trends by percentage only; also define them by the absolute number of times (frequency).
+- Focus your analysis context specifically on the timeframe or selection described in [RECAP FOCUS].
+- End with one concrete practice recommendation from the playbook when present.
+- Keep it under 350 Chinese characters if possible.
+""".trimIndent()
+        }
 
         val prompt = """You are an elite fencing coach reviewing recent training history. Use only the supplied session counts and playbook details; do not invent causes, injuries, tactics, or unseen technique.
 
@@ -205,14 +253,7 @@ $recapFocus
 $recentErrorsText
 
 [OUTPUT RULES]
-- Reply in Traditional Chinese.
-- Write 2-3 concise sentences.
-- Analyze the timeline of sessions (listed oldest to newest) to identify key trends.
-- Focus on major mistakes, major improvements, or major declines across all errors. You do not need to focus on a single mistake.
-- Do not define trends by percentage only; also define them by the absolute number of times (frequency).
-- Focus your analysis context specifically on the timeframe or selection described in [RECAP FOCUS].
-- End with one concrete practice recommendation from the playbook when present.
-- Keep it under 350 Chinese characters if possible.
+$outputRules
 """
         generateTextWithFallback(prompt, llmConfig).text ?: fallback
     }
@@ -378,7 +419,11 @@ $recentErrorsText
                 "model" in lower -> "model unavailable"
             "timeout" in lower ||
                 "network" in lower ||
-                "unable to resolve host" in lower -> "network error"
+                "unable to resolve host" in lower ||
+                "unknown host" in lower ||
+                "failed to connect" in lower ||
+                "connectexception" in lower ||
+                "socket" in lower -> "network error"
             message.isNotBlank() -> message.take(120)
             else -> e::class.java.simpleName
         }
@@ -396,20 +441,37 @@ $recentErrorsText
                 shortCue = entry?.shortCue ?: "",
                 practice = entry?.practice ?: ""
             )
-        }.sortedByDescending { it.count }
+        }.sortedWith(compareByDescending<AggregatedError> { it.count }.thenBy { it.key })
     }
 
     private fun generateRuleBasedSummary(
         trainingMode: String,
         totalActions: Long,
-        errors: List<AggregatedError>
+        errors: List<AggregatedError>,
+        language: String
     ): String {
+        if (language == PlaybookRepository.ENGLISH_LANGUAGE) {
+            val lines = mutableListOf("This $trainingMode session classified $totalActions actions.")
+            if (errors.isEmpty()) {
+                lines.add("No playbook-defined posture problems were detected. Keep the same stable form.")
+                return lines.joinToString("\n")
+            }
+            lines.add("Top detected playbook problems:")
+            for (item in errors) {
+                val detail = StringBuilder("- ${item.errorName}: ${item.count} times\n")
+                if (item.diagnosis.isNotBlank()) detail.append("  Diagnosis: ${item.diagnosis}\n")
+                if (item.practice.isNotBlank()) detail.append("  Coach suggestion: ${item.practice}\n")
+                lines.add(detail.toString().trimEnd())
+            }
+            return lines.joinToString("\n")
+        }
+
         val lines = mutableListOf("本次 $trainingMode 共辨識到 $totalActions 個動作。")
         if (errors.isEmpty()) {
             lines.add("未偵測到姿勢問題，表現良好！繼續保持！")
             return lines.joinToString("\n")
         }
-        lines.add("偵測到的問題與頻率：")
+        lines.add("主要偵測問題（最多 3 項）：")
         for (item in errors) {
             val detail = StringBuilder("- ${item.errorName}：${item.count} 次\n")
             if (item.diagnosis.isNotBlank()) detail.append("  診斷：${item.diagnosis}\n")
@@ -426,7 +488,8 @@ $recentErrorsText
         totalActions: Long,
         actionSummary: String,
         playbookBlock: String,
-        detectedProblemCount: Int
+        detectedProblemCount: Int,
+        language: String
     ): String {
         val modeFocus = when (trainingMode) {
             "Footwork" -> "balance, center-of-mass control, stance height, and step width"
@@ -435,14 +498,24 @@ $recentErrorsText
             else -> "the detected playbook problems and the session action mix"
         }
         val actions = actionSummary.ifBlank { "- No classified actions." }
+        val languageRule = if (language == PlaybookRepository.ENGLISH_LANGUAGE) {
+            "- Reply in English. Keep the whole answer under 120 words."
+        } else {
+            "- Reply in Traditional Chinese. Keep the whole answer under 160 Chinese words."
+        }
+        val responseProblemShape = if (language == PlaybookRepository.ENGLISH_LANGUAGE) {
+            "Problem | frequency | diagnosis | coaching suggestion."
+        } else {
+            "問題｜次數｜診斷｜教練建議."
+        }
         return """You are an elite fencing coach. Create a post-session coaching summary from objective AI vision data.
 
 [NON-NEGOTIABLE RULES]
 - Use only the evidence in OBJECTIVE_DATA and PLAYBOOK_CONTEXT.
 - Do not invent mistakes, timecodes, injuries, tactics, opponent behavior, or psychological advice.
 - If detected_problem_count is 0, say no playbook-defined posture problems were detected and give only a light next-step cue for the training mode.
-- If problems exist, mention every listed problem exactly once with its frequency, diagnosis, and practice recommendation.
-- Reply in Traditional Chinese. Keep the whole answer under 160 Chinese words.
+- If problems exist, focus only on the top ${SummaryTopErrorLimit} listed problems. Mention each listed problem exactly once with its frequency, diagnosis, and practice recommendation.
+$languageRule
 - Address the student directly as "$userName".
 - Prefer compact paragraphs over long bullet lists.
 
@@ -462,21 +535,42 @@ $playbookBlock
 
 [RESPONSE SHAPE]
 1. One sentence summarizing practice volume and action mix.
-2. One compact sentence or bullet per detected problem: 問題｜次數｜診斷｜教練建議.
+2. One compact sentence or bullet per detected problem: $responseProblemShape
 3. Final priority sentence naming the most frequent issue and the next drill.
 """
     }
 
-    private fun formatPlaybookBlock(errors: List<AggregatedError>): String {
-        if (errors.isEmpty()) return "No posture problems were detected."
+    private fun formatPlaybookBlock(errors: List<AggregatedError>, language: String): String {
+        if (errors.isEmpty()) {
+            return if (language == PlaybookRepository.ENGLISH_LANGUAGE) {
+                "No posture problems were detected."
+            } else {
+                "未偵測到姿勢問題。"
+            }
+        }
+        val missingDiagnosis = if (language == PlaybookRepository.ENGLISH_LANGUAGE) {
+            "No playbook diagnosis available."
+        } else {
+            "沒有可用的 playbook 診斷。"
+        }
+        val missingCue = if (language == PlaybookRepository.ENGLISH_LANGUAGE) {
+            "No playbook cue available."
+        } else {
+            "沒有可用的 playbook 提示。"
+        }
+        val missingPractice = if (language == PlaybookRepository.ENGLISH_LANGUAGE) {
+            "No playbook practice available."
+        } else {
+            "沒有可用的 playbook 練習。"
+        }
         return errors.joinToString("\n") { item ->
             listOf(
                 "- error_key: ${item.key}",
                 "  frequency: ${item.count}",
                 "  problem: ${item.errorName}",
-                "  diagnosis: ${item.diagnosis.ifBlank { "No playbook diagnosis available." }}",
-                "  short_cue: ${item.shortCue.ifBlank { "No playbook cue available." }}",
-                "  practice: ${item.practice.ifBlank { "No playbook practice available." }}"
+                "  diagnosis: ${item.diagnosis.ifBlank { missingDiagnosis }}",
+                "  short_cue: ${item.shortCue.ifBlank { missingCue }}",
+                "  practice: ${item.practice.ifBlank { missingPractice }}"
             ).joinToString("\n")
         }
     }
