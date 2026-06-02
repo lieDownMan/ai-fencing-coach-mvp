@@ -34,7 +34,7 @@ const double kSpineForwardTiltThresholdDeg = 15.0; // 重心前傾判定角度
 const double kSpineBackwardTiltThresholdDeg = 10.0; // 重心後仰判定角度
 const double kShoulderForwardTiltThresholdDeg = 15.0; // 肩膀連線前傾角度門檻
 const double kShoulderBackwardTiltThresholdDeg = 15.0; // 肩膀連線後仰角度門檻
-const double kHandTooHighMinAngleDeg = 60.0; // 手抬太高的判定角度門檻 (大於 60 度)
+const double kElbowTooAcuteMinAngleDeg = 100.0; // 手肘角度小於此值 → 手抬太高（預設 100°）
 
 // ---------------------------------------------------------------------------
 // Detected action classes (from FenceNetV2 class names)
@@ -519,26 +519,20 @@ class HeuristicsEngine {
 
   String? _checkHandTooHigh(List<Skeleton> skeletons) {
     final limbs = frontLimbs(targetSide);
-    
+
     for (final skel in skeletons) {
-      final elbow = skel[limbs['elbow']!];
-      final wrist = skel[limbs['wrist']!];
-      
-      if (elbow != null && wrist != null) {
-        // dy: positive if wrist is above elbow (y goes downwards)
-        final dy = elbow.dy - wrist.dy;
-        final dx = (wrist.dx - elbow.dx).abs(); 
-        
-        if (dy > 0) {
-          // Angle from horizontal (90 degrees is perfectly vertical upwards)
-          final angleDeg = math.atan2(dy, dx) * 180 / math.pi;
-          lastArmAngleDeg = angleDeg;
-          
-          if (angleDeg > kHandTooHighMinAngleDeg) {
-            return 'hand_too_high';
-          }
-        } else {
-          lastArmAngleDeg = 0.0;
+      final shoulder = skel[limbs['shoulder']!];
+      final elbow    = skel[limbs['elbow']!];
+      final wrist    = skel[limbs['wrist']!];
+
+      if (shoulder != null && elbow != null && wrist != null) {
+        // Elbow joint angle: shoulder → elbow → wrist
+        // Small angle = arm is bent / hand raised
+        final angleDeg = calcAngle(shoulder, elbow, wrist);
+        lastArmAngleDeg = angleDeg;
+
+        if (angleDeg < kElbowTooAcuteMinAngleDeg) {
+          return 'hand_too_high';
         }
       }
     }
