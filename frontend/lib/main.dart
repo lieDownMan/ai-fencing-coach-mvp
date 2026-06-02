@@ -1293,6 +1293,7 @@ class _MainScreenState extends State<MainScreen>
                         _focusErrors.remove(key);
                       }
                     });
+                    _rebuildHeuristics();
                   },
                 );
               }).toList(),
@@ -1327,6 +1328,7 @@ class _MainScreenState extends State<MainScreen>
                         _muteErrors.remove(key);
                       }
                     });
+                    _rebuildHeuristics();
                   },
                 );
               }).toList(),
