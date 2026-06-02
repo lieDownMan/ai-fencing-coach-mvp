@@ -840,10 +840,112 @@ class _MainScreenState extends State<MainScreen>
               right: 12,
               child: _buildCameraToggleButton(),
             ),
+
+            // End Session button (bottom right)
+            Positioned(
+              bottom: 12,
+              right: 12,
+              child: _buildEndSessionButton(),
+            ),
           ],
         ),
       ),
     );
+  }
+
+  Widget _buildEndSessionButton() {
+    final hasData = _sessionStartTime != null && _sessionInferenceCount > 0;
+    return GestureDetector(
+      onTap: hasData ? _saveAndEndSession : null,
+      child: AnimatedOpacity(
+        opacity: hasData ? 1.0 : 0.4,
+        duration: const Duration(milliseconds: 300),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.black.withAlpha(180),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: const Color(0xFF00D4FF).withAlpha(200),
+              width: 1.5,
+            ),
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.save_alt_rounded, color: Color(0xFF00D4FF), size: 16),
+              SizedBox(width: 6),
+              Text(
+                '儲存訓練',
+                style: TextStyle(
+                  color: Color(0xFF00D4FF),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _saveAndEndSession() async {
+    if (_sessionStartTime == null || _sessionInferenceCount == 0) return;
+    final durationMs = DateTime.now().difference(_sessionStartTime!).inMilliseconds;
+    if (durationMs < 1000) return;
+
+    final topAction = _sessionActionCounts.isEmpty
+        ? 'Idle'
+        : (_sessionActionCounts.entries.toList()
+              ..sort((a, b) => b.value.compareTo(a.value)))
+            .first
+            .key;
+
+    await _db.insertSession(
+      trainingMode: _trainingMode,
+      targetSide: _targetSide,
+      durationMs: durationMs,
+      framesAnalyzed: _sessionFrameCount,
+      modelChecks: _sessionInferenceCount,
+      topAction: topAction,
+      actionCounts: Map.from(_sessionActionCounts),
+      errorCounts: {
+        for (final cue in _sessionCues)
+          cue.errorKey: _sessionCues.where((c) => c.errorKey == cue.errorKey).length,
+      },
+      cues: List.from(_sessionCues),
+      userName: _userName,
+      source: 'Realtime',
+    );
+
+    // Reset session tracking so the same data isn't saved twice
+    setState(() {
+      _sessionStartTime = null;
+      _sessionCues.clear();
+      _sessionActionCounts.clear();
+      _sessionFrameCount = 0;
+      _sessionInferenceCount = 0;
+    });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle, color: Color(0xFF00D4FF)),
+              const SizedBox(width: 10),
+              Text('訓練已儲存！${_userName} 的紀錄已更新。',
+                  style: const TextStyle(color: Colors.white)),
+            ],
+          ),
+          backgroundColor: const Color(0xFF1E262F),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   Widget _buildActionPill() {
