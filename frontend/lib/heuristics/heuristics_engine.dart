@@ -20,7 +20,7 @@ const double kLungeKneeMinAngleDeg = 120.0; // 🎯 已改為 120 度
 const int kGuardDroppedThresholdFrames = 5; // 🎯 觸發幀數調小 (原10)
 const int kGuardDroppedFreeBoutingThresholdFrames = 10; // 🎯 實戰觸發幀數調小 (原20)
 const double kFootBeforeHandMinDisplacementPx = 0.01; // 🎯 歸一化座標下合理值 (原5.0)
-const double kStanceTooHighAngleDeg = 160.0; // 🎯 改為 160 度，更容易觸發
+const double kStanceTooHighAngleDeg = 165; // 🎯 改為 160 度，更容易觸發
 const double kIncompleteArmExtensionAngleDeg = 155.0;
 const int kOverParryMinWristSamples = 5;
 const double kOverParryShoulderMultiplier = 2.0;
@@ -34,7 +34,7 @@ const double kSpineForwardTiltThresholdDeg = 15.0; // 重心前傾判定角度
 const double kSpineBackwardTiltThresholdDeg = 10.0; // 重心後仰判定角度
 const double kShoulderForwardTiltThresholdDeg = 15.0; // 肩膀連線前傾角度門檻
 const double kShoulderBackwardTiltThresholdDeg = 15.0; // 肩膀連線後仰角度門檻
-const double kElbowTooAcuteMinAngleDeg = 80.0; // 手肘角度小於此值 → 手抬太高（預設 80°）
+const double kElbowTooAcuteMinAngleDeg = 30.0; // 手肘角度小於此值 → 手抬太高（預設 80°）
 
 // ---------------------------------------------------------------------------
 // Detected action classes (from FenceNetV2 class names)
