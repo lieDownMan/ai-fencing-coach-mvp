@@ -14,8 +14,8 @@ retaining coaches as final authorities. We conducted a preliminary mixed-method
 study with four participants using baseline self-review and AI-assisted
 practice, collecting ratings from all four and detailed post-task interviews
 from two. Ratings were highest for error awareness, post-review usefulness, and
-perceived advantage over self-review (all M=4.75), but lower for timing accuracy
-and correction understandability (both M=3.25). Participants could act on step
+perceived advantage over self-review (all M=4.75/5), but lower for timing accuracy
+and correction understandability (both M=3.25/5). Participants could act on step
 and center-of-mass cues; however, delayed timing and action misclassification
 obscured which movement the feedback referred to. These findings identify
 temporal grounding, layered feedback, and explicit handling of recognition
