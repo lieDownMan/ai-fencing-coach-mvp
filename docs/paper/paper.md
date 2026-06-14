@@ -16,8 +16,9 @@ practice, collecting ratings from all four and detailed post-task interviews
 from two. Descriptive ratings were highest for error awareness, post-review
 usefulness, and perceived advantage over self-review (M=4.75 for each), and
 lowest for timing accuracy and correction understandability (M=3.25 for each).
-Participants could act on step and center-of-mass cues; however, delayed timing
-and action misclassification obscured which movement the feedback referred to.
+The two interviewees reported acting on step and center-of-mass cues; however,
+delayed timing and action misclassification obscured which movement the
+feedback referred to.
 These findings identify temporal grounding, layered feedback, and explicit
 handling of recognition errors as requirements for interpretable AI support in
 solo movement practice.
@@ -158,8 +159,8 @@ may claim.
 
 We ask:
 
-1. **RQ1:** How does AI-assisted feedback support fencers' ability to notice and
-   interpret posture and footwork errors compared with video self-review?
+1. **RQ1:** What differences emerge between the errors fencers identify through
+   unaided video self-review and those they report after AI-assisted feedback?
 2. **RQ2:** Which properties of live feedback make a correction actionable
    without unnecessarily interrupting practice?
 3. **RQ3:** How do cue timing, action-recognition errors, and post-session
@@ -168,14 +169,13 @@ We ask:
 To obtain initial evidence, we conducted a preliminary mixed-method study with
 four participants who completed baseline self-review and AI-assisted practice.
 We collected post-use ratings from all four and analyzed detailed post-task
-interviews from two. The results suggest that participants valued the system
-most for making errors visible and supporting later review. They could act on
-several concrete cues, especially those concerning step size and body balance,
-without reporting substantial interruption. At the same time, delayed cues and
-misclassified actions made some feedback difficult to ground in a specific
-movement. We use these results to characterize both the promise and the design
-requirements of interpretable feedback, rather than as evidence of durable
-skill improvement.
+interviews from two. The ratings suggest value in making errors visible and
+supporting later review, while the two interviewees reported acting on several
+concrete cues, especially those concerning step size and body balance, without
+substantial interruption. At the same time, delayed cues and misclassified
+actions made some feedback difficult to ground in a specific movement. We use
+these results to characterize both the promise and the design requirements of
+interpretable feedback, rather than as evidence of durable skill improvement.
 
 ### 1.5 Contributions and Scope
 
@@ -846,51 +846,312 @@ those mechanisms remain incomplete.
 
 ### 5.1 System Architecture
 
+We implemented the prototype as a native Android application in Kotlin and
+Jetpack Compose (minimum Android API level 26). The application combines
+CameraX for live capture, a YOLO ONNX model or selectable MediaPipe Tasks
+backend for pose estimation, ONNX Runtime for fencing-action inference, Room
+for local session storage, Android text-to-speech for spoken cues, and Media3
+for optional annotated-video export. This Android application is the most
+complete realization of the proposed system; the legacy Python components in
+the repository are not part of the deployed mobile inference path.
+
+The application has two video ingress paths. In live coaching, CameraX supplies
+frames from the rear camera to a single analysis executor. It uses
+`KEEP_ONLY_LATEST` backpressure so that inference does not accumulate an
+increasing queue of stale frames. In post-session review, the application
+samples a selected recording at approximately 30 frames per second and sends
+the decoded frames through the same analysis pipeline. Reusing the pipeline
+keeps the action labels and feedback rules consistent across immediate and
+retrospective feedback, although the two paths have not yet been shown to have
+equivalent timing or decoding behavior.
+
+For each accepted frame, the pipeline performs:
+
+1. pose extraction and conversion to a common skeleton representation;
+2. target selection and short-gap tracking;
+3. activity gating and body-centered spatial normalization;
+4. windowed FenceNet action classification;
+5. rule-based detection of fencing-form errors;
+6. feedback prioritization, cooldown enforcement, and output; and
+7. local aggregation of action counts, cue history, and pipeline diagnostics.
+
+All pose, action, and heuristic analysis runs on the device. Network access is
+optional and is used only to generate a post-session natural-language summary.
+That request contains the stored profile name, selected practice mode and
+target side, aggregate action counts, and the three most frequent error
+categories with their playbook descriptions; it does not upload raw video or
+pose trajectories. If the service is disabled or fails, the application
+generates a deterministic local summary from the same playbook. This boundary
+allows the main coaching loop and report generation to remain usable without a
+remote model.
+
+Figure 3 summarizes this architecture and distinguishes the implemented
+mechanisms from user-facing configuration. In particular, target side,
+practice mode, voice state, muted feedback categories, and a selected focus
+category affect runtime behavior. Handedness, height, weight, and processing
+profile are currently stored but are not used by the inference or heuristic
+calculations; we therefore do not treat the current prototype as
+anthropometrically personalized.
+
 ### 5.2 Pose and Action Analysis
+
+The application defaults to a YOLO pose model executed through ONNX Runtime.
+It letterboxes each frame to \(640 \times 640\), normalizes RGB values to
+\([0,1]\), applies a 0.35 person-box threshold and a 0.35 keypoint threshold,
+and performs non-maximum suppression at 0.45 intersection-over-union. Users
+can instead select MediaPipe Pose Landmarker in video mode with the lite model,
+at most two detected poses, and minimum detection and tracking confidence of
+0.50. MediaPipe landmarks below 0.35 visibility are excluded from the mapped
+skeleton. Both backends are mapped to a shared set of head, shoulder, elbow,
+wrist, pelvis, knee, and ankle points. The YOLO mapping currently uses a fixed
+right-side limb assignment whereas the MediaPipe mapping is target-side aware.
+Results from the two backends should therefore not be pooled until their limb
+semantics have been tested and aligned.
+
+When multiple people are visible, the tracker initializes the target using the
+leftmost or rightmost candidate according to the configured target side and
+then favors track continuity and spatial proximity. It permits up to five
+missing detections by extrapolating recent motion and rejects large frame-wise
+position jumps. This supports brief occlusion but does not provide identity
+recognition; a crossing opponent or bystander can still cause a target switch.
+
+An activity gate reduces unnecessary downstream work and prevents obviously
+non-fencing frames from entering the action buffer. In its idle state, pose
+extraction is throttled to approximately 5 Hz. The gate becomes active after
+five consecutive indications of bent-knee or body motion and returns to idle
+after 60 inactive frames. It also rejects a strongly turned-away body when
+visible shoulder width is less than 5% of the frame width. These constants are
+engineering settings rather than empirically calibrated fencing thresholds.
+
+For active frames, the spatial normalizer uses the nose position in the first
+active frame as the origin and the vertical nose-to-front-ankle distance as the
+scale. Nine two-dimensional joints produce an 18-channel skeleton vector. A
+FIFO buffer holds 28 such vectors, and action inference runs every 10 accepted
+frames. The deployed FenceNet model is a six-block causal temporal convolutional
+network with channel sizes 32, 32, 64, 64, 128, and 128; kernel size 3; and
+dilations 1, 2, 4, 8, 16, and 32. A final 64-unit layer predicts six action
+classes: rapid lunge, incremental-speed lunge, waiting lunge, jumping-sliding
+lunge, step forward, and step backward.
+
+The classifier receives a tensor of shape \(1 \times 18 \times 28\). The
+highest softmax probability is exposed as the action confidence, and
+predictions below 0.60 are labeled `Idle` rather than assigned to one of the
+six classes. This is an action-level abstention only: most biomechanical rules
+can still emit feedback from the raw pose history when action confidence is
+low. Moreover, report "action counts" count classification windows assigned to
+each non-`Idle` class, not independently segmented fencing repetitions. Session
+timestamps are currently derived from frame index under a nominal 30-fps
+assumption. These representations are sufficient for prototype feedback and
+relative session summaries, but they should not be interpreted as ground-truth
+repetition counts or capture-clock-accurate timecodes.
 
 ### 5.3 Biomechanical Heuristics
 
+In parallel with the normalized action buffer, the pipeline retains up to 60
+recent skeletons in image coordinates. Twelve deterministic rules inspect this
+history for form patterns that can be expressed with joint angles, relative
+displacements, or body-scaled distances. Table 3 reports the implemented
+conditions. The thresholds were selected to operationalize coach-relevant
+concepts in the prototype; they have not yet been calibrated against
+independent coach annotations.
+
+**Table 3. Implemented biomechanical feedback rules and operating conditions.**
+
+| Feedback rule | Implemented trigger | Context and current handling |
+|---|---|---|
+| Excessive bounce | Pelvis vertical range exceeds 0.33 of body-box height over at least five samples | Evaluated after a 15-cycle warm-up |
+| Lunge overextension | Minimum front-knee angle is below \(120^\circ\) | Evaluated from recent raw poses |
+| Dropped guard | Weapon wrist remains below the pelvis for more than five frames, or more than ten in free bout | Duration threshold varies by mode |
+| Foot before hand | Front-ankle displacement peaks before wrist displacement; both exceed 0.01 body scale | Requires target-practice mode and an offensive action |
+| Stance too high | Mean front-knee angle exceeds \(160^\circ\) over at least three samples | Fixed threshold across users |
+| Incomplete arm extension | Weapon-elbow angle remains below \(155^\circ\) | Requires target-practice mode and an offensive action |
+| Over-parrying | Maximum wrist sweep exceeds three times a shoulder-width proxy | Requires at least five samples |
+| Step too wide | Front-to-rear ankle separation exceeds three times a shoulder-width proxy | Evaluated from the current pose |
+| Step too narrow | Front-to-rear ankle separation is below 1.2 times a shoulder-width proxy | Evaluated from the current pose |
+| Center of mass too far forward | Spine tilt exceeds \(15^\circ\), or shoulder tilt exceeds \(15^\circ\) | Geometric proxy rather than force measurement |
+| Center of mass too far backward | Spine tilt is below \(-10^\circ\), or shoulder tilt is below \(-15^\circ\) | Geometric proxy rather than force measurement |
+| Hand too high | Wrist-above-elbow angle exceeds \(60^\circ\) | Evaluated from the current pose |
+
+The rules return categorical error keys rather than probabilities or
+diagnostic traces. The scheduler then attaches playbook content and a dynamic
+priority score. All twelve are deterministic Kotlin rules that share angle,
+displacement, and body-scale utilities. Foot-before-hand and incomplete arm
+extension are explicitly conditioned on both target-practice mode and an
+offensive-action prediction. The other rules may run when FenceNet has
+abstained to `Idle`. This design preserves form feedback when action recognition
+is uncertain, but it also creates a path for out-of-context cues. A stricter
+production design should jointly gate rules on pose quality, action coverage,
+and temporal evidence.
+
 ### 5.4 Visual, Spoken, and Post-Session Feedback
+
+The feedback scheduler converts simultaneous rule detections into a bounded set
+of outputs. For each active error, it computes a priority score from a
+playbook-defined base weight, an aging bonus of 2 per skipped opportunity, a
+persistence bonus of 0.25 for up to eight active cycles, a novelty bonus of
+0.75, a focus-category bonus of 4, and a repetition penalty of 1 for up to
+three prior spoken instances. The scheduler removes muted or mode-incompatible
+errors, displays at most three visual cues, and selects at most one cue for
+speech. It enforces a 1.2-second global speech interval and a 4-second
+per-error cooldown. A cue waiting for speech expires after 5 seconds so that
+old advice is not read after the relevant motion has passed.
+
+Labels, short corrective cues, diagnoses, drills, and base priorities are
+loaded from a bilingual JSON playbook. During practice, the interface presents
+the recognized action, confidence, processing state, and prioritized correction
+cards. Android text-to-speech uses flush semantics so that a newly selected cue
+replaces queued speech. Users can pause analysis, disable voice, focus on one
+error category, mute categories, or terminate the session. When no visual rule
+is active the interface shows "Good Technique"; this means only that no
+implemented rule fired on the current evidence, not that the movement was
+biomechanically correct.
+
+The application logs a spoken cue, or otherwise the first visual cue, while
+deduplicating the same label within a classifier stride. The live history keeps
+five recent cues, the session timeline keeps up to 60, and the report displays
+the 20 most recent entries. Room stores session metadata, aggregate
+classification-window counts, and cue history. The post-session report combines
+these records with playbook explanations and drill suggestions. If enabled,
+annotated-video export renders the sampled analysis over the original recording
+through Media3.
+
+Several failure paths are handled explicitly. Missing pose or FenceNet assets
+produce a model-unavailable state, optional language-model failure falls back
+to the deterministic report, and short target loss is bridged by the tracker.
+However, exceptions in the live camera analyzer are currently suppressed to
+protect the session from a crash and are not surfaced to the learner. Better
+diagnostic logging and a visible degraded-mode indicator are needed before the
+system can support reliability claims.
 
 <!-- Insert system overview figure here.
 Figure 3. AI Fencing Coach pipeline from commodity-camera video through pose
 extraction, target tracking, action recognition, fencing-specific heuristic
 analysis, feedback prioritization, and visual, spoken, or post-session output. -->
 
-<!-- Insert feedback-rules table here.
-Table 3. Implemented feedback rules, triggering conditions, required pose
-signals, confidence or abstention behavior, presentation timing, and intended
-fencing correction. -->
-
 ## 6. Technical Evaluation
 
-### 6.1 Evaluation Dataset and Conditions
+### 6.1 Current Verification and Evaluation Scope
 
-### 6.2 Accuracy, Latency, and Calibration Measures
+We retain a separate technical-evaluation section because implementation
+description and technical evidence answer different questions. Section 5
+documents what the artifact does; this section states what has and has not been
+verified. At the current prototype stage, the available evidence supports
+Android build integrity, selected component behavior, and model-export claims,
+but not pose accuracy, action recognition accuracy, biomechanical-error
+accuracy, or real-time performance claims.
+
+Table 4 summarizes reproducible checks on the artifact snapshot used for this
+manuscript. The Android unit-test task completed 20 tests with no failures, and
+the debug application assembled successfully. Three focused Python tests for
+FenceNet and YOLO export contracts also passed. Comparing the deployed FenceNet
+ONNX model with its PyTorch checkpoint on a synthetic tensor of the expected
+shape produced a maximum absolute logit difference of \(3.58 \times 10^{-7}\).
+This establishes numerical fidelity for that export check, not correctness of
+the checkpoint's action predictions.
+
+**Table 4. Reproducible implementation checks and their claim boundaries.**
+
+| Technical check | Observation | Supported interpretation |
+|---|---|---|
+| Android JVM tests | 20 passed; 0 failed, errored, or skipped | Tested scheduler, heuristic, normalization, tracking, classifier-label, report, and agent-utility behaviors remain internally consistent |
+| Android debug build | Build completed successfully | The current mobile artifact and bundled model assets package together |
+| Focused model-export tests | 3 passed | Expected FenceNet and YOLO ONNX interfaces can be loaded and exercised |
+| FenceNet checkpoint-to-ONNX parity | Maximum absolute logit difference \(3.58 \times 10^{-7}\) on a synthetic input | The tested export closely reproduces checkpoint computation |
+| FenceNet deployed interface | Input \(1 \times 18 \times 28\); output \(1 \times 6\) | Android tensor construction matches the model contract |
+| Repository-wide Python suite | 82 passed and 36 failed | The legacy Python tree is not a clean validation target; many failures reference absent modules or older interfaces |
+| Coach-labeled benchmark and device trace | Not present in the current artifact | Accuracy, calibration, latency, energy, and thermal claims remain unmeasured |
+
+The checkpoint contains model weights but no training manifest, split
+identifiers, class distribution, camera conditions, or held-out metrics.
+Consequently, we cannot reconstruct a defensible evaluation dataset from the
+deployed artifact. The preliminary evaluation in Section 7 supplies usability
+and design-diagnostic evidence only and is not reused as an accuracy benchmark.
+
+### 6.2 Required Accuracy, Latency, and Calibration Measures
+
+A complete technical evaluation should use an independently annotated video
+corpus rather than the recordings used to tune rule thresholds. The corpus
+should vary fencer experience, target side, body proportions, clothing, camera
+distance and angle, illumination, movement speed, opponent presence, and
+partial occlusion. It should include all six supported actions, non-action
+intervals, correct technique, each implemented error type, and unsupported
+movements. At least two qualified fencing coaches should annotate action
+boundaries and feedback correctness, with disagreements retained and reported
+rather than collapsed without explanation.
+
+The evaluation should report:
+
+1. pose availability, target-identity retention, reacquisition time, and
+   landmark error under each recording condition;
+2. per-class action precision, recall, F1, confusion matrices, and macro
+   averages, with participant-independent test splits;
+3. reliability diagrams or expected calibration error for action confidence,
+   together with coverage-versus-error curves for the 0.60 abstention
+   threshold;
+4. per-rule precision, recall, false cues per minute, and coach agreement on
+   whether each cue was appropriate and timely;
+5. scheduler agreement with coach priority when several errors co-occur, plus
+   the frequency of repeated, delayed, or expired cues;
+6. end-to-end capture-to-display and capture-to-speech latency at the median
+   and 95th percentile, effective update rate, dropped-frame rate, warm-up
+   time, battery use, and thermal throttling across representative low-, mid-,
+   and high-end Android devices; and
+7. report grounding, measured as the proportion of generated statements
+   supported by stored action or cue records.
+
+These measures should be stratified by recording condition and accompanied by
+confidence intervals. Component accuracy alone would not establish coaching
+effectiveness, but it is necessary to determine whether subsequent user
+responses concern the intended system behavior or failures in perception and
+timing.
 
 ### 6.3 Failure Cases and Abstention Behavior
 
-<!-- Insert technical-evaluation table here.
-Table 4. Technical performance by error type and recording condition, including
-detection accuracy, false-feedback frequency, latency, confidence calibration,
-and observed failure cases. -->
+Code inspection and the formative study identify several cases that the future
+benchmark must treat explicitly. One participant observed a defensive movement
+being misclassified and described the resulting correction as delayed. This is
+useful evidence of an end-to-end failure mode, but a single observation does
+not estimate its frequency. Table 5 distinguishes the current handling from
+the unresolved technical risk.
 
-## 7. User Study Design and Analysis
+**Table 5. Current failure handling and unresolved technical risks.**
 
-We conducted a preliminary mixed-method feedback study to examine whether the
-prototype's real-time and post-session feedback was understandable and
-actionable during a short fencing practice workflow. The study was designed as
-a feasibility and design-diagnostic study, not as a test of skill acquisition
-or long-term training effectiveness. The analyzed corpus contains aggregate
-ratings from four participants and detailed ordered interview records for two
-of those participants.
+| Failure condition | Current behavior | Unresolved risk or required test |
+|---|---|---|
+| Low action confidence | Action output becomes `Idle` below 0.60 | Most form rules can still speak, so action abstention is not full feedback abstention |
+| Low-visibility or missing landmarks | Unavailable joints are omitted; the tracker can extrapolate for five missing detections | Geometry may be computed from stale or incomplete evidence; pose-quality gating requires validation |
+| Multiple people or crossing trajectories | Target selected by side and maintained by motion/proximity | No identity model prevents a switch to an opponent or bystander |
+| MediaPipe/YOLO backend change | Both feed a nominally shared skeleton format | Different front-limb semantics can change rule outputs; backend-equivalence tests are required |
+| Variable capture or decode rate | Cue time is derived from frame index at nominal 30 fps | Stored timecodes and temporal windows can drift from actual motion time |
+| Simultaneous errors | Up to three visual cues and one spoken cue are prioritized with cooldowns | Priority scores and delay acceptability have not been validated with coaches |
+| Unsupported movement or rule coverage gap | No rule may fire and the UI can display "Good Technique" | Absence of a detected error may be mistaken for verified correctness |
+| Missing model or optional cloud failure | Model-unavailable state or deterministic report fallback | Live analyzer exceptions remain insufficiently visible to the learner |
+
+The current technical claim is therefore deliberately narrow: the Android
+prototype integrates on-device pose processing, a numerically faithful export
+of the available FenceNet checkpoint, deterministic fencing heuristics, and
+bounded multimodal feedback into an executable workflow. Whether the workflow
+is accurate, calibrated, timely, and robust across fencers and environments
+remains an empirical question. Retaining this section, rather than deleting it,
+makes that evidence boundary explicit and turns the missing measurements into
+a reproducible evaluation plan.
+
+## 7. Preliminary Evaluation Design and Analysis
+
+The same four-participant sessions described in Section 3 also provide the
+paper's preliminary evaluation evidence. No second participant sample or
+independent validation study was conducted. Section 3 uses the retained
+qualitative material formatively to derive design requirements; Sections 7 and
+8 organize the same corpus around the research questions and descriptive
+outcomes. The evaluation therefore addresses feasibility, interpretation, and
+interaction breakdowns, not skill acquisition or long-term effectiveness.
 
 ### 7.1 Research Questions
 
 Following the questions introduced in Section 1.4, the study asked:
 
-- **RQ1:** How does AI-assisted feedback support fencers' ability to notice and
-  interpret posture and footwork errors compared with video self-review?
+- **RQ1:** What differences emerge between the errors fencers identify through
+  unaided video self-review and those they report after AI-assisted feedback?
 - **RQ2:** Which properties of live feedback make a correction actionable
   without unnecessarily interrupting practice?
 - **RQ3:** How do cue timing, action-recognition errors, and post-session
@@ -898,71 +1159,42 @@ Following the questions introduced in Section 1.4, the study asked:
 
 ### 7.2 Participants and Ethics
 
-Four participants contributed questionnaire ratings. Detailed Chinese-language
-interview records were available for two participants, referred to as P1 and
-P2. The supplied study artifacts do not preserve recruitment source, age,
-gender, fencing experience, compensation, session duration, or the applicable
-ethics-review and consent procedure. We therefore do not infer these
-characteristics or claim that the sample represents the wider fencing
-population. These details, together with video-data retention and withdrawal
-procedures, must be added from the original study records before publication.
-
-The present analysis retains participant identifiers rather than names and
-reports only movement-relevant observations. Because only two detailed
-interviews were available, qualitative findings describe cases and tensions
-observed in this preliminary sample; they do not establish thematic saturation
-or population prevalence.
+Participant and data coverage is reported once in Table 1. Four participants
+contributed aggregate questionnaire ratings, while detailed records were
+retained only for P1 and P2. Recruitment, participant characteristics,
+compensation, and the applicable ethics, consent, retention, and withdrawal
+procedures are absent from the supplied artifacts. As detailed in Sections 3.1
+and 10.1, the manuscript therefore makes no representativeness, saturation, or
+complete ethical-governance claim.
 
 ### 7.3 Conditions and Baseline
 
-The study used a fixed sequence built around the learner's current self-review
-practice and the prototype's two feedback modes:
-
-1. **Video self-review baseline.** Participants performed a short sequence that
-   could include en garde, advance, retreat, and lunge movements. They reviewed
-   the recording and described what had gone well, what appeared incorrect,
-   and what they would change.
-2. **Real-time voice feedback.** Participants repeated the movements while the
-   camera-based system analyzed their pose and action sequence. Short cues were
-   delivered through earphones, including feedback about stance height,
-   center-of-mass position, and step width.
-3. **Feedback-guided attempt.** Participants performed another attempt while
-   trying to act on the preceding voice feedback.
-4. **Post-session video analysis.** Participants reviewed timestamped detected
-   issues and a summary of recurring problems, then discussed whether this
-   information added value beyond unaided video review.
-
-This was not a counterbalanced comparison. The baseline always preceded
-AI-assisted practice, so order, repetition, interviewer guidance, and growing
-familiarity with the task are alternative explanations for any perceived
-improvement.
+As described in Section 3.2, each session followed four fixed phases: unaided
+video self-review, real-time earphone feedback, a feedback-guided attempt, and
+post-session video analysis. Self-review served as a current-practice
+reference, but not as a controlled comparison condition. The order was not
+counterbalanced, and P2's baseline included interviewer prompting; repetition,
+task familiarity, and researcher guidance therefore remain alternative
+explanations for later responses.
 
 ### 7.4 Procedure
 
-The researcher first explained the two prototype modes: camera-based real-time
-analysis with earphone cues and post-session video analysis. Participants then
-completed the baseline, real-time, and feedback-guided phases described above.
-After the movement tasks, they inspected the post-session analysis and
-completed feedback ratings. Detailed semi-structured interview records were
-retained for P1 and P2. Interview prompts covered self-detected errors, cue
-comprehension, timing, immediate adjustment, interruption, perceived
-usefulness, and incorrect feedback.
-
-Two protocol deviations are visible in the available records. During P2's
-baseline review, the interviewer suggested that the participant's center of
-mass appeared to move forward before P2 agreed with that diagnosis. P2's
-baseline therefore cannot be treated as a fully independent self-diagnosis.
-The records also include developer explanations of available error types and
-system behavior during P1's session. These explanations may have shaped later
-interpretations of the feedback. In addition, P2's final feedback-guided
-attempt lacks a complete post-attempt verbal response.
+The complete task sequence and retained corpus are reported in Section 3.2.
+For evaluation, we treated verbalized baseline diagnoses, explanations of cue
+meaning, reported correction attempts, reactions to incorrect detections, and
+the 15 post-use ratings as complementary evidence. The visible protocol
+deviations were retained in analysis: P2's prompted baseline, developer
+explanations during P1's session, and P2's incomplete final post-attempt
+response.
 
 ### 7.5 Measures
 
-Table 5 maps each research question to the evidence available in the study
+Table 6 maps each research question to the evidence available in the study
 corpus. The questionnaire summary contains 15 item means, each based on four
 participants. Item wording, response anchors, participant-level values, and
 dispersion statistics were not included in the supplied file.
+
+**Table 6. Research questions, constructs, and retained evidence.**
 
 | Research question | Construct | Operational evidence | Data source |
 | --- | --- | --- | --- |
@@ -983,62 +1215,41 @@ responses, calculate standard deviations or confidence intervals, or conduct
 null-hypothesis significance tests. We calculated category-level means by
 averaging the five supplied item means within each category.
 
-For the qualitative analysis, we used a focused hybrid framework organized
-around the practice-feedback cycle: **notice**, **interpret**, **act**, and
-**verify**. We additionally coded timing, interruption, recognition error,
-trust, and the relationship between real-time and post-session feedback. We
-constructed a participant-by-finding matrix, compared P1 and P2, and retained
-negative and contradictory cases. The source files are ordered interview
-records containing summarized answers rather than complete verbatim
-transcripts; quotations are therefore used only where the record preserves the
-participant's words. Chinese quotations were translated into English for
-reporting.
+The qualitative procedure is reported in Section 3.3 and was not repeated as a
+separate analysis. In Sections 8.2-8.5, we integrate those case findings with
+the aggregate ratings through convergence, complementarity, and contradiction.
+For example, the interviews explain why low-interruption ratings can coexist
+with poor timing ratings, while P1's baseline self-diagnosis limits a simple
+interpretation of the high advantage-over-self-review mean.
 
 <!-- Insert user-study procedure figure here.
 Figure 4. Fixed-order preliminary study procedure: unaided video self-review,
 real-time earphone feedback, a feedback-guided attempt, post-session analysis,
 questionnaire, and semi-structured interview. -->
 
-## 8. Preliminary Study Results (4 Participants)
+## 8. Preliminary Evaluation Results
 
-### 8.1 Participant Overview
+### 8.1 Evidence Coverage
 
-All four participants contributed to each aggregate questionnaire item. P1 and
-P2 additionally contributed detailed interview evidence spanning baseline
-self-review, real-time voice feedback, and post-session video analysis. No
-interview or participant-level questionnaire records were available for the
-other two participants. Participant demographics and fencing-experience levels
-were also unavailable, preventing subgroup comparison.
+This section reports no new participant pool beyond Section 3. All 15
+questionnaire means use `N=4`; qualitative interpretation is limited to P1 and
+P2, with the deviations summarized in Table 1. Because participant-level
+ratings and characteristics were unavailable, the results cannot support
+individual trajectories, subgroup comparisons, or distributional claims.
 
-| Available evidence | P1 | P2 | Two additional participants |
-| --- | --- | --- | --- |
-| Questionnaire contribution | Included in aggregate | Included in aggregate | Included in aggregate |
-| Baseline self-review record | Available | Available, with interviewer prompt | Not available |
-| Real-time feedback interview | Available | Available | Not available |
-| Feedback-guided attempt account | Available | Partial; no complete final response | Not available |
-| Post-session analysis interview | Available | Available | Not available |
+### 8.2 Reported Correction Attempts and Performance Boundary
 
-### 8.2 Behavioral and Performance Results
+Consistent with the formative cases in Section 3.4, P1 and P2 reported
+attempting immediate changes to step size or center-of-mass position after
+spoken cues. P1 could already diagnose major errors at baseline, whereas P2
+did not independently state a correction before interviewer prompting. The
+evaluation therefore records reported correction attempts, not a uniform gain
+over self-review.
 
-The two interviews showed different starting points for unaided self-review.
-P1 independently identified vertical center-of-mass movement and narrow steps
-and could already state a correction: remain level and adjust step width. P2
-did not independently identify a concrete correction and said, in translation,
-"I am not really sure"; P2 agreed with a center-of-mass diagnosis only after
-the interviewer introduced it. The prototype therefore did not provide wholly
-new awareness for every participant. Instead, it made feedback more specific
-for a participant with limited self-diagnosis while adding detail for a
-participant who could already identify gross errors.
-
-Both interviewees reported attempting immediate adjustments after voice cues.
-P1 described changing step size in response to "too far" or "too near" cues
-and using subsequent feedback to judge whether the adjustment had changed the
-system response. P2 reported adjusting center-of-mass position and step size.
-These accounts demonstrate perceived actionability, but the available corpus
-does not contain blinded technique ratings, coded kinematics, or
-participant-level pre/post performance measures. We therefore cannot determine
-whether the attempted corrections were technically correct or improved
-fencing performance.
+No blinded coach rating, coded kinematic outcome, or participant-level pre/post
+performance measure was retained. We cannot determine whether the attempted
+changes were technically correct, improved fencing performance, or persisted
+beyond the session.
 
 ### 8.3 Experience, Trust, and Actionability
 
@@ -1048,6 +1259,8 @@ training value (4.45) and feedback quality (3.60). The contrast is important:
 participants rated the workflow as useful for noticing and reviewing errors,
 but were less positive about whether individual cues arrived at the right time
 and clearly explained how to correct the movement.
+
+**Table 7. Aggregate post-use ratings from the four-participant sample.**
 
 | Category | Measure | Mean | N |
 | --- | --- | ---: | ---: |
@@ -1074,54 +1287,34 @@ high (M=4.25), matching the interviews: neither P1 nor P2 identified voice
 feedback itself as a major disruption. Their difficulty was temporal
 reference, not merely the presence of audio.
 
-### 8.4 Qualitative Findings
+### 8.4 Mixed-Method Results by Research Question
 
-#### Feedback made uneven self-review more concrete
+**RQ1: Error awareness alongside self-review.** Error awareness and advantage
+over self-review were among the highest-rated items (both `M=4.75`), but the
+case evidence qualifies this pattern. P2 struggled to name a baseline problem,
+whereas P1 already identified major posture and footwork issues. The retained
+evidence therefore supports differing forms of added value, such as initial
+diagnosis for one learner and added detail or confirmation for another, rather
+than a general claim that AI reveals errors users cannot see.
 
-The baseline cases show that self-review ability varied. P1 could identify
-large posture and footwork problems without assistance, whereas P2 struggled
-to name either a problem or a next action. After using the system, both
-participants discussed concrete categories such as stance height,
-center-of-mass position, and step width. For P2, the primary value was external
-diagnosis: the system named issues that were difficult to articulate through
-video review alone. For P1, the value was refinement rather than first
-detection, especially when post-session analysis supplied more detailed or
-technical descriptions.
+**RQ2: Actionability without unnecessary interruption.** Actionable correction
+was rated positively (`M=4.50`) and neither interviewee identified earphone
+audio itself as a major disruption, consistent with low interruption
+(`M=4.25`). The interviews add the mechanism: directional step-size and balance
+cues implied a concrete next action, while unfamiliar arm or defensive-action
+issues needed richer post-session explanation. Correction understandability
+remained lower (`M=3.25`), indicating that a cue can be brief and tolerable
+without fully explaining the correction.
 
-#### Short cues supported action, while review supported explanation
-
-Both participants could act most readily on concise, directional feedback
-about step size and center of mass. P1 described step-width cues as especially
-clear because they directly indicated whether to make the next step shorter or
-wider. However, detailed issues involving the weapon arm or a defensive action
-were harder to resolve through audio alone. P1 explicitly treated the two
-modalities as complementary: voice was useful for immediate adjustment,
-whereas video analysis and the end-of-session summary provided the detail
-needed for reflection. This finding supports a layered design rather than
-attempting to deliver a full biomechanical explanation during movement.
-
-#### A cue without a clear movement referent was difficult to use
-
-Temporal grounding was the most consistent breakdown. P1 was unsure whether a
-cue described the current movement or the preceding repetition. P2 reported
-that some feedback arrived well after the movement had ended, making it
-difficult to know which action should be corrected. This pattern explains why
-timing accuracy and correction understandability received the lowest mean
-ratings even though participants generally heard and understood the words.
-Interpretability in this setting therefore depends on linking advice to a
-specific movement episode, not only on simplifying the cue text.
-
-#### Recognition errors changed the meaning of otherwise plausible advice
-
-Both interviews contain examples in which hand movement was interpreted as a
-defensive action even though the participant did not believe they had
-performed one. P1 also questioned an apparent lunge-related classification.
-These were not cosmetic errors: once the action label was wrong, the associated
-coaching advice no longer had a trustworthy referent. P2 still considered most
-other feedback reasonable, showing calibrated rather than total rejection.
-The finding nevertheless indicates that action confidence, uncertainty, and a
-way to inspect or dismiss questionable detections are necessary parts of the
-feedback interaction.
+**RQ3: Timing, recognition errors, and appropriate reliance.** Timing accuracy
+was among the lowest-rated items (`M=3.25`), matching both interviewees'
+uncertainty about which movement a cue described. The moderate trust rating
+(`M=3.75`) also concealed meaningful variation: participants accepted some
+step and balance cues but questioned defensive-action and lunge-related
+classifications. Post-session evidence added useful detail, yet could also make
+a false classification appear more authoritative. Appropriate reliance
+therefore depended on temporal provenance and contestability, not confidence
+in the system as a whole.
 
 ### 8.5 Unexpected Findings and Negative Cases
 
@@ -1145,24 +1338,11 @@ support a claim that the study identified feasibility and design issues; they
 do not support claims of improved skill, superiority to self-review, or
 generalizable trust.
 
-The resulting design requirements are:
-
-| Finding | Design requirement | Main-study measure |
-| --- | --- | --- |
-| Participants could act on short step and center-of-mass cues | Keep real-time cues brief and directional; move explanation to post-session review | Cue comprehension and next-attempt correction |
-| Participants could not reliably connect delayed cues to a movement | Attach feedback to a repetition or timestamp and report end-to-end cue latency | Referent-identification accuracy and latency |
-| Action misclassification produced misleading coaching | Expose confidence, support dismissal or correction, and abstain when action evidence is weak | False-feedback rate and appropriate reliance |
-| Self-review ability differed between P1 and P2 | Measure baseline diagnostic ability and report who benefits from which feedback layer | Added error detection beyond unaided review |
-| Voice and video served different roles | Preserve layered immediate, visual, and post-session feedback | Interruption, review usefulness, and correction quality |
-
-The current Android implementation already reflects part of this agenda: its
-scheduler speaks one prioritized cue while retaining up to three visual issues,
-and post-session review presents a timestamped cue history. It also displays
-action-classification confidence. However, real-time advice is not explicitly
-bound to a repetition identifier, and the interface does not yet expose
-cue-specific uncertainty or let a learner dismiss or correct a questionable
-detection. These remain implementation and evaluation priorities rather than
-resolved outcomes of the preliminary study.
+Table 2 translates these same cases into DR1-DR5 and records the current
+Android response. We do not repeat that traceability table here because the
+evaluation is not independent evidence that those design responses are
+effective. Sections 9 and 10 instead discuss the implications and the measures
+needed to test them.
 
 ## 9. Discussion
 
@@ -1181,8 +1361,8 @@ judgment.
 
 ### 9.1 How AI Feedback Fits Solo Fencing Practice
 
-For RQ1, the findings indicate that AI feedback can reduce the diagnostic work
-of self-review, but its added value depends on what a learner can already see.
+For RQ1, the findings suggest that AI feedback may add diagnostic structure
+beyond self-review, but its value depends on what a learner can already see.
 P1 independently identified conspicuous center-of-mass and step-width problems,
 whereas P2 struggled to name a problem before interviewer prompting. After
 system use, both discussed concrete movement categories, and the aggregate
