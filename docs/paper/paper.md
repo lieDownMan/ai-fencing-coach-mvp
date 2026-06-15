@@ -10,11 +10,12 @@ practice. We present AI Fencing Coach, an Android prototype whose on-device
 pipeline combines commodity-camera pose estimation, fencing action recognition,
 biomechanical heuristics, and feedback prioritization. It delivers visual and
 spoken cues during practice plus post-session video and error review, while
-retaining coaches as final authorities. We conducted a preliminary mixed-method
-study with four participants using baseline self-review and AI-assisted
-practice, collecting ratings from all four and detailed post-task interviews
-from two. Descriptive ratings were highest for error awareness, post-review
-usefulness, and perceived advantage over self-review (M=4.75 for each), and
+positioning coaches as final authorities. We conducted a preliminary
+mixed-methods study of an early prototype. Four participants contributed
+post-use ratings, and retained records from two document unaided self-review,
+AI-assisted practice, and detailed post-task interviews. Descriptive ratings
+were highest for error awareness, post-review usefulness, and perceived
+advantage over self-review (M=4.75 for each), and
 lowest for timing accuracy and correction understandability (M=3.25 for each).
 The two interviewees reported acting on step and center-of-mass cues; however,
 delayed timing and action misclassification obscured which movement the
@@ -68,18 +69,18 @@ recognition accuracy as the endpoint.
 Recorded-video self-review is a lightweight way to revisit practice without
 specialized sensing. It preserves the performed movement and can reveal gross
 posture or footwork patterns, but it also shifts the burden of diagnosis to the
-learner. In our baseline condition, the two interviewed participants differed
-substantially in what they could infer from video alone. Self-review helped one
-participant articulate a visible balance problem, while the other remained
-unsure what to change. Video can show that something happened without
-necessarily explaining what the movement means in fencing terms or what the
-next repetition should look like.
+learner. In the retained unaided self-review records, the two interviewed
+participants differed substantially in what they could infer from video alone.
+Self-review helped one participant articulate a visible balance problem, while
+the other remained unsure what to change. Video can show that something
+happened without necessarily explaining what the movement means in fencing
+terms or what the next repetition should look like.
 
 The preliminary study suggests value in combining immediate and reflective
 support. Among the 15 supplied aggregate questionnaire items, the highest means
-were for error awareness, usefulness of post-session review, and advantage over
-self-review (`M=4.75` for each). Actionable correction and solo-practice support
-were assigned means of `M=4.50`. In the interviews, both participants reported
+were for the items labeled Error Awareness, Post-Review Usefulness, and Better
+than Self-Review (`M=4.75` for each). Actionable Correction and Solo Practice
+Support had means of `M=4.50`. In the interviews, both participants reported
 that they could respond to step-size and center-of-mass cues, and one described
 post-session analysis as adding detail that short spoken feedback could not
 provide during movement.
@@ -166,12 +167,13 @@ We ask:
 3. **RQ3:** How do cue timing, action-recognition errors, and post-session
    evidence shape appropriate reliance on AI-generated fencing feedback?
 
-To obtain initial evidence, we conducted a preliminary mixed-method study with
-four participants who completed baseline self-review and AI-assisted practice.
-We collected post-use ratings from all four and analyzed detailed post-task
-interviews from two. The ratings suggest value in making errors visible and
-supporting later review, while the two interviewees reported acting on several
-concrete cues, especially those concerning step size and body balance, without
+To obtain initial evidence, we conducted a preliminary mixed-methods study of
+an early prototype. Four participants contributed post-use ratings. Retained
+records from two document unaided self-review, real-time feedback,
+feedback-guided practice, post-session analysis, and detailed interviews. The
+relative rating pattern suggests value in making errors visible and supporting
+later review, while the two interviewees reported acting on several concrete
+cues, especially those concerning step size and body balance, without
 substantial interruption. At the same time, delayed cues and misclassified
 actions made some feedback difficult to ground in a specific movement. We use
 these results to characterize both the promise and the design requirements of
@@ -204,7 +206,7 @@ aspect of fencing. AI Fencing Coach is therefore positioned as a practice and
 reflection aid for moments when expert attention is unavailable, not as a
 replacement for a coach or as an independent authority on technique.
 
-## 2. Related Work Analysis
+## 2. Related Work
 
 Prior work relevant to AI Fencing Coach spans three connected conversations:
 computational analysis of fencing, interactive systems for movement learning,
@@ -410,10 +412,11 @@ movement- and interaction-relevant observations.
 
 ### 3.2 Procedure and Materials
 
-The study used a fixed sequence centered on a short fencing movement set that
-could include en garde, advance, retreat, lunge, and advance-lunge actions.
-Participants first performed without automated feedback and reviewed the
-recorded video. They described what appeared correct, what appeared
+The retained interview materials describe a fixed sequence centered on a short
+fencing movement set that could include en garde, advance, retreat, lunge, and
+advance-lunge actions. In these records, participants first performed without
+automated feedback and reviewed the recorded video. They described what
+appeared correct, what appeared
 problematic, and what they would change on another attempt. This phase served
 as the current-practice baseline because recorded self-review is accessible
 without a continuously present coach.
@@ -451,7 +454,8 @@ later in that interview.
 
 ### 3.3 Qualitative Analysis
 
-We used a focused hybrid analysis organized around a practice-feedback cycle:
+For this manuscript, we used a focused hybrid framework analysis organized
+around a practice-feedback cycle:
 **notice**, **interpret**, **act**, and **verify**. These deductive categories
 captured whether a participant detected a problem, understood its referent,
 selected a correction, and obtained evidence about the result. We then tracked
@@ -466,6 +470,10 @@ learner-relevant issue the system apparently did not cue, delayed but still
 actionable feedback, and defensive-action labels that participants questioned.
 Because the records summarize speech, we do not treat their phrasing as a
 verbatim corpus except where an answer explicitly preserves participant words.
+The available files do not preserve the original study team's codebook,
+analysis log, or independent second analysis, so this account is a structured
+reanalysis of the retained summaries rather than a reconstruction of the
+original analysis process.
 
 Questionnaire means were used only as descriptive triangulation. We did not
 infer individual responses, variability, confidence intervals, or statistical
@@ -486,18 +494,18 @@ show every learner an error they cannot see. Some learners need help detecting
 and naming a problem, while others need finer evidence, prioritization, or
 confirmation of an existing judgment. This variation argues for establishing
 baseline diagnostic ability rather than treating all users as equally unable
-to self-review. The high aggregate ratings for error awareness and advantage
-over self-review (both `M=4.75`, `N=4`) are promising, but they cannot erase
+to self-review. Error awareness and the item labeled Better than Self-Review
+had the highest aggregate means (both `M=4.75`, `N=4`), but they cannot erase
 the difference between P1 and P2 or establish how common either case is.
 
 #### Brief directional cues supported action, while reflection required detail
 
 Both interviewees reported attempting adjustments to step size and
 center-of-mass position after spoken feedback. P1 found step cues especially
-direct because "too far" or "too near" implied a concrete change on the next
-attempt. Neither participant identified the presence of earphone audio as a
-major interruption, consistent with the comparatively high low-interruption
-rating (`M=4.25`). However, the interviews do not establish that these
+direct because indications that a step was too far or too near implied a
+concrete change on the next attempt. Neither participant identified earphone
+audio as a major interruption, consistent with the comparatively high
+Low Interruption rating (`M=4.25`). However, the interviews do not establish that these
 adjustments were biomechanically correct; no blinded coach rating or kinematic
 pre/post measure was retained.
 
@@ -543,8 +551,8 @@ advice about how to perform a parry is not useful if no parry occurred. A
 detailed post-session report can amplify this problem by making a false
 classification appear more authoritative. The formative implication is that
 confidence, abstention, inspection, and correction are part of the feedback
-interaction rather than purely backend concerns. The moderate aggregate trust
-rating (`M=3.75`) should therefore not be interpreted as blanket acceptance.
+interaction rather than purely backend concerns. The aggregate Feedback Trust
+mean (`M=3.75`) should therefore not be interpreted as blanket acceptance.
 
 ### 3.5 Design Requirements
 
@@ -647,12 +655,15 @@ to the intended movement.
 interface distinguishes model loading, target search, stance checking, active
 analysis, pause, and review states. When a non-idle action is recognized, the
 live action label includes the classifier confidence, and the interface also
-reports processing rate and latency. These states expose more of the
-recognition process than a single authoritative diagnosis. However, confidence
-is not propagated to each biomechanical cue, low-confidence action recognition
-does not provide a complete abstention mechanism for all heuristics, and a
-learner cannot yet dismiss or correct an individual output. The intended goal
-is contestability; the current design provides partial inspectability.
+reports processing rate. Per-frame state also records pose, classifier, and
+total processing times plus estimated dropped frames for internal diagnostics,
+but these latency values are not shown in the live interface. These states
+expose more of the recognition process than a single authoritative diagnosis.
+However, confidence is not propagated to each biomechanical cue,
+low-confidence action recognition does not provide a complete abstention
+mechanism for all heuristics, and a learner cannot yet dismiss or correct an
+individual output. The intended goal is contestability; the current design
+provides partial inspectability.
 
 **DG5: Preserve learner and coach authority.** The learner can pause analysis,
 silence speech, resume or reset a session, emphasize or mute error categories,
@@ -701,11 +712,11 @@ finish the session. Recent cue labels remain visible so that a spoken message
 is not the only record of what the system reported.
 
 Finishing practice freezes the live analysis and opens a review. The report
-summarizes elapsed and active time, number of model checks and cues, the most
-frequent recognized action, action counts, recurring issues, and a relative
-cue timeline. Each issue can carry three levels of text from the fencing
-playbook: a short cue, a diagnosis, and a suggested drill. The learner may
-resume the same session, begin a new one, or return home. The report is saved
+summarizes elapsed and active time, model checks, retained report cues, the
+most frequent recognized action, action counts, recurring issues, and a
+relative cue timeline. Each issue can carry three levels of text from the
+fencing playbook: a short cue, a diagnosis, and a suggested drill. The learner
+may resume the same session, begin a new one, or return home. The report is saved
 in an on-device session database, where history can be filtered by user,
 opened at the session level, summarized across recent sessions, selected for a
 custom recap, or deleted.
@@ -917,11 +928,13 @@ recognition; a crossing opponent or bystander can still cause a target switch.
 
 An activity gate reduces unnecessary downstream work and prevents obviously
 non-fencing frames from entering the action buffer. In its idle state, pose
-extraction is throttled to approximately 5 Hz. The gate becomes active after
-five consecutive indications of bent-knee or body motion and returns to idle
-after 60 inactive frames. It also rejects a strongly turned-away body when
-visible shoulder width is less than 5% of the frame width. These constants are
-engineering settings rather than empirically calibrated fencing thresholds.
+extraction is throttled to approximately 5 Hz. Motion can initiate a checking
+state, after which five consecutive bent-knee posture indications activate the
+pipeline. The gate returns to idle after 60 frames of standing posture, a
+strongly turned-away body, or missing target evidence. A turned-away body is
+detected when visible shoulder width is less than 5% of the frame width. These
+constants are engineering settings rather than empirically calibrated fencing
+thresholds.
 
 For active frames, the spatial normalizer uses the nose position in the first
 active frame as the origin and the vertical nose-to-front-ankle distance as the
@@ -993,8 +1006,9 @@ persistence bonus of 0.25 for up to eight active cycles, a novelty bonus of
 three prior spoken instances. The scheduler removes muted or mode-incompatible
 errors, displays at most three visual cues, and selects at most one cue for
 speech. It enforces a 1.2-second global speech interval and a 4-second
-per-error cooldown. A cue waiting for speech expires after 5 seconds so that
-old advice is not read after the relevant motion has passed.
+per-error cooldown. An issue remains pending for up to 5 seconds after its
+most recent detection, limiting how long stale advice remains eligible for
+speech.
 
 Labels, short corrective cues, diagnoses, drills, and base priorities are
 loaded from a bilingual JSON playbook. During practice, the interface presents
@@ -1045,9 +1059,9 @@ manuscript. The Android unit-test task completed 20 tests with no failures, and
 the debug application assembled successfully. Three focused Python tests for
 FenceNet and YOLO export contracts also passed. Comparing the deployed FenceNet
 ONNX model with its PyTorch checkpoint on a synthetic tensor of the expected
-shape produced a maximum absolute logit difference of \(3.58 \times 10^{-7}\).
-This establishes numerical fidelity for that export check, not correctness of
-the checkpoint's action predictions.
+shape generated with PyTorch seed 0 produced a maximum absolute logit
+difference of \(2.98 \times 10^{-7}\). This establishes numerical fidelity for
+that export check, not correctness of the checkpoint's action predictions.
 
 **Table 4. Reproducible implementation checks and their claim boundaries.**
 
@@ -1056,7 +1070,7 @@ the checkpoint's action predictions.
 | Android JVM tests | 20 passed; 0 failed, errored, or skipped | Tested scheduler, heuristic, normalization, tracking, classifier-label, report, and agent-utility behaviors remain internally consistent |
 | Android debug build | Build completed successfully | The current mobile artifact and bundled model assets package together |
 | Focused model-export tests | 3 passed | Expected FenceNet and YOLO ONNX interfaces can be loaded and exercised |
-| FenceNet checkpoint-to-ONNX parity | Maximum absolute logit difference \(3.58 \times 10^{-7}\) on a synthetic input | The tested export closely reproduces checkpoint computation |
+| FenceNet checkpoint-to-ONNX parity | Maximum absolute logit difference \(2.98 \times 10^{-7}\) on a synthetic input generated with PyTorch seed 0 | The tested export closely reproduces checkpoint computation |
 | FenceNet deployed interface | Input \(1 \times 18 \times 28\); output \(1 \times 6\) | Android tensor construction matches the model contract |
 | Repository-wide Python suite | 82 passed and 36 failed | The legacy Python tree is not a clean validation target; many failures reference absent modules or older interfaces |
 | Coach-labeled benchmark and device trace | Not present in the current artifact | Accuracy, calibration, latency, energy, and thermal claims remain unmeasured |
@@ -1255,10 +1269,11 @@ beyond the session.
 
 Across the 15 questionnaire items, the unweighted overall mean was 4.20. The
 five learning-support items had the highest category mean (4.55), followed by
-training value (4.45) and feedback quality (3.60). The contrast is important:
-participants rated the workflow as useful for noticing and reviewing errors,
-but were less positive about whether individual cues arrived at the right time
-and clearly explained how to correct the movement.
+training value (4.45) and feedback quality (3.60). The relative contrast is
+important: items concerning noticing and reviewing errors had higher means than
+items concerning whether individual cues arrived at the right time and clearly
+explained how to correct the movement. Without the response anchors, these
+values support only descriptive comparisons within the supplied item set.
 
 **Table 7. Aggregate post-use ratings from the four-participant sample.**
 
@@ -1280,35 +1295,36 @@ and clearly explained how to correct the movement.
 | Training value | Coach supplement | 4.50 | 4 |
 | Training value | Willingness to use | 4.25 | 4 |
 
-The highest item means were error awareness, better than self-review, and
-post-review usefulness (all M=4.75). Timing accuracy and correction
-understandability were lowest (both M=3.25). Low interruption was comparatively
-high (M=4.25), matching the interviews: neither P1 nor P2 identified voice
-feedback itself as a major disruption. Their difficulty was temporal
-reference, not merely the presence of audio.
+The highest item means were Error Awareness, Better than Self-Review, and
+Post-Review Usefulness (all M=4.75). Timing Accuracy and Correction
+Understandability were lowest (both M=3.25). The Low Interruption item also had
+a comparatively high mean (M=4.25), matching the interviews: neither P1 nor P2
+identified voice feedback itself as a major disruption. Their difficulty was
+temporal reference, not merely the presence of audio.
 
-### 8.4 Mixed-Method Results by Research Question
+### 8.4 Mixed-Methods Results by Research Question
 
-**RQ1: Error awareness alongside self-review.** Error awareness and advantage
-over self-review were among the highest-rated items (both `M=4.75`), but the
-case evidence qualifies this pattern. P2 struggled to name a baseline problem,
+**RQ1: Error awareness alongside self-review.** Error Awareness and Better than
+Self-Review were among the highest item means (both `M=4.75`), but the case
+evidence qualifies this pattern. P2 struggled to name a baseline problem,
 whereas P1 already identified major posture and footwork issues. The retained
 evidence therefore supports differing forms of added value, such as initial
 diagnosis for one learner and added detail or confirmation for another, rather
 than a general claim that AI reveals errors users cannot see.
 
-**RQ2: Actionability without unnecessary interruption.** Actionable correction
-was rated positively (`M=4.50`) and neither interviewee identified earphone
-audio itself as a major disruption, consistent with low interruption
-(`M=4.25`). The interviews add the mechanism: directional step-size and balance
-cues implied a concrete next action, while unfamiliar arm or defensive-action
-issues needed richer post-session explanation. Correction understandability
-remained lower (`M=3.25`), indicating that a cue can be brief and tolerable
-without fully explaining the correction.
+**RQ2: Actionability without unnecessary interruption.** The item labeled
+Actionable Correction had a comparatively high mean (`M=4.50`), and neither
+interviewee identified earphone audio itself as a major disruption, consistent
+with the Low Interruption mean (`M=4.25`). The interviews add the mechanism:
+directional step-size and balance cues implied a concrete next action, while
+unfamiliar arm or defensive-action issues needed richer post-session
+explanation. Correction Understandability remained lower (`M=3.25`),
+indicating that a cue can be brief and tolerable without fully explaining the
+correction.
 
 **RQ3: Timing, recognition errors, and appropriate reliance.** Timing accuracy
 was among the lowest-rated items (`M=3.25`), matching both interviewees'
-uncertainty about which movement a cue described. The moderate trust rating
+uncertainty about which movement a cue described. The Feedback Trust mean
 (`M=3.75`) also concealed meaningful variation: participants accepted some
 step and balance cues but questioned defensive-action and lunge-related
 classifications. Post-session evidence added useful detail, yet could also make
@@ -1365,9 +1381,9 @@ For RQ1, the findings suggest that AI feedback may add diagnostic structure
 beyond self-review, but its value depends on what a learner can already see.
 P1 independently identified conspicuous center-of-mass and step-width problems,
 whereas P2 struggled to name a problem before interviewer prompting. After
-system use, both discussed concrete movement categories, and the aggregate
-ratings for error awareness, advantage over self-review, and post-review
-usefulness were high. The mechanism is not simply that the system reveals
+system use, both discussed concrete movement categories, and Error Awareness,
+Better than Self-Review, and Post-Review Usefulness were among the highest
+aggregate item means. The mechanism is not simply that the system reveals
 otherwise invisible errors. It narrows a continuous video into candidate
 problems, supplies fencing-specific labels, and preserves recurring issues for
 later inspection. For a learner like P2, this can provide an initial diagnostic
@@ -1391,9 +1407,9 @@ both interviewees a plausible next action, while neither described earphone
 speech itself as a major interruption. More technical arm and defensive-action
 issues were harder to resolve from audio alone, and P1 valued post-session
 analysis because it could provide detail that would be impractical during
-movement. This explains the contrast between comparatively positive ratings
-for actionable correction and low interruption and lower ratings for
-correction understandability. A cue can be brief enough to act on without
+movement. This explains the contrast between the comparatively high means for
+the items labeled Actionable Correction and Low Interruption and the lower
+Correction Understandability mean. A cue can be brief enough to act on without
 being sufficiently explanatory for reflection.
 
 The live and review channels consequently perform different cognitive work.
@@ -1570,8 +1586,8 @@ judgment affects the intended practice.
 The retained questionnaire file contains only item labels, means, and
 `N=4`. It does not preserve the exact wording, response anchors,
 participant-level responses, missing values, or dispersion. The reported means
-can indicate which aspects were rated relatively more or less positively in
-this sample, but they are not population estimates and cannot support
+can indicate which aspects received relatively higher or lower means in this
+sample, but they are not population estimates and cannot support
 significance tests, confidence intervals, or claims about individual
 consistency. The two qualitative files are ordered question-and-answer
 summaries rather than complete verbatim transcripts. Reorganization,
@@ -1686,8 +1702,8 @@ supports and what remains untested.
 
 | The current evidence supports | The current evidence does not support |
 | --- | --- |
-| The Android prototype can deliver live and post-session fencing feedback in a short supervised workflow. | The system is technically reliable across fencers, devices, viewpoints, and practice conditions. |
-| Four participants rated error awareness and post-session review positively, and two interviews illustrate how the feedback was interpreted. | The reported means generalize to a fencing population or demonstrate superiority to video self-review. |
+| The retained study records document live and post-session prototype feedback in a short supervised workflow, and the current Android repository implements both modes. | The evaluated prototype version is identical to the current Android build or technically reliable across fencers, devices, viewpoints, and practice conditions. |
+| Error Awareness and Post-Review Usefulness had among the highest aggregate means for four participants, and two retained interviews illustrate how the feedback was interpreted. | The reported means generalize to a fencing population or demonstrate superiority to video self-review. |
 | Some concise step-size and center-of-mass cues were understandable enough to prompt reported adjustments. | Those adjustments were biomechanically correct, retained over time, transferred to other drills, or improved fencing performance. |
 | Delayed cues and action misclassification were consequential interaction failures in the retained cases. | Current latency, false-feedback, and calibration levels are acceptable for independent practice. |
 | Temporal grounding, layered explanation, baseline-sensitive support, and contestability are evidence-backed design requirements. | The current implementations of those requirements have been validated across users, coaches, settings, or sports. |
@@ -1751,19 +1767,75 @@ layered feedback interaction: an on-device pipeline converts camera-based pose,
 target tracking, action recognition, and fencing-specific heuristics into one
 prioritized spoken cue and a small set of visual issues, while timestamped
 post-practice reports preserve evidence for reflection. In a preliminary
-mixed-method study with four participants, including detailed interviews with
-two, participants rated error awareness, post-review usefulness, and advantage
-over self-review most highly; the interviews indicated that brief step-size and
-balance cues could guide reported next-attempt adjustments. At the same time,
-delayed cues and action misclassification made otherwise understandable advice
-difficult to connect to the movement that produced it. Together, these findings
-identify temporal grounding, layered explanation, prioritization, and
-contestability as requirements for interpretable AI movement feedback that
-supports rather than replaces learner and coach judgment. Given the small,
-partially retained corpus and absence of objective skill measures, this work
-contributes feasibility evidence and design requirements rather than proof of
-durable fencing improvement.
+mixed-methods study of an early prototype, four participants contributed
+post-use ratings and two had detailed retained interviews. Error Awareness,
+Post-Review Usefulness, and Better than Self-Review had the highest aggregate
+means; the interviews indicated that brief step-size and balance cues could
+guide reported next-attempt adjustments. At the same time, delayed cues and
+action misclassification made otherwise understandable advice difficult to
+connect to the movement that produced it. Together, these findings identify
+temporal grounding, layered explanation, prioritization, and contestability as
+requirements for interpretable AI movement feedback that supports rather than
+replaces learner and coach judgment. Given the small, partially retained corpus
+and absence of objective skill measures, this work contributes feasibility
+evidence and design requirements rather than proof of durable fencing
+improvement.
 
 ## Acknowledgments
 
 ## References
+
+1. Filip Malawski and Bogdan Kwolek. 2018. Recognition of action dynamics in
+   fencing using multimodal cues. *Image and Vision Computing* 75, 1-10.
+   https://doi.org/10.1016/j.imavis.2018.04.005
+2. Kevin Zhu, Alexander Wong, and John McPhee. 2022. FenceNet: Fine-Grained
+   Footwork Recognition in Fencing. In *Proceedings of the IEEE/CVF Conference
+   on Computer Vision and Pattern Recognition Workshops*, 3589-3598.
+   https://openaccess.thecvf.com/content/CVPR2022W/CVSports/html/Zhu_FenceNet_Fine-Grained_Footwork_Recognition_in_Fencing_CVPRW_2022_paper.html
+3. Filip Malawski and Marek Krupa. 2023. Temporal Segmentation of Actions in
+   Fencing Footwork Training. *Computer Science Research Notes*.
+   https://doi.org/10.24132/CSRN.3301.28
+4. Mingdong Zhang, Li Chen, Xiaoru Yuan, Renpei Huang, Shuang Liu, and Junhai
+   Yong. 2019. Visualization of technical and tactical characteristics in
+   fencing. *Journal of Visualization* 22, 109-124.
+   https://doi.org/10.1007/s12650-018-0521-3
+5. Takehiro Sawahata, Alessandro Moro, Sarthak Pathak, and Kazunori Umeda.
+   2024. Instance Segmentation-Based Markerless Tracking of Fencing Sword
+   Tips. In *2024 IEEE/SICE International Symposium on System Integration*.
+   https://doi.org/10.1109/SII58957.2024.10417603
+6. Atima Tharatipyakul, Kenny T. W. Choo, and Simon T. Perrault. 2020. Pose
+   Estimation for Facilitating Movement Learning from Online Videos. In
+   *Proceedings of the International Conference on Advanced Visual
+   Interfaces*. https://doi.org/10.1145/3399715.3399835
+7. Alessandra Semeraro and Laia Turmo Vidal. 2022. Visualizing Instructions for
+   Physical Training: Exploring Visual Cues to Support Movement Learning from
+   Instructional Videos. In *CHI Conference on Human Factors in Computing
+   Systems*. https://doi.org/10.1145/3491102.3517735
+8. Leonor Portugal da Fonseca, Francisco Nunes, and Paula Alexandra Silva.
+   2024. Understanding Feedback in Rhythmic Gymnastics Training: An
+   Ethnographic-Informed Study of a Competition Class. In *Proceedings of the
+   CHI Conference on Human Factors in Computing Systems*.
+   https://doi.org/10.1145/3613904.3642434
+9. Jian-Jia Weng, Calvin Ku, Jo Chien Wang, Chih-Jen Cheng, Tica Lin, Yu-An
+   Su, Tsung-Hsun Tsai, You-Yi Lin, Lun-Wei Ku, Hung-Kuo Chu, and Min-Chun Hu.
+   2025. Bridging Coaching Knowledge and AI Feedback to Enhance Motor Learning
+   in Basketball Shooting Mechanics Through a Knowledge-Based SOP Framework.
+   In *Proceedings of the 2025 CHI Conference on Human Factors in Computing
+   Systems*. https://doi.org/10.1145/3706598.3713324
+10. Valentin-Adrian Niță and Petra Magyar. 2023. Improving Balance and Movement
+    Control in Fencing Using IoT and Real-Time Sensorial Feedback. *Sensors*
+    23, 24. https://doi.org/10.3390/s23249801
+11. Lana Frančeska Dreimane and Zinta Zālīte-Supe. 2022. Instructional Design
+    Map for Immersive Fencing Training in Virtual Reality. In *Human,
+    Technologies and Quality of Education, 2022*.
+    https://doi.org/10.22364/htqe.2022.13
+12. Max Schemmer, Niklas Kuehl, Carina Benz, Andrea Bartos, and Gerhard
+    Satzger. 2023. Appropriate Reliance on AI Advice: Conceptualization and the
+    Effect of Explanations. In *Proceedings of the 28th International
+    Conference on Intelligent User Interfaces*.
+    https://doi.org/10.1145/3581641.3584066
+13. Shiye Cao, Anqi Liu, and Chien-Ming Huang. 2024. Designing for Appropriate
+    Reliance: The Roles of AI Uncertainty Presentation, Initial User Decision,
+    and User Demographics in AI-Assisted Decision-Making. *Proceedings of the
+    ACM on Human-Computer Interaction*.
+    https://doi.org/10.1145/3637318
