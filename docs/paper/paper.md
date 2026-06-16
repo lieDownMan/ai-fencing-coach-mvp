@@ -357,241 +357,227 @@ affects interpretation. We do not claim that the current prototype establishes
 long-term skill improvement, replaces coaching judgment, or provides complete
 technical and tactical assessment.
 
-## 3. Formative Prototype Study and Analysis
+## 3. Formative Study and Analysis
 
-Before stabilizing the interaction design, we used an early working prototype
-to reduce four consequential uncertainties: (1) what learners could diagnose
-through video self-review alone, (2) which corrections could be understood and
-acted on during movement, (3) how immediate and post-session feedback should
-divide explanatory work, and (4) how timing and recognition errors would
-affect interpretation and trust. The study was therefore formative in a
-design-oriented sense: it examined current self-review alongside reactions to
-prototype feedback and was used to refine requirements. It was not a
-pre-design ethnography, a technical validation, or a test of skill learning.
+Our formative work focused on the coaching knowledge and practice breakdowns
+that should shape an AI fencing coach before evaluating whether the prototype
+is useful. We asked four design questions: how coaches talk when they instruct
+from a fencing video, what fencers find difficult during self-practice, how
+coach language should be converted into system feedback, and how concurrent
+errors should be queued and scoped by practice mode. This differs from a
+simple "do users like the prototype" study. The formative goal was to decide
+what the system should say, when it should say it, and which errors should be
+eligible in different practice contexts.
 
-The same sessions provide the preliminary feasibility evidence reported in
-Sections 7 and 8. This section focuses on what the sessions changed or
-constrained about the design; the later sections report the evaluative
-questions, descriptive ratings, and observed interaction outcomes. Those
-later results should not be read as an independent validation of requirements
-derived from the same sessions.
+### 3.1 Corpus and Participants
 
-### 3.1 Participants and Recruitment
+The formative corpus combines coach-facing and fencer-facing evidence. The
+coach-facing material was an elicitation spreadsheet in which coaches were
+asked how they would instruct actions observed in a fencing match video. The
+locally retained design output of that analysis is the English coaching
+playbook used by the Android system, `android/coach_playbook_en.json`. Each
+playbook entry contains an error name, a diagnostic explanation, a short cue,
+a practice suggestion, and a weight for cue queueing. The fencer-facing
+material consists of two ordered Chinese-language interview records about
+self-review and AI-assisted practice, plus aggregate post-use ratings from
+four participants.
 
-Four participants contributed post-use questionnaire ratings. Detailed
-Chinese-language interview records were available for two of them, referred
-to as P1 and P2. The records cover unaided video self-review, real-time
-earphone feedback, a feedback-guided attempt, and post-session video analysis.
-For the other two participants, only their contribution to the aggregate
-questionnaire means is preserved.
+The coach form captured one timestamped submission per response and then
+repeated the same instruction block for up to four errors observed in the
+video. Each block asked for an error name, an explanation of the cause and why
+it was incorrect, the oral cue the coach would say to the fencer, and a drill
+or practice activity for improvement. The first three blocks used the order
+error name, cause, oral cue, and practice; the fourth block retained the same
+elements but placed the cause field after cue and practice. The external
+spreadsheet should still be archived or exported into the repository before
+submission so that coach count, experience, recruitment, video prompt details,
+and all raw response examples can be reported precisely. The current paper
+draft therefore treats the retained playbook and the supplied excerpted form
+structure as verified, while leaving full coach sample metadata to be filled
+from the original spreadsheet.
 
-The supplied artifacts do not record recruitment source, inclusion criteria,
-age, gender, fencing experience, compensation, study location, or the
-relationship between participants and researchers. We therefore cannot
-reconstruct the sampling rationale or claim that the participants represent
-beginner, intermediate, or expert fencers. Coaches were not represented in the
-available corpus, which is especially important because the study concerns
-feedback authority and technical correctness. Table 1 reports only evidence
-that can be verified from the retained files.
+**Table 1. Retained formative evidence and its role in design.**
 
-**Table 1. Retained evidence by participant.**
+| Evidence source | Retained artifact | Role in the formative analysis |
+| --- | --- | --- |
+| Coach instruction elicitation | Timestamped Google Form spreadsheet; export needed for full publication record | How coaches name errors, explain causes, phrase oral cues, and propose practice drills |
+| Coaching playbook | `android/coach_playbook_en.json` and bundled Android asset | Structured translation from coach instruction to diagnosis, short cue, drill, and weight |
+| Fencer self-practice interviews | `interviewee_01_1Q1A_ordered.txt`; `interviewee_02_1Q1A_ordered.txt` | Pain points in self-diagnosis, cue interpretation, timing, and post-session review |
+| Post-use ratings | `formative_study_feedback_statistics.csv` | Descriptive triangulation of perceived error awareness, actionability, interruption, trust, and review value |
+| Android implementation | `FeedbackScheduler.kt`, `MainActivity.kt`, and playbook assets | Trace from formative requirements to cue queueing, mode filtering, and feedback controls |
 
-| Available formative evidence | P1 | P2 | Two additional participants |
-| --- | --- | --- | --- |
-| Post-use questionnaire | Included in aggregate | Included in aggregate | Included in aggregate |
-| Unaided self-review account | Available | Available, with interviewer prompting | Not available |
-| Real-time feedback account | Available | Available | Not available |
-| Feedback-guided attempt account | Available | Partial; final verbal response missing | Not available |
-| Post-session analysis account | Available | Available | Not available |
-
-The artifacts also do not preserve the applicable ethics-review status,
-consent procedure, video-retention policy, or withdrawal process. These details
-must be recovered from the original study records before publication. In this
-manuscript, we use pseudonymous identifiers and report only
-movement- and interaction-relevant observations.
+The supplied fencer artifacts do not preserve recruitment source, age, gender,
+fencing experience, compensation, session duration, or ethics-review and
+consent procedures. The same care is needed for the coach elicitation once the
+spreadsheet is exported. We therefore use the current evidence to support
+design requirements and mechanism hypotheses, not population prevalence,
+learning outcomes, or claims that the playbook represents all coaching styles.
 
 ### 3.2 Procedure and Materials
 
-The retained interview materials describe a fixed sequence centered on a short
-fencing movement set that could include en garde, advance, retreat, lunge, and
-advance-lunge actions. In these records, participants first performed without
-automated feedback and reviewed the recorded video. They described what
-appeared correct, what appeared
-problematic, and what they would change on another attempt. This phase served
-as the current-practice baseline because recorded self-review is accessible
-without a continuously present coach.
+For the coach elicitation, coaches watched actions in a fencing match video
+and filled the timestamped form described above. A single response could
+therefore contain several observed errors from the same video, with each error
+linked to a cause, an oral instruction, and a practice recommendation. The
+analysis converted these responses into a playbook of twelve normalized error
+categories. Each category keeps three levels of coach talk: a diagnostic
+sentence for later explanation, a short imperative cue for live practice, and
+a drill-like practice suggestion for follow-up work.
 
-Participants were then introduced to an early prototype with two feedback
-channels. During another performance, the real-time mode analyzed camera input
-and delivered short spoken cues through earphones, including cues about stance
-height, center-of-mass position, and step width. Participants subsequently
-attempted to adjust their movement. After practice, they inspected a
-video-analysis view that associated detected problems with moments in the
-recording and summarized recurring issues. A semi-structured interview asked
-about error awareness, cue meaning, timing, immediate adjustment,
-interruption, incorrect detections, and the relative value of live and
-post-session feedback. Participants also completed a 15-item post-use
-questionnaire.
+For the fencer-facing inquiry, participants performed short fencing movements
+such as en garde, advance, retreat, lunge, and advance-lunge, then reviewed
+video and discussed what they could identify without a coach. They then tried
+the prototype's real-time earphone feedback and post-session video analysis.
+These sessions are also reported later as preliminary feasibility evidence;
+in this section, we use them only to identify self-practice pain points that
+the coach-derived playbook and cue queue should address.
 
-The retained corpus consists of ordered question-and-answer records for P1 and
-P2 and a CSV containing the mean of each questionnaire item across four
-participants. The interview files are reorganized summaries, not complete
-verbatim transcripts, and the questionnaire file does not include item
-wording, response anchors, participant-level values, or dispersion. The
-prototype build, phone model, camera placement, model version, session
-duration, and exact movement repetitions are also absent. These omissions
-limit reproducibility and must be filled from contemporaneous records where
-possible.
+### 3.3 Analysis
 
-The order was not counterbalanced: self-review always preceded AI-assisted
-practice. Repetition, growing task familiarity, and interviewer explanation
-could therefore influence later responses. Two deviations are visible in the
-records. The interviewer proposed a forward center-of-mass problem before P2
-agreed with it, so P2's baseline was not fully independent. Developer
-explanations of possible error types and system behavior were also interleaved
-with P1's session, potentially shaping the language and interpretations used
-later in that interview.
+We analyzed the coach-derived material by treating each completed error block
+as an instruction unit with four primary components: the observed movement
+problem, the cause and consequence of the error, the short correction a coach
+would say, and the practice activity used to improve it. The raw responses
+varied in granularity and tone. Some named broad categories such as step width
+or center-of-mass position; others named more situated problems such as overly
+forceful thrusting, dropping the weapon during attack, inaccurate feints, foot
+alignment during footwork, or inward wrist rotation before attack. Oral cues
+also ranged from technical prompts, such as relaxing the shoulder or using the
+fingers to control the blade, to very short colloquial reminders. We
+normalized these heterogeneous blocks into the playbook structure
+`error_name -> diagnosis -> short_cue -> practice -> weight`.
 
-### 3.3 Qualitative Analysis
+We analyzed the fencer interviews with a complementary self-practice
+breakdown frame: **notice**, **interpret**, **act**, and **verify**. This
+captured whether a fencer could detect an error, understand what it meant,
+choose a correction, and check whether the correction helped. We then compared
+these breakdowns against the coach-derived playbook to ask where the system
+should reduce self-diagnosis burden, where a short cue is enough, and where
+post-session explanation is needed.
 
-For this manuscript, we used a focused hybrid framework analysis organized
-around a practice-feedback cycle:
-**notice**, **interpret**, **act**, and **verify**. These deductive categories
-captured whether a participant detected a problem, understood its referent,
-selected a correction, and obtained evidence about the result. We then tracked
-inductively observed breakdowns involving cue timing, interruption,
-action-recognition errors, disagreement with the system, and differences
-between live and post-session feedback.
-
-We organized the ordered answers in a participant-by-finding matrix and
-compared P1 and P2 within each phase. We retained negative and divergent cases,
-including a participant who could already diagnose major errors, a
-learner-relevant issue the system apparently did not cue, delayed but still
-actionable feedback, and defensive-action labels that participants questioned.
-Because the records summarize speech, we do not treat their phrasing as a
-verbatim corpus except where an answer explicitly preserves participant words.
-The available files do not preserve the original study team's codebook,
-analysis log, or independent second analysis, so this account is a structured
-reanalysis of the retained summaries rather than a reconstruction of the
-original analysis process.
-
-Questionnaire means were used only as descriptive triangulation. We did not
-infer individual responses, variability, confidence intervals, or statistical
-significance from the aggregate file. The analysis also does not claim
-thematic saturation: only two detailed cases were available, one baseline was
-interviewer-prompted, and the development team's presence may have encouraged
-participants to accommodate the prototype's framing.
+Finally, we examined the Android implementation as a traceability check. The
+playbook weights are read by `PlaybookRepository` and used by
+`FeedbackScheduler`. The scheduler combines the coach-derived weight with
+dynamic factors such as persistence, novelty, aging behind other cues, repeat
+penalty, and learner emphasis. Practice modes and user settings filter which
+errors can appear. This implementation check prevents the paper from
+describing a design rule that the current system does not actually enact.
 
 ### 3.4 Findings
 
-#### Unaided self-review exposed different diagnostic starting points
+#### Coaches do more than name an error; they connect diagnosis, cue, and drill
 
-P1 independently identified vertical center-of-mass movement and narrow steps
-and could state a corresponding adjustment. P2 initially could not name a
-specific problem or correction and agreed with a center-of-mass diagnosis only
-after interviewer prompting. The formative need is therefore not simply to
-show every learner an error they cannot see. Some learners need help detecting
-and naming a problem, while others need finer evidence, prioritization, or
-confirmation of an existing judgment. This variation argues for establishing
-baseline diagnostic ability rather than treating all users as equally unable
-to self-review. Error awareness and the item labeled Better than Self-Review
-had the highest aggregate means (both `M=4.75`, `N=4`), but they cannot erase
-the difference between P1 and P2 or establish how common either case is.
+The playbook shows that coach instruction cannot be reduced to a label such
+as "wide step" or "guard dropped." Each error needs a short cue for immediate
+use, but also a reason and a follow-up practice action. In the supplied form
+excerpt, for example, a coach described overly forceful thrusting as excessive
+shoulder effort and cued the athlete to relax the shoulder and use the
+fingers to control blade direction. Another response separated an attack
+problem, an imprecise feint, a footwork-alignment problem, and a wrist-rotation
+problem within the same timestamped submission, giving each a different cue
+and, when available, a different practice response. This structure shows why
+the system cannot treat coach knowledge as a flat checklist of errors.
 
-#### Brief directional cues supported action, while reflection required detail
+The normalized playbook preserves that layered structure. "Stance Too High"
+is not only cued as "Stay lower"; it is explained as reducing balance and
+readiness to change direction and paired with advance-retreat sets that
+maintain a bent front knee and quiet head height. "Foot Before Hand" becomes
+the live cue "Hand first," but its diagnosis explains that the front foot
+moves before the weapon arm creates threat, making the attack easier to read.
+This became the basic design unit of the system: a live cue should be short,
+while review should preserve the coach's diagnostic reasoning and practice
+suggestion.
 
-Both interviewees reported attempting adjustments to step size and
-center-of-mass position after spoken feedback. P1 found step cues especially
-direct because indications that a step was too far or too near implied a
-concrete change on the next attempt. Neither participant identified earphone
-audio as a major interruption, consistent with the comparatively high
-Low Interruption rating (`M=4.25`). However, the interviews do not establish that these
-adjustments were biomechanically correct; no blinded coach rating or kinematic
-pre/post measure was retained.
+#### Fencers' self-practice pain point is translating video into action
 
-More technical or unfamiliar issues, particularly those concerning the weapon
-arm or a defensive action, were harder to resolve from a short spoken cue. P1
-described the post-session analysis as adding detail that could not reasonably
-be delivered during movement. This creates a division of labor between
-feedback channels: live feedback should support one immediate next action,
-whereas review should preserve evidence, terminology, repeated patterns, and
-practice guidance. The lower correction-understandability rating (`M=3.25`)
-reinforces that hearing a concise cue is not the same as understanding a full
-correction.
+The fencer interviews show that video self-review does not automatically
+produce an actionable correction. P1 could identify visible posture and
+footwork problems, especially vertical center-of-mass movement and narrow
+steps, but still needed external support for more technical or unfamiliar
+issues. P2 initially struggled to name a concrete problem and agreed with a
+center-of-mass diagnosis only after prompting. This suggests that the pain
+point is not simply lack of recording. It is the burden of deciding what is
+wrong, what matters first, and how to change the next repetition.
 
-#### Interpretability depended on temporal grounding
+The ratings are consistent with this interpretation. The highest retained
+means were for Error Awareness, Better than Self-Review, and Post-Review
+Usefulness (all `M=4.75`, `N=4`), while Timing Accuracy and Correction
+Understandability were lower (both `M=3.25`). Participants valued the system
+for surfacing and organizing errors, but the lower ratings show that a cue
+still fails when its referent, timing, or correction logic is unclear.
 
-Both detailed cases had difficulty determining which movement a cue described.
-P1 was unsure whether the system was responding to the current action or the
-preceding repetition. P2 reported that some cues arrived well after an action
-had ended. Participants could understand the words and still lack an
-actionable referent. This distinction helps explain why timing accuracy was
-among the lowest-rated items (`M=3.25`) even though participants reported
-acting on several cues.
+#### Cue queueing should encode coaching priority, not only detection order
 
-The design problem is consequently broader than reducing average latency. A
-cue must identify, through timing or representation, the movement episode to
-which it belongs. When immediate delivery cannot be guaranteed, the interface
-should defer or mark the feedback rather than present a delayed diagnosis as
-if it described the action currently underway.
+Several errors can be detected in the same movement window, but a learner
+cannot use all of them at once. The coach-derived playbook therefore assigns
+weights that act as a first approximation of pedagogical priority. The
+highest weights emphasize foundational or safety-relevant form, including
+stance too high (`10.0`), guard dropped (`9.7`), lunge overextension (`9.5`),
+incomplete arm extension (`9.0`), and narrow step (`9.0`). Lower weights, such
+as wide step (`4.0`) or over-parrying (`5.0`), can still matter but should not
+always displace more foundational problems.
 
-#### Recognition errors required contestability, not unconditional trust
+The Android scheduler turns these weights into a cue queue rather than a
+fixed list. It boosts persistent errors, gives a novelty bonus to errors not
+yet spoken, ages skipped errors so they do not starve, penalizes repeated
+speech, and adds a focus boost when the learner emphasizes an error category.
+This design treats coach priority as contextual: weight starts the ranking,
+but persistence, repetition, and practice focus can change what is most useful
+to say next.
 
-Both interviews contained cases in which ordinary hand movement was associated
-with a defensive-action diagnosis. P1 also questioned an apparent
-lunge-related classification. The cases produced different responses: P1
-could reinterpret one hand-motion description as plausible after discussion,
-whereas P2 maintained that no defensive action had occurred. This variation is
-more informative than a single trust score. It shows that users may accept,
-reinterpret, or reject an output depending on their own memory and the
-available evidence.
+#### Practice mode changes which coaching problems should be eligible
 
-An incorrect action label changes the meaning of otherwise sensible coaching:
-advice about how to perform a parry is not useful if no parry occurred. A
-detailed post-session report can amplify this problem by making a false
-classification appear more authoritative. The formative implication is that
-confidence, abstention, inspection, and correction are part of the feedback
-interaction rather than purely backend concerns. The aggregate Feedback Trust
-mean (`M=3.75`) should therefore not be interpreted as blanket acceptance.
+The coach and fencer evidence also argues against one universal feedback set.
+The form responses themselves mix errors that belong to different practice
+contexts: step width and foot alignment are footwork problems; attack release,
+thrust control, hand timing, and arm extension belong more naturally to target
+or attacking practice; feint precision, guard position, and parry compactness
+may surface in freer tactical contexts. In footwork practice, the system
+should therefore focus on stance, bounce, step width, and center-of-mass
+control. In target practice, attack coordination and weapon-arm preparation
+become more relevant, including hand-before-foot timing, complete arm
+extension, lunge control, and guard position. In free bouting, the feedback
+should stay broader and handle mixed movement and opponent context without
+overloading the fencer.
+
+The current Android implementation partially operationalizes this mode logic.
+It defines three modes: Footwork, Target Practice, and Free Bouting. It also
+restricts `foot_before_hand` and `incomplete_arm_extension` to Target
+Practice, while most posture, guard, balance, step, and parry-related errors
+remain available across modes. The settings screen further lets the learner
+emphasize, mute, or restrict feedback to selected error categories. If the
+final design requires each mode to focus only on a narrower error subset, the
+mode filters in the scheduler and settings list should be tightened to match
+the intended table before publication.
 
 ### 3.5 Design Requirements
 
-We translated the findings into five design requirements. Table 2 also records
-how the current Android repository responds to each requirement. These
-implementation links establish traceability, not effectiveness: a feature's
-presence does not demonstrate that the requirement has been satisfied in use.
+We translated the formative analysis into five design requirements. Table 2
+records how each requirement is supported and how it appears in the current
+Android system. These implementation links establish traceability, not proof
+that the requirement is fully satisfied in use.
 
-**Table 2. Formative findings, design requirements, current implementation,
-and unresolved evaluation questions.**
+**Table 2. From formative evidence to system requirements.**
 
-| Requirement | Evidence-backed rationale | Current Android response | Remaining question |
+| Requirement | Formative rationale | Current Android response | Remaining work |
 | --- | --- | --- | --- |
-| **DR1: Reduce diagnostic burden without assuming zero self-awareness.** | P1 could diagnose gross posture and footwork errors; P2 struggled to name a problem before external prompting. | Live visual labels and speech name detected issues; post-session breakdowns and timelines provide additional evidence. | Which feedback layer adds information beyond each learner's unaided self-review? |
-| **DR2: Keep live feedback brief and prioritized; move explanation to review.** | Directional step and balance cues supported reported adjustment, while unfamiliar arm and defensive-action issues needed more context. | The scheduler speaks one weighted cue at a time, limits repeated speech with cooldowns, shows up to three visual cues, and stores richer diagnosis and practice text for review. | Does prioritization improve next-attempt correction without increasing interruption or hiding learner-relevant errors? |
-| **DR3: Ground every cue in a movement episode.** | Both participants were unsure whether delayed feedback referred to the current or a previous action. | Cue history stores frame-based timestamps, and review views expose a timeline; video analysis can preserve the relevant moment. Real-time speech does not yet identify a repetition or action referent. | What end-to-end latency and representation let users identify the intended movement reliably? |
-| **DR4: Make recognition uncertainty inspectable and contestable.** | Hand motion was interpreted as a defensive action, and an incorrect action label made the attached correction misleading. | The live interface displays action confidence, and generated summaries are constrained to detected counts and playbook evidence. Cue-level confidence, user correction, dismissal, and abstention are not yet implemented. | How often does false feedback occur, and do uncertainty and correction controls support appropriate reliance? |
-| **DR5: Preserve learner and coach authority.** | Participants did not accept every diagnosis, and the corpus contains no coach validation of technical correctness. | Users can disable speech, pause analysis, focus or mute error categories, and retain deterministic playbook feedback when an optional language-model summary is unavailable. A coach-review workflow is not yet present. | Do learner controls and coach review prevent automation from overriding situated expertise? |
+| **DR1: Represent coach instruction as layered feedback.** | Coaches' instruction contains a diagnosis, short correction, and practice follow-up rather than only an error label. | The playbook stores `diagnosis`, `short_cue`, `practice`, and `weight` for twelve errors. | Archive coach responses and report examples showing how playbook entries were derived. |
+| **DR2: Reduce self-practice diagnostic burden.** | Fencers may record video but still struggle to name what is wrong or what to change first. | Live cues name detected issues; review shows repeated errors, action counts, and cue history. | Test added value against unaided self-review with participant-level and coach-rated evidence. |
+| **DR3: Queue cues by coaching priority and practice state.** | Multiple errors can co-occur, but coaches do not correct everything at once. | The scheduler combines playbook weights with persistence, novelty, aging, repeat penalty, and learner focus. | Validate the weights and queue order with coaches and measure whether learners can act on the selected cue. |
+| **DR4: Scope feedback to practice mode.** | Footwork, target practice, and free bouting make different errors relevant and tolerable. | The app exposes three modes and partially filters mode-specific errors; users can focus or mute categories. | Tighten mode-specific eligibility if the final design requires each mode to show only its focused error subset. |
+| **DR5: Preserve coach authority and learner contestability.** | Coach-derived rules guide feedback, but learners still encounter timing ambiguity and possible misclassification. | The app displays action confidence, stores cue history, supports playbook-only summaries, and lets users pause, mute, focus, or delete sessions. | Add coach review, cue dismissal/correction, and clearer uncertainty handling for questionable detections. |
 
-The study narrowed three initial assumptions. More simultaneous feedback was
-not necessarily more useful; semantic clarity alone could not repair a cue
-whose movement referent was ambiguous; and a detailed report was not
-inherently trustworthy when its underlying action classification was wrong.
-These constraints motivated the current layered, prioritized, and
-history-preserving design while identifying temporal grounding and
-contestability as incomplete work.
-
-The resulting requirements remain design hypotheses. The small and partially
-retained corpus, fixed condition order, interviewer influence, missing
-participant characteristics, absence of coaches, and lack of objective
-movement measures prevent claims about prevalence, learning, or technical
-correctness. A later study should independently establish baseline
-self-diagnosis, measure cue latency and false-feedback frequency, include coach
-judgment, and test whether the implemented responses improve correction and
-appropriate reliance.
+These requirements position the formative study as a translation from coaching
+practice to interaction design. The contribution is not that the current
+prototype has proven learning gains. Rather, the formative work identifies
+what an AI fencing coach should preserve from human instruction, which
+self-practice pain points it should address, and where the current
+implementation still diverges from the intended mode-specific feedback logic.
 
 <!-- Insert design-traceability figure here.
-Figure 2. Traceability from formative evidence through DR1-DR5 to current
-Android features and unresolved evaluation questions. -->
+Figure 2. Traceability from coach instruction elicitation and fencer
+self-practice pain points to playbook entries, cue weights, practice-mode
+filters, and unresolved implementation/evaluation questions. -->
 
 ## 4. System Design
 
@@ -606,52 +592,48 @@ core interaction mechanism is therefore not action classification alone, but
 the conversion of a continuous practice stream into **sparse correction during
 movement and inspectable evidence after movement**.
 
-This design follows the formative findings in Section 3. P1 could already
-diagnose several gross errors, whereas P2 needed help naming a problem; both
-could respond to concise directional cues, but both had difficulty grounding
-delayed feedback in a specific action. Detailed review helped explain
-unfamiliar issues, yet a false defensive-action label also showed that detail
-can amplify an incorrect inference. We consequently designed the system to
-reduce diagnostic work without treating the AI as the final authority. The
-five goals below operationalize DR1-DR5 as intended interaction properties,
-not evidence that the current prototype improves technique.
+This design follows the formative findings in Section 3. Coaches' video-based
+instruction was translated into layered playbook entries: a diagnosis, a short
+cue, a follow-up practice suggestion, and a queueing weight. Fencer interviews
+then showed why this translation matters in self-practice: learners may have
+video but still struggle to identify the error, choose what matters first, and
+connect feedback to the next repetition. We consequently designed the system
+to reduce diagnostic work while preserving the coach-derived rationale behind
+each cue. The five goals below operationalize DR1-DR5 as intended interaction
+properties, not evidence that the current prototype improves technique.
 
 ### 4.1 Design Goals
 
-**DG1: Add diagnostic support without replacing self-assessment.** The system
-should help learners notice and name movement features while preserving their
-ability to compare the output with what they felt and saw. During practice, it
-shows the camera image, optional skeleton overlay, current action state, and
-detected issues rather than returning only a hidden score. After practice, it
-retains recognized-action counts and a cue timeline so that a learner can
-compare automated feedback with memory and other available evidence. This
-design addresses the different starting points observed in P1 and P2:
-assistance can add a label or priority for one learner while serving as
-confirmation or a point of disagreement for another.
+**DG1: Preserve coach instruction as a layered artifact.** The system should
+not collapse coaching into action labels or scores. During practice, it uses
+short playbook cues that resemble what could be said between repetitions. After
+practice, it restores the longer diagnosis and practice suggestion so the
+learner can see why the cue mattered and what drill to try next. This design
+keeps live feedback lightweight while preserving the instructional reasoning
+captured from coaches.
 
-**DG2: Separate immediate action from later explanation.** Live feedback
-should answer a narrow question: "What should I change on the next attempt?"
-The system therefore uses short directional phrases such as "Stay lower" or
-"Shorten the step," speaks at most one correction at a time, and keeps no more
-than three issues visible. Diagnosis, recurrence, and practice suggestions are
-deferred to the review layer. This division reflects the interviews, in which
-step-size and balance cues supported immediate adjustment, while arm and
-defensive-action feedback required more explanation. It also treats low
-interruption and full understanding as separate outcomes rather than assuming
-that a short cue accomplishes both.
+**DG2: Reduce self-practice diagnostic burden without replacing
+self-assessment.** The system should help learners notice and name movement
+features while preserving their ability to compare the output with what they
+felt and saw. During practice, it shows the camera image, optional skeleton
+overlay, current action state, and detected issues rather than returning only a
+hidden score. After practice, it retains recognized-action counts and a cue
+timeline so that a learner can compare automated feedback with memory, video,
+and later coach judgment.
 
-**DG3: Preserve the temporal provenance of feedback.** A correction is useful
-only if the learner can identify the movement episode it describes. The
-prototype records each accepted cue with a frame index, converts that position
-into a relative session time, and exposes recent and post-session timelines.
-The selected-video mode similarly preserves frame-level analysis states for
-optional annotation. These mechanisms support retrospective grounding, but
-the live spoken cue does not yet name a repetition, action, or timecode. DG3
-is therefore only partially realized: the system preserves when it produced
-feedback without yet guaranteeing that the learner can connect that feedback
-to the intended movement.
+**DG3: Queue sparse feedback by coaching priority and practice state.** Live
+feedback should answer a narrow question: "What should I change on the next
+attempt?" The system therefore speaks at most one correction at a time, keeps
+no more than three issues visible, and ranks candidate cues by playbook
+weight, persistence, novelty, waiting time, repeated presentation, and learner
+focus. This treats cue selection as a pedagogical queue rather than a raw
+dump of all detected errors.
 
-**DG4: Make uncertainty and failure visible enough to question.** The
+**DG4: Ground feedback in time and make failure visible enough to question.**
+A correction is useful only if the learner can identify the movement episode
+it describes and question it when the recognition is wrong. The prototype
+records each accepted cue with a frame index, converts that position into a
+relative session time, and exposes recent and post-session timelines. The
 interface distinguishes model loading, target search, stance checking, active
 analysis, pause, and review states. When a non-idle action is recognized, the
 live action label includes the classifier confidence, and the interface also
@@ -665,15 +647,17 @@ mechanism for all heuristics, and a learner cannot yet dismiss or correct an
 individual output. The intended goal is contestability; the current design
 provides partial inspectability.
 
-**DG5: Preserve learner and coach authority.** The learner can pause analysis,
-silence speech, resume or reset a session, emphasize or mute error categories,
-restrict feedback to selected categories, choose whether a generated summary
-is used, and delete stored sessions. The deterministic fencing playbook remains
-available when no language-model service is selected or a request fails. These
-controls make automation configurable rather than compulsory. The system is
-nevertheless a practice aid, not a coach replacement: it currently provides no
-coach-facing validation or correction workflow, and its rule thresholds should
-not be interpreted as universal definitions of correct or safe technique.
+**DG5: Scope cues by practice mode while preserving coach and learner
+authority.** The learner can choose Footwork, Target Practice, or Free Bouting,
+pause analysis, silence speech, resume or reset a session, emphasize or mute
+error categories, restrict feedback to selected categories, choose whether a
+generated summary is used, and delete stored sessions. The deterministic
+fencing playbook remains available when no language-model service is selected
+or a request fails. These controls make automation configurable rather than
+compulsory. The system is nevertheless a practice aid, not a coach
+replacement: it currently provides no coach-facing validation or correction
+workflow, and its rule thresholds should not be interpreted as universal
+definitions of correct or safe technique.
 
 ### 4.2 Interaction Flow
 
@@ -739,14 +723,14 @@ of a correction depend on drill, skill, weapon context, and coach intent.
 
 ### 4.3 Feedback Timing and Prioritization
 
-The formative study showed that speaking more quickly is not sufficient if the
-learner still cannot identify the referenced action. Our design therefore
-treats feedback timing as a coordination problem among detection, ranking,
-presentation, and the next movement. Movement must first be recognized over a
-short temporal window; biomechanical checks may then yield several concurrent
-issues; visual attention and speech can present only part of that set. The
-system must decide both **what** to present and **when** presenting it remains
-useful.
+The formative evidence showed two related timing problems: coaches prioritize
+what matters in a practice context, and learners must still identify which
+movement a correction describes. Our design therefore treats feedback timing
+as a coordination problem among detection, ranking, presentation, and the next
+movement. Movement must first be recognized over a short temporal window;
+biomechanical checks may then yield several concurrent issues; visual
+attention and speech can present only part of that set. The system must decide
+both **what** to present and **when** presenting it remains useful.
 
 The scheduler first filters issues by practice mode and the learner's muted or
 selected categories. It then ranks the remaining issues using a playbook
@@ -771,7 +755,7 @@ requirements.
 
 The pending interval creates an important tradeoff. It lets a high-priority
 cue survive a brief detection gap and lets skipped issues eventually surface,
-but it can also produce exactly the ambiguity observed by P1 and P2: a
+but it can also produce the ambiguity reported in the fencer interviews: a
 technically valid message may be delivered after the movement that triggered
 it. The current interface partly repairs this after the fact through recent
 cue labels and a timestamped timeline. It does not yet repair it during
@@ -1152,13 +1136,14 @@ a reproducible evaluation plan.
 
 ## 7. Preliminary Evaluation Design and Analysis
 
-The same four-participant sessions described in Section 3 also provide the
-paper's preliminary evaluation evidence. No second participant sample or
-independent validation study was conducted. Section 3 uses the retained
-qualitative material formatively to derive design requirements; Sections 7 and
-8 organize the same corpus around the research questions and descriptive
-outcomes. The evaluation therefore addresses feasibility, interpretation, and
-interaction breakdowns, not skill acquisition or long-term effectiveness.
+The fencer-facing four-participant sessions described in Section 3 also
+provide the paper's preliminary evaluation evidence. No second participant
+sample or independent validation study was conducted. Section 3 uses the
+retained qualitative material formatively alongside the coach-derived playbook
+to derive design requirements; Sections 7 and 8 organize the fencer-facing
+corpus around the research questions and descriptive outcomes. The evaluation
+therefore addresses feasibility, interpretation, and interaction breakdowns,
+not skill acquisition or long-term effectiveness.
 
 ### 7.1 Research Questions
 
@@ -1173,13 +1158,13 @@ Following the questions introduced in Section 1.4, the study asked:
 
 ### 7.2 Participants and Ethics
 
-Participant and data coverage is reported once in Table 1. Four participants
-contributed aggregate questionnaire ratings, while detailed records were
-retained only for P1 and P2. Recruitment, participant characteristics,
-compensation, and the applicable ethics, consent, retention, and withdrawal
-procedures are absent from the supplied artifacts. As detailed in Sections 3.1
-and 10.1, the manuscript therefore makes no representativeness, saturation, or
-complete ethical-governance claim.
+Participant and fencer-facing data coverage are summarized in Section 3.1.
+Four participants contributed aggregate questionnaire ratings, while detailed
+records were retained only for P1 and P2. Recruitment, participant
+characteristics, compensation, and the applicable ethics, consent, retention,
+and withdrawal procedures are absent from the supplied artifacts. As detailed
+in Sections 3.1 and 10.1, the manuscript therefore makes no representativeness,
+saturation, or complete ethical-governance claim.
 
 ### 7.3 Conditions and Baseline
 
@@ -1247,9 +1232,10 @@ questionnaire, and semi-structured interview. -->
 
 This section reports no new participant pool beyond Section 3. All 15
 questionnaire means use `N=4`; qualitative interpretation is limited to P1 and
-P2, with the deviations summarized in Table 1. Because participant-level
-ratings and characteristics were unavailable, the results cannot support
-individual trajectories, subgroup comparisons, or distributional claims.
+P2, with the deviations summarized in Sections 7.3 and 7.4. Because
+participant-level ratings and characteristics were unavailable, the results
+cannot support individual trajectories, subgroup comparisons, or
+distributional claims.
 
 ### 8.2 Reported Correction Attempts and Performance Boundary
 
@@ -1354,11 +1340,11 @@ support a claim that the study identified feasibility and design issues; they
 do not support claims of improved skill, superiority to self-review, or
 generalizable trust.
 
-Table 2 translates these same cases into DR1-DR5 and records the current
-Android response. We do not repeat that traceability table here because the
-evaluation is not independent evidence that those design responses are
-effective. Sections 9 and 10 instead discuss the implications and the measures
-needed to test them.
+Section 3.5 translates the formative corpus into DR1-DR5 and records the
+current Android response. We do not repeat that traceability table here
+because the evaluation is not independent evidence that those design responses
+are effective. Sections 9 and 10 instead discuss the implications and the
+measures needed to test them.
 
 ## 9. Discussion
 
