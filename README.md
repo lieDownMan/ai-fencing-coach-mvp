@@ -21,6 +21,12 @@ The project is a coaching aid, not a referee replacement.
 
 ## Main Runtime Modes
 
+The Python web app now lives in `apps/web`. Run these commands from that folder:
+
+```bash
+cd apps/web
+```
+
 ### 1. Clip Analysis UI
 
 ```bash
@@ -109,6 +115,7 @@ lowest-latency local tuning loop.
 ```bash
 python3 -m venv venv
 source venv/bin/activate
+cd apps/web
 pip install -r requirements.txt
 ```
 
@@ -118,13 +125,13 @@ Optional Gemini setup:
 GEMINI_API_KEY=your_key_here
 ```
 
-Put that in a local `.env` file in the repo root before starting `app.py`.
+Put that in a local `.env` file in `apps/web` before starting `app.py`.
 Without `GEMINI_API_KEY`, `app.py` still produces a deterministic
 `coach_playbook.json` summary that lists each detected problem and frequency.
 When Gemini is configured, the Analysis UI shows a `Use Gemini Summary`
 checkbox so each clip can still use either Gemini or the playbook-only summary.
 
-For real pose inference, keep `yolov8n-pose.pt` in the repo root or let
+For real pose inference, keep `yolov8n-pose.pt` in `apps/web` or let
 Ultralytics download it on first run. Persistent webcam target IDs use the
 optional `lap` package listed in `requirements.txt`; the live app falls back to
 non-persistent pose detections if `lap` is missing.
@@ -144,22 +151,22 @@ camera or video
 
 Important runtime files:
 
-- `app.py`
-- `heuristic_visualizer.py`
-- `realtime_heuristic_visualizer.py`
-- `src/realtime/realtime_app.py`
-- `src/realtime/feedback_config.py`
-- `src/realtime/feedback_scheduler.py`
-- `src/realtime/realtime_voice_coach.py`
-- `web_realtime.py`
-- `coach_playbook.json`
-- `inference/`
-- `llm_agent.py`
-- `database.py`
+- `apps/web/app.py`
+- `apps/web/heuristic_visualizer.py`
+- `apps/web/realtime_heuristic_visualizer.py`
+- `apps/web/src/realtime/realtime_app.py`
+- `apps/web/src/realtime/feedback_config.py`
+- `apps/web/src/realtime/feedback_scheduler.py`
+- `apps/web/src/realtime/realtime_voice_coach.py`
+- `apps/web/web_realtime.py`
+- `apps/web/coach_playbook.json`
+- `apps/web/inference/`
+- `apps/web/llm_agent.py`
+- `apps/web/database.py`
 
 ## Important Notes
 
-- The active inference package is now top-level `inference/`, not `src/inference/`.
+- The active Python inference package is in `apps/web/inference/`, not the repo root.
 - Voice cues do not require Gemini. They use offline `pyttsx3`.
 - Final clip summaries do not require Gemini. Without an API key, `llm_agent.py` uses `coach_playbook.json`; with an API key, Gemini receives the same playbook details in its prompt.
 - Feedback weights and mode availability live in `src/realtime/feedback_config.py`; unsupported or future errors are hidden or ignored by the UI for the selected training mode.

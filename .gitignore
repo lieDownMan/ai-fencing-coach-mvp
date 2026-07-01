@@ -4,6 +4,7 @@
 # Python
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # SSL certs (old WebRTC approach)
 *.pem
@@ -17,6 +18,7 @@ cloudflared.exe
 # OS
 .DS_Store
 Thumbs.db
+__MACOSX/
 
 
 # Video files
@@ -46,8 +48,9 @@ FFD.zip
 
 # Android local/build outputs
 android/.gradle/
+android/.idea/
 android/**/build/
-android/local.properties
+android/.kotlin/
+android/**/local.properties
 android/captures/
-android/app/.idea/workspace.xml
-android/app/.idea/inspectionProfiles/
+android/app/.idea/
