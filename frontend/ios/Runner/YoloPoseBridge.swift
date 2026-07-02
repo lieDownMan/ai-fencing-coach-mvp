@@ -108,7 +108,9 @@ import Vision
             result(FlutterError(code: "INVALID_ARGS", message: "Missing frame arguments", details: nil))
             return
         }
-
+        
+        let isFrontCamera = args["isFrontCamera"] as? Bool ?? false
+        
         let data = bytesData.data
         guard let provider = CGDataProvider(data: data as CFData) else {
             result(FlutterError(code: "CONVERSION_ERROR", message: "Failed to create data provider", details: nil))
@@ -136,8 +138,12 @@ import Vision
             result(FlutterError(code: "CONVERSION_ERROR", message: "Failed to create CGImage from bytes", details: nil))
             return
         }
-
-        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        
+        // Tell Vision the correct orientation so YOLO receives an upright portrait image.
+        // iOS camera sensor output is landscape; back camera needs 90° CW rotation (.right),
+        // front camera needs 90° CW + horizontal mirror (.rightMirrored).
+        let orientation: CGImagePropertyOrientation = isFrontCamera ? .rightMirrored : .right
+        let handler = VNImageRequestHandler(cgImage: cgImage, orientation: orientation, options: [:])
         do {
             try handler.perform([request])
 

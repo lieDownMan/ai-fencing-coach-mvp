@@ -29,6 +29,7 @@ class LLMAgent:
         if HAS_GENAI and key:
             genai.configure(api_key=key)
             self.model = genai.GenerativeModel('gemini-1.5-flash')
+            self.model = genai.GenerativeModel('gemini-1.5-flash')
             self.enabled = True
         else:
             self.enabled = False

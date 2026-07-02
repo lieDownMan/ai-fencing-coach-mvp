@@ -6,31 +6,50 @@ import 'package:flutter/material.dart';
 import 'pose_service.dart';
 
 // ---------------------------------------------------------------------------
-// Connection pairs for skeleton lines
+// Skeleton connection groups (for color coding)
 // ---------------------------------------------------------------------------
 
-const List<(String, String)> kSkeletonConnections = [
-  // Torso
+// Upper body: green
+const List<(String, String)> kUpperConnections = [
+  ('nose', 'left_shoulder'),
+  ('nose', 'right_shoulder'),
   ('left_shoulder', 'right_shoulder'),
+  ('left_shoulder', 'left_elbow'),
+  ('left_elbow', 'left_wrist'),
+  ('right_shoulder', 'right_elbow'),
+  ('right_elbow', 'right_wrist'),
+];
+
+// Torso: green (links upper to lower)
+const List<(String, String)> kTorsoConnections = [
   ('left_shoulder', 'left_hip'),
   ('right_shoulder', 'right_hip'),
   ('left_hip', 'right_hip'),
-  // Left arm
-  ('left_shoulder', 'left_elbow'),
-  ('left_elbow', 'left_wrist'),
-  // Right arm
-  ('right_shoulder', 'right_elbow'),
-  ('right_elbow', 'right_wrist'),
-  // Left leg
+];
+
+// Lower body: blue
+const List<(String, String)> kLowerConnections = [
   ('left_hip', 'left_knee'),
   ('left_knee', 'left_ankle'),
-  // Right leg
   ('right_hip', 'right_knee'),
   ('right_knee', 'right_ankle'),
-  // Nose to shoulders
-  ('nose', 'left_shoulder'),
-  ('nose', 'right_shoulder'),
 ];
+
+// Upper body joint names
+const Set<String> kUpperJoints = {
+  'nose',
+  'left_shoulder', 'right_shoulder',
+  'left_elbow', 'right_elbow',
+  'left_wrist', 'right_wrist',
+  'front_shoulder', 'front_elbow', 'front_wrist',
+};
+
+// Lower body joint names
+const Set<String> kLowerJoints = {
+  'left_hip', 'right_hip',
+  'left_knee', 'right_knee',
+  'left_ankle', 'right_ankle',
+};
 
 // ---------------------------------------------------------------------------
 // PosePainter
@@ -58,43 +77,71 @@ class PosePainter extends CustomPainter {
 
     Offset mapPoint(Offset pt) => Offset(pt.dx * scaleX, pt.dy * scaleY);
 
-    // Choose skeleton color based on action
-    final Color boneColor = triggeredError != null
-        ? Colors.redAccent.withAlpha(230)
-        : const Color(0xFF00E5FF).withAlpha(200);
+    // Error flash overrides all colors with red
+    final bool hasError = triggeredError != null;
 
-    final Paint bonePaint = Paint()
-      ..color = boneColor
-      ..strokeWidth = 2.5
+    // ── Paint factories ────────────────────────────────────────────────────
+
+    Paint bonePaint(Color color) => Paint()
+      ..color = hasError ? Colors.redAccent.withAlpha(220) : color
+      ..strokeWidth = 3.0
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
 
-    final Paint jointPaint = Paint()
-      ..color = Colors.white.withAlpha(220)
+    Paint jointPaint(Color color) => Paint()
+      ..color = hasError ? Colors.red.withAlpha(220) : color
       ..style = PaintingStyle.fill;
 
-    final Paint frontJointPaint = Paint()
-      ..color = const Color(0xFFFF6600).withAlpha(240)
+    // Upper body: vivid green
+    final upperPaint = bonePaint(const Color(0xFF00E676).withAlpha(220)); // green accent
+    // Torso: green (same as upper)
+    final torsoPaint = bonePaint(const Color(0xFF00E676).withAlpha(180));
+    // Lower body: vivid blue
+    final lowerPaint = bonePaint(const Color(0xFF2979FF).withAlpha(220)); // blue accent
+
+    // Joint dot paints
+    final upperJointPaint  = jointPaint(const Color(0xFF69FF47).withAlpha(240)); // bright green
+    final lowerJointPaint  = jointPaint(const Color(0xFF448AFF).withAlpha(240)); // bright blue
+    final frontJointPaint  = Paint()
+      ..color = hasError ? Colors.red : const Color(0xFFFF6600).withAlpha(240)
       ..style = PaintingStyle.fill;
 
     final joints = skeleton.joints;
 
-    // Draw connections
-    for (final (a, b) in kSkeletonConnections) {
-      final ptA = joints[a];
-      final ptB = joints[b];
-      if (ptA != null && ptB != null) {
-        canvas.drawLine(mapPoint(ptA), mapPoint(ptB), bonePaint);
+    // ── Draw connections ───────────────────────────────────────────────────
+
+    void drawConnections(List<(String, String)> pairs, Paint paint) {
+      for (final (a, b) in pairs) {
+        final ptA = joints[a];
+        final ptB = joints[b];
+        if (ptA != null && ptB != null) {
+          canvas.drawLine(mapPoint(ptA), mapPoint(ptB), paint);
+        }
       }
     }
 
-    // Draw joints
+    drawConnections(kUpperConnections, upperPaint);
+    drawConnections(kTorsoConnections, torsoPaint);
+    drawConnections(kLowerConnections, lowerPaint);
+
+    // ── Draw joints ────────────────────────────────────────────────────────
+
     for (final entry in joints.entries) {
       final name = entry.key;
       final pt = mapPoint(entry.value);
       final isFront = name.startsWith('front_');
-      final radius = isFront ? 5.0 : 3.5;
-      canvas.drawCircle(pt, radius, isFront ? frontJointPaint : jointPaint);
+
+      if (isFront) {
+        // Sword-arm joints: orange highlight with glow ring
+        canvas.drawCircle(pt, 8.0, Paint()
+          ..color = const Color(0xFFFF6600).withAlpha(60)
+          ..style = PaintingStyle.fill);
+        canvas.drawCircle(pt, 5.5, frontJointPaint);
+      } else if (kLowerJoints.contains(name)) {
+        canvas.drawCircle(pt, 4.0, lowerJointPaint);
+      } else {
+        canvas.drawCircle(pt, 4.0, upperJointPaint);
+      }
     }
   }
 

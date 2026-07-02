@@ -62,6 +62,7 @@ class YoloPoseService {
           'width': width,
           'height': height,
           'bytesPerRow': bytesPerRow,
+          'isFrontCamera': isFrontCamera,
         },
       );
 

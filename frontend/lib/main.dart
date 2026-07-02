@@ -778,7 +778,19 @@ class _MainScreenState extends State<MainScreen>
       return Container();
     }
 
-    final double aspectRatio = 1.0 / _cameraController!.value.aspectRatio;
+    // Always compute a portrait ratio regardless of sensor orientation.
+    // On iOS 26, CameraPreview already handles rotation internally, so
+    // we must NOT double-flip with 1.0/aspectRatio.
+    final previewSize = _cameraController!.value.previewSize;
+    final double aspectRatio;
+    if (previewSize != null) {
+      final w = previewSize.width;
+      final h = previewSize.height;
+      // Force portrait (smaller dimension / larger dimension)
+      aspectRatio = w < h ? w / h : h / w;
+    } else {
+      aspectRatio = 3.0 / 4.0;
+    }
 
     return Center(
       child: AspectRatio(
@@ -789,15 +801,12 @@ class _MainScreenState extends State<MainScreen>
             // Camera preview
             CameraPreview(_cameraController!),
 
-            // Skeleton overlay
+            // Skeleton overlay — keypoints from YOLOv8 are pre-normalized [0,1]
             if (_currentSkeleton != null)
               CustomPaint(
                 painter: PosePainter(
                   skeleton: _currentSkeleton!,
-                  imageSize: Size(
-                    _cameraController!.value.previewSize?.height ?? 480,
-                    _cameraController!.value.previewSize?.width ?? 640,
-                  ),
+                  imageSize: const Size(1.0, 1.0),
                   triggeredError: _activeErrors.isNotEmpty ? _activeErrors.first : null,
                   currentAction: _currentAction,
                   isFrontCamera: _cameraController?.description.lensDirection == CameraLensDirection.front,
