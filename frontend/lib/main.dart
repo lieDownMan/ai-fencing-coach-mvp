@@ -173,6 +173,11 @@ class _MainScreenState extends State<MainScreen>
   // FenceNet window buffer (28 skeletons for classification)
   final List<Skeleton> _classifierBuffer = [];
 
+  // Effective pose fps estimate (frames actually processed per second) —
+  // used so the heuristics engine's duration-based thresholds stay
+  // consistent across devices with different pose throughput.
+  final List<int> _poseTimestampsMs = [];
+
   // Live state
   String _currentAction = 'Idle';
   double _actionConfidence = 0.0;
@@ -421,6 +426,11 @@ class _MainScreenState extends State<MainScreen>
         _frameCount++;
         _currentSkeleton = skeleton;
 
+        _poseTimestampsMs.add(DateTime.now().millisecondsSinceEpoch);
+        if (_poseTimestampsMs.length > 30) {
+          _poseTimestampsMs.removeAt(0);
+        }
+
         // Add to heuristic buffer
         _skeletonBuffer.add(skeleton.joints);
         if (_skeletonBuffer.length > 60) {
@@ -525,6 +535,13 @@ class _MainScreenState extends State<MainScreen>
     await AppDatabase.instance.savePracticeReport(report);
   }
 
+  double get _effectivePoseFps {
+    if (_poseTimestampsMs.length < 5) return 30.0;
+    final spanMs = _poseTimestampsMs.last - _poseTimestampsMs.first;
+    if (spanMs <= 0) return 30.0;
+    return (_poseTimestampsMs.length - 1) * 1000.0 / spanMs;
+  }
+
   Future<void> _classifyAndEvaluate() async {
     // ── FenceNet action classification ───────────────────────────────────────
     String action = 'SF'; // default footwork
@@ -544,6 +561,7 @@ class _MainScreenState extends State<MainScreen>
     final errors = _heuristics.evaluateWindow(
       action: action,
       skeletons: List.from(_skeletonBuffer),
+      fps: _effectivePoseFps,
     );
 
     // Filter by mode
@@ -628,6 +646,7 @@ class _MainScreenState extends State<MainScreen>
     _refScale = null;
     _classifierBuffer.clear();
     _skeletonBuffer.clear();
+    _poseTimestampsMs.clear();
     _activeErrors = [];
     _currentSkeleton = null;
     _currentAction = 'Idle';
@@ -1052,7 +1071,8 @@ class _MainScreenState extends State<MainScreen>
               'Turned Back: ${_gatekeeper.lastReasons['turned_back']}\n'
               'Moving: ${_gatekeeper.lastReasons['moving']}\n'
               'Step Ratio: ${_heuristics.lastStepRatio?.toStringAsFixed(2) ?? 'N/A'} | '
-              'Step Width: ${_heuristics.lastStepWidth?.toStringAsFixed(3) ?? 'N/A'}',
+              'Step Width: ${_heuristics.lastStepWidth?.toStringAsFixed(3) ?? 'N/A'} | '
+              'Pose FPS: ${_effectivePoseFps.toStringAsFixed(1)}',
               style: const TextStyle(color: Colors.white54, fontSize: 10),
               textAlign: TextAlign.center,
             ),

@@ -3,6 +3,18 @@
 /// All computations are frame-by-frame or over sliding windows of raw skeletons.
 /// Skeletons are represented as `Map<String, Offset>` where keys match the
 /// ML-Kit landmark names we resolve into logical fencing joints.
+///
+/// Divergences from the Python engine (deliberate, tuned for live phone use):
+///  - Frame-count thresholds are time-based (seconds × measured fps) because the
+///    effective pose fps on device varies with hardware and load.
+///  - Step-width / center-of-mass checks must hold for a sustained duration,
+///    not a single frame, so normal mid-stride phases don't trigger them.
+///  - Over-parrying measures the wrist sweep RELATIVE to the pelvis (so walking
+///    doesn't count as a parry) and scales by torso length, which stays valid
+///    in the side-on camera view where shoulder X-width collapses to ~0.
+///  - foot_before_hand compares motion ONSET times (not peak times) with a
+///    small margin, since in a correct lunge the foot can legitimately *peak*
+///    (land) before the arm reaches full extension.
 
 library;
 
@@ -11,27 +23,32 @@ import 'dart:ui' show Offset;
 import 'package:flutter/foundation.dart';
 
 // ---------------------------------------------------------------------------
-// Constants — mirror of heuristics_engine.py
+// Constants
 // ---------------------------------------------------------------------------
 
 const int kBouncMinPelvisSamples = 5;
+// Python uses 0.25; kept looser here because live phone pose is noisier.
 const double kBounceRatioThreshold = 0.33;
 const double kLungeKneeMinAngleDeg = 90.0;
-const int kGuardDroppedThresholdFrames = 10;
-const int kGuardDroppedFreeBoutingThresholdFrames = 20;
+const double kGuardDroppedSeconds = 0.35;
+const double kGuardDroppedFreeBoutingSeconds = 0.70;
 const double kFootBeforeHandMinDisplacementPx = 0.01; // normalized [0,1] space (≈ 6px in 640px)
+const double kFootBeforeHandLeadSeconds = 0.10; // ankle must lead wrist by at least this
 const double kStanceTooHighAngleDeg = 170.0;
 const double kIncompleteArmExtensionAngleDeg = 155.0;
 const int kOverParryMinWristSamples = 5;
-const double kOverParryShoulderMultiplier = 2.0;
-const double kOverParryRatioThreshold = 2.0;
+// Wrist sweep (relative to pelvis) beyond this multiple of torso length = over-parry.
+const double kOverParryTorsoRatioThreshold = 1.2;
 const double kStepShoulderProxyMultiplier = 2.5;
 const double kStepMinShoulderWidthPx = 0.01;  // normalized [0,1] space (≈ 6px in 640px)
 const double kWideStepRatioThreshold = 3.0;
 const double kNarrowStepRatioThreshold = 1.0;
+const double kStepSustainedSeconds = 0.30; // ratio must stay out of range this long
 const double kComMinBaseWidthPx = 0.01;       // normalized [0,1] space (≈ 6px in 640px)
 const double kComInFrontRatioThreshold = 0.65;
 const double kComLeaningBackRatioThreshold = 0.35;
+const double kComSustainedSeconds = 0.30;
+const double kDefaultFps = 30.0;
 
 // ---------------------------------------------------------------------------
 // Detected action classes (from FenceNetV2 class names)
@@ -68,6 +85,13 @@ Offset? _pelvisCenter(Skeleton skel) {
   final rh = skel['right_hip'];
   if (lh == null || rh == null) return null;
   return Offset((lh.dx + rh.dx) / 2, (lh.dy + rh.dy) / 2);
+}
+
+double _median(List<double> values) {
+  final sorted = List<double>.from(values)..sort();
+  final mid = sorted.length ~/ 2;
+  if (sorted.length.isOdd) return sorted[mid];
+  return (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 // ---------------------------------------------------------------------------
@@ -118,13 +142,24 @@ class HeuristicsEngine {
     required this.trainingMode,
   });
 
+  /// Convert a duration threshold to a frame count at the given fps.
+  static int _framesFor(double seconds, double fps) =>
+      math.max(3, (seconds * fps).round());
+
   /// Evaluate a buffer of skeletons against the given action label.
+  /// [fps] is the *effective* pose frame rate of the buffer (frames actually
+  /// processed per second, not the camera rate) so duration-based thresholds
+  /// stay consistent across devices.
   /// Returns a list of triggered error keys.
   List<String> evaluateWindow({
     required String action,
     required List<Skeleton> skeletons,
+    double fps = kDefaultFps,
   }) {
     if (skeletons.isEmpty) return [];
+    if (!fps.isFinite || fps <= 1.0) {
+      fps = kDefaultFps;
+    }
 
     // Unconditionally compute live step debug metrics
     final latestSkel = skeletons.last;
@@ -133,7 +168,7 @@ class HeuristicsEngine {
     final fAnkle = latestSkel[liveLimbs['ankle']!];
     final bAnkle = latestSkel[liveBackAnkle];
     if (fAnkle != null && bAnkle != null) {
-      lastStepWidth = (fAnkle - bAnkle).distance;
+      lastStepWidth = (fAnkle.dx - bAnkle.dx).abs();
       final fShoulder = latestSkel[liveLimbs['shoulder']!];
       final pCenter = _pelvisCenter(latestSkel);
       if (fShoulder != null && pCenter != null) {
@@ -144,37 +179,29 @@ class HeuristicsEngine {
 
     final errors = <String>[];
     final isOffensive = kOffensiveActions.contains(action);
+    final isFootwork = kFootworkActions.contains(action);
 
-    // Footwork-specific checks
-    if (trainingMode == 'Footwork' && kFootworkActions.contains(action)) {
+    // Footwork checks — footwork actions in any mode
+    if (isFootwork) {
       _tryAdd(errors, _checkBounce(skeletons));
       _tryAdd(errors, _checkStanceTooHigh(skeletons));
-      _tryAdd(errors, _checkCenterOfMass(skeletons));
+      _tryAdd(errors, _checkStepWidth(skeletons, fps));
+      _tryAdd(errors, _checkCenterOfMass(skeletons, fps));
     }
 
     // Target Practice offensive checks
     if (trainingMode == 'Target Practice' && isOffensive) {
       _tryAdd(errors, _checkLunge(skeletons));
-      _tryAdd(errors, _checkFootBeforeHand(skeletons));
+      _tryAdd(errors, _checkFootBeforeHand(skeletons, fps));
       _tryAdd(errors, _checkIncompleteArmExtension(skeletons));
     }
 
     // Guard dropped — all modes
-    _tryAdd(errors, _checkGuard(skeletons));
+    _tryAdd(errors, _checkGuard(skeletons, fps));
 
-    // Step width — all modes, unconditionally
-    _tryAdd(errors, _checkStepWidth(skeletons));
-
-    // Footwork checks in non-Footwork modes
-    if (trainingMode != 'Footwork' && kFootworkActions.contains(action)) {
-      _tryAdd(errors, _checkStanceTooHigh(skeletons));
-      _tryAdd(errors, _checkBounce(skeletons));
-      _tryAdd(errors, _checkCenterOfMass(skeletons));
-    }
-
-    // Over-parrying
+    // Over-parrying — defensive context: SB in all modes, SF/SB in Free Bouting
     if (action == 'SB' ||
-        (trainingMode == 'Free Bouting' && kFootworkActions.contains(action))) {
+        (trainingMode == 'Free Bouting' && isFootwork)) {
       _tryAdd(errors, _checkOverParrying(skeletons));
     }
 
@@ -241,12 +268,13 @@ class HeuristicsEngine {
 
   // ── Rule 3: guard_dropped ─────────────────────────────────────────────────
 
-  String? _checkGuard(List<Skeleton> skeletons) {
+  String? _checkGuard(List<Skeleton> skeletons, double fps) {
     final limbs = frontLimbs(targetSide);
     int consecutive = 0;
-    final threshold = trainingMode == 'Free Bouting'
-        ? kGuardDroppedFreeBoutingThresholdFrames
-        : kGuardDroppedThresholdFrames;
+    final seconds = trainingMode == 'Free Bouting'
+        ? kGuardDroppedFreeBoutingSeconds
+        : kGuardDroppedSeconds;
+    final threshold = _framesFor(seconds, fps);
 
     for (final skel in skeletons) {
       final wrist = skel[limbs['wrist']!];
@@ -262,41 +290,43 @@ class HeuristicsEngine {
   }
 
   // ── Rule 4: foot_before_hand ──────────────────────────────────────────────
+  //
+  // Compare the ONSET frame (first frame the joint has moved past the noise
+  // threshold from its start position) of the front ankle vs the front wrist.
+  // If the foot starts moving clearly before the hand, the sequencing is wrong.
 
-  String? _checkFootBeforeHand(List<Skeleton> skeletons) {
+  String? _checkFootBeforeHand(List<Skeleton> skeletons, double fps) {
     final limbs = frontLimbs(targetSide);
     final refWrist = skeletons[0][limbs['wrist']!];
     final refAnkle = skeletons[0][limbs['ankle']!];
     if (refWrist == null || refAnkle == null) return null;
 
-    double maxWristDisp = 0, maxAnkleDisp = 0;
-    int wristPeakFrame = 0, anklePeakFrame = 0;
+    int? wristOnset;
+    int? ankleOnset;
 
     for (int i = 0; i < skeletons.length; i++) {
       final skel = skeletons[i];
-      final wrist = skel[limbs['wrist']!];
-      final ankle = skel[limbs['ankle']!];
-      if (wrist != null) {
-        final d = (wrist.dx - refWrist.dx).abs();
-        if (d > maxWristDisp) {
-          maxWristDisp = d;
-          wristPeakFrame = i;
+      if (wristOnset == null) {
+        final wrist = skel[limbs['wrist']!];
+        if (wrist != null &&
+            (wrist.dx - refWrist.dx).abs() > kFootBeforeHandMinDisplacementPx) {
+          wristOnset = i;
         }
       }
-      if (ankle != null) {
-        final d = (ankle.dx - refAnkle.dx).abs();
-        if (d > maxAnkleDisp) {
-          maxAnkleDisp = d;
-          anklePeakFrame = i;
+      if (ankleOnset == null) {
+        final ankle = skel[limbs['ankle']!];
+        if (ankle != null &&
+            (ankle.dx - refAnkle.dx).abs() > kFootBeforeHandMinDisplacementPx) {
+          ankleOnset = i;
         }
       }
+      if (wristOnset != null && ankleOnset != null) break;
     }
 
-    if (maxAnkleDisp > kFootBeforeHandMinDisplacementPx &&
-        maxWristDisp > kFootBeforeHandMinDisplacementPx &&
-        anklePeakFrame < wristPeakFrame) {
-      return 'foot_before_hand';
-    }
+    if (wristOnset == null || ankleOnset == null) return null;
+
+    final margin = _framesFor(kFootBeforeHandLeadSeconds, fps);
+    if (ankleOnset + margin <= wristOnset) return 'foot_before_hand';
     return null;
   }
 
@@ -350,51 +380,54 @@ class HeuristicsEngine {
   }
 
   // ── Rule 9: over_parrying ─────────────────────────────────────────────────
+  //
+  // Wrist X measured RELATIVE to the pelvis center each frame, so whole-body
+  // translation (advancing/retreating) doesn't register as a parry sweep.
+  // Scale reference is the median torso length (front shoulder → pelvis,
+  // Euclidean), which stays meaningful in the side-on view where the X-width
+  // between the two shoulders collapses to ~0.
 
   String? _checkOverParrying(List<Skeleton> skeletons) {
     final limbs = frontLimbs(targetSide);
-    double? shoulderWidth;
+    final relXs = <double>[];
+    final torsoLens = <double>[];
 
     for (final skel in skeletons) {
+      final wrist = skel[limbs['wrist']!];
+      final pelvis = _pelvisCenter(skel);
+      if (wrist == null || pelvis == null) continue;
+      relXs.add(wrist.dx - pelvis.dx);
       final shoulder = skel[limbs['shoulder']!];
-      final otherShoulderName =
-          targetSide == 'right' ? 'left_shoulder' : 'right_shoulder';
-      final otherShoulder = skel[otherShoulderName];
-      if (otherShoulder == null) {
-        final pelvis = _pelvisCenter(skel);
-        if (shoulder != null && pelvis != null) {
-          shoulderWidth =
-              (shoulder.dx - pelvis.dx).abs() * kOverParryShoulderMultiplier;
-          break;
-        }
-      } else if (shoulder != null) {
-        shoulderWidth = (shoulder.dx - otherShoulder.dx).abs();
-        break;
+      if (shoulder != null) {
+        torsoLens.add((shoulder - pelvis).distance);
       }
     }
 
-    if (shoulderWidth == null || shoulderWidth < 1e-6) return null;
-
-    final wristXs = <double>[];
-    for (final skel in skeletons) {
-      final wrist = skel[limbs['wrist']!];
-      if (wrist != null) wristXs.add(wrist.dx);
+    if (relXs.length < kOverParryMinWristSamples || torsoLens.isEmpty) {
+      return null;
     }
+    final torso = _median(torsoLens);
+    if (torso < 1e-6) return null;
 
-    if (wristXs.length < kOverParryMinWristSamples) return null;
-
-    final sweepRange = wristXs.reduce(math.max) - wristXs.reduce(math.min);
-    if (sweepRange > kOverParryRatioThreshold * shoulderWidth) {
+    final sweepRange = relXs.reduce(math.max) - relXs.reduce(math.min);
+    if (sweepRange > kOverParryTorsoRatioThreshold * torso) {
       return 'over_parrying';
     }
     return null;
   }
 
   // ── Rule 10: wide_step / narrow_step ──────────────────────────────────────
+  //
+  // The ratio must stay out of the healthy band for a sustained duration —
+  // feet naturally pass close together mid-stride, and a single such frame
+  // is normal footwork, not an error.
 
-  String? _checkStepWidth(List<Skeleton> skeletons) {
+  String? _checkStepWidth(List<Skeleton> skeletons, double fps) {
     final limbs = frontLimbs(targetSide);
     final backAnkleKey = backAnkleName(targetSide);
+    final sustained = _framesFor(kStepSustainedSeconds, fps);
+    int wideRun = 0;
+    int narrowRun = 0;
 
     for (final skel in skeletons) {
       final frontAnkle = skel[limbs['ankle']!];
@@ -408,19 +441,36 @@ class HeuristicsEngine {
           (frontShoulder.dx - pelvis.dx).abs() * kStepShoulderProxyMultiplier;
       if (sw < kStepMinShoulderWidthPx) continue;
 
-      final stepWidth = (frontAnkle - back).distance;
+      final stepWidth = (frontAnkle.dx - back.dx).abs();
       final ratio = stepWidth / sw;
 
-      if (ratio < kNarrowStepRatioThreshold) return 'narrow_step';
+      if (ratio > kWideStepRatioThreshold) {
+        wideRun++;
+        narrowRun = 0;
+        if (wideRun >= sustained) return 'wide_step';
+      } else if (ratio < kNarrowStepRatioThreshold) {
+        narrowRun++;
+        wideRun = 0;
+        if (narrowRun >= sustained) return 'narrow_step';
+      } else {
+        wideRun = 0;
+        narrowRun = 0;
+      }
     }
     return null;
   }
 
   // ── Rule 11: center_of_mass_in_front / leaning_backward ──────────────────
+  //
+  // Same sustained-duration requirement as step width: the pelvis ratio
+  // legitimately leaves the healthy band during a step's transfer phase.
 
-  String? _checkCenterOfMass(List<Skeleton> skeletons) {
+  String? _checkCenterOfMass(List<Skeleton> skeletons, double fps) {
     final limbs = frontLimbs(targetSide);
     final backAnkleKey = backAnkleName(targetSide);
+    final sustained = _framesFor(kComSustainedSeconds, fps);
+    int frontRun = 0;
+    int backRun = 0;
 
     for (final skel in skeletons) {
       final frontAnkle = skel[limbs['ankle']!];
@@ -441,9 +491,17 @@ class HeuristicsEngine {
         ratio = (backX - pelvisX) / baseWidth;
       }
 
-      if (ratio > kComInFrontRatioThreshold) return 'center_of_mass_in_front';
-      if (ratio < kComLeaningBackRatioThreshold) {
-        return 'center_of_mass_leaning_backward';
+      if (ratio > kComInFrontRatioThreshold) {
+        frontRun++;
+        backRun = 0;
+        if (frontRun >= sustained) return 'center_of_mass_in_front';
+      } else if (ratio < kComLeaningBackRatioThreshold) {
+        backRun++;
+        frontRun = 0;
+        if (backRun >= sustained) return 'center_of_mass_leaning_backward';
+      } else {
+        frontRun = 0;
+        backRun = 0;
       }
     }
     return null;
