@@ -140,9 +140,17 @@ import Vision
         }
         
         // Tell Vision the correct orientation so YOLO receives an upright portrait image.
-        // iOS camera sensor output is landscape; back camera needs 90° CW rotation (.right),
-        // front camera needs 90° CW + horizontal mirror (.rightMirrored).
-        let orientation: CGImagePropertyOrientation = isFrontCamera ? .rightMirrored : .right
+        // Older camera-plugin/iOS versions deliver image-stream buffers in raw sensor
+        // (landscape) orientation, which needs a 90° CW rotation (+ mirror for the front
+        // camera). Newer versions (observed on iOS 26) deliver frames already rotated to
+        // portrait — rotating those again puts the skeleton 90° off the body. Infer which
+        // case we're in from the buffer shape instead of assuming.
+        let orientation: CGImagePropertyOrientation
+        if width > height {
+            orientation = isFrontCamera ? .rightMirrored : .right
+        } else {
+            orientation = isFrontCamera ? .upMirrored : .up
+        }
         let handler = VNImageRequestHandler(cgImage: cgImage, orientation: orientation, options: [:])
         do {
             try handler.perform([request])
