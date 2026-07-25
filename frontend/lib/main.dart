@@ -18,6 +18,7 @@ import 'database/app_database.dart';
 import 'screens/history_screen.dart';
 import 'screens/postgame_screen.dart';
 import 'ai/gemini_agent.dart';
+import 'tuning/session_recorder.dart';
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -177,6 +178,10 @@ class _MainScreenState extends State<MainScreen>
   // used so the heuristics engine's duration-based thresholds stay
   // consistent across devices with different pose throughput.
   final List<int> _poseTimestampsMs = [];
+
+  // Tuning-data recorder (Debug tab toggle)
+  final SessionRecorder _recorder = SessionRecorder();
+  String? _lastRecordingPath;
 
   // Live state
   String _currentAction = 'Idle';
@@ -430,6 +435,12 @@ class _MainScreenState extends State<MainScreen>
         if (_poseTimestampsMs.length > 30) {
           _poseTimestampsMs.removeAt(0);
         }
+
+        _recorder.addFrame(
+          action: _currentAction,
+          confidence: _actionConfidence,
+          joints: skeleton.joints,
+        );
 
         // Add to heuristic buffer
         _skeletonBuffer.add(skeleton.joints);
@@ -1286,6 +1297,36 @@ class _MainScreenState extends State<MainScreen>
                 ),
               ),
             ],
+          ),
+        ),
+        Container(
+          color: const Color(0xFF141420),
+          child: SwitchListTile(
+            title: const Text('錄製調參數據 Record tuning data',
+                style: TextStyle(fontSize: 13)),
+            subtitle: Text(
+              _recorder.isRecording
+                  ? '錄製中… ${_recorder.frameCount} frames'
+                  : (_lastRecordingPath != null
+                      ? '已存: ${_lastRecordingPath!.split('/').last}'
+                      : '存到 檔案App ▸ AI Fencing Coach ▸ tuning/'),
+              style: const TextStyle(fontSize: 11),
+            ),
+            value: _recorder.isRecording,
+            activeThumbColor: const Color(0xFFFF6600),
+            dense: true,
+            onChanged: (on) async {
+              if (on) {
+                _recorder.start();
+                setState(() {});
+              } else {
+                final f = await _recorder.stop();
+                if (mounted) {
+                  setState(() =>
+                      _lastRecordingPath = f?.path ?? '(no frames recorded)');
+                }
+              }
+            },
           ),
         ),
         Expanded(

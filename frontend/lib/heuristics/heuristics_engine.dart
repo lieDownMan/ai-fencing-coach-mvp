@@ -23,32 +23,110 @@ import 'dart:ui' show Offset;
 import 'package:flutter/foundation.dart';
 
 // ---------------------------------------------------------------------------
-// Constants
+// Fixed constants (not worth tuning)
 // ---------------------------------------------------------------------------
 
 const int kBouncMinPelvisSamples = 5;
-// Python uses 0.25; kept looser here because live phone pose is noisier.
-const double kBounceRatioThreshold = 0.33;
-const double kLungeKneeMinAngleDeg = 90.0;
-const double kGuardDroppedSeconds = 0.35;
-const double kGuardDroppedFreeBoutingSeconds = 0.70;
-const double kFootBeforeHandMinDisplacementPx = 0.01; // normalized [0,1] space (≈ 6px in 640px)
-const double kFootBeforeHandLeadSeconds = 0.10; // ankle must lead wrist by at least this
-const double kStanceTooHighAngleDeg = 170.0;
-const double kIncompleteArmExtensionAngleDeg = 155.0;
 const int kOverParryMinWristSamples = 5;
-// Wrist sweep (relative to pelvis) beyond this multiple of torso length = over-parry.
-const double kOverParryTorsoRatioThreshold = 1.2;
-const double kStepShoulderProxyMultiplier = 2.5;
 const double kStepMinShoulderWidthPx = 0.01;  // normalized [0,1] space (≈ 6px in 640px)
-const double kWideStepRatioThreshold = 3.0;
-const double kNarrowStepRatioThreshold = 1.0;
-const double kStepSustainedSeconds = 0.30; // ratio must stay out of range this long
 const double kComMinBaseWidthPx = 0.01;       // normalized [0,1] space (≈ 6px in 640px)
-const double kComInFrontRatioThreshold = 0.65;
-const double kComLeaningBackRatioThreshold = 0.35;
-const double kComSustainedSeconds = 0.30;
 const double kDefaultFps = 30.0;
+
+// ---------------------------------------------------------------------------
+// Tunable thresholds
+// ---------------------------------------------------------------------------
+
+/// Every tunable threshold in one place, overridable per-instance so the
+/// offline replay tool can sweep values and (later) per-user calibration can
+/// scale them. The defaults are the shipped behavior.
+class HeuristicsConfig {
+  // Python uses 0.25; kept looser here because live phone pose is noisier.
+  final double bounceRatioThreshold;
+  final double lungeKneeMinAngleDeg;
+  final double guardDroppedSeconds;
+  final double guardDroppedFreeBoutingSeconds;
+  final double footBeforeHandMinDisplacement; // normalized [0,1] space
+  final double footBeforeHandLeadSeconds; // ankle must lead wrist by at least this
+  final double stanceTooHighAngleDeg;
+  final double incompleteArmExtensionAngleDeg;
+  // Wrist sweep (relative to pelvis) beyond this multiple of torso length = over-parry.
+  final double overParryTorsoRatioThreshold;
+  final double stepShoulderProxyMultiplier;
+  final double wideStepRatioThreshold;
+  final double narrowStepRatioThreshold;
+  final double stepSustainedSeconds; // ratio must stay out of range this long
+  final double comInFrontRatioThreshold;
+  final double comLeaningBackRatioThreshold;
+  final double comSustainedSeconds;
+
+  const HeuristicsConfig({
+    this.bounceRatioThreshold = 0.33,
+    this.lungeKneeMinAngleDeg = 90.0,
+    this.guardDroppedSeconds = 0.35,
+    this.guardDroppedFreeBoutingSeconds = 0.70,
+    this.footBeforeHandMinDisplacement = 0.01,
+    this.footBeforeHandLeadSeconds = 0.10,
+    this.stanceTooHighAngleDeg = 170.0,
+    this.incompleteArmExtensionAngleDeg = 155.0,
+    this.overParryTorsoRatioThreshold = 1.2,
+    this.stepShoulderProxyMultiplier = 2.5,
+    this.wideStepRatioThreshold = 3.0,
+    this.narrowStepRatioThreshold = 1.0,
+    this.stepSustainedSeconds = 0.30,
+    this.comInFrontRatioThreshold = 0.65,
+    this.comLeaningBackRatioThreshold = 0.35,
+    this.comSustainedSeconds = 0.30,
+  });
+
+  HeuristicsConfig copyWith({
+    double? bounceRatioThreshold,
+    double? lungeKneeMinAngleDeg,
+    double? guardDroppedSeconds,
+    double? guardDroppedFreeBoutingSeconds,
+    double? footBeforeHandMinDisplacement,
+    double? footBeforeHandLeadSeconds,
+    double? stanceTooHighAngleDeg,
+    double? incompleteArmExtensionAngleDeg,
+    double? overParryTorsoRatioThreshold,
+    double? stepShoulderProxyMultiplier,
+    double? wideStepRatioThreshold,
+    double? narrowStepRatioThreshold,
+    double? stepSustainedSeconds,
+    double? comInFrontRatioThreshold,
+    double? comLeaningBackRatioThreshold,
+    double? comSustainedSeconds,
+  }) {
+    return HeuristicsConfig(
+      bounceRatioThreshold: bounceRatioThreshold ?? this.bounceRatioThreshold,
+      lungeKneeMinAngleDeg: lungeKneeMinAngleDeg ?? this.lungeKneeMinAngleDeg,
+      guardDroppedSeconds: guardDroppedSeconds ?? this.guardDroppedSeconds,
+      guardDroppedFreeBoutingSeconds:
+          guardDroppedFreeBoutingSeconds ?? this.guardDroppedFreeBoutingSeconds,
+      footBeforeHandMinDisplacement:
+          footBeforeHandMinDisplacement ?? this.footBeforeHandMinDisplacement,
+      footBeforeHandLeadSeconds:
+          footBeforeHandLeadSeconds ?? this.footBeforeHandLeadSeconds,
+      stanceTooHighAngleDeg:
+          stanceTooHighAngleDeg ?? this.stanceTooHighAngleDeg,
+      incompleteArmExtensionAngleDeg: incompleteArmExtensionAngleDeg ??
+          this.incompleteArmExtensionAngleDeg,
+      overParryTorsoRatioThreshold:
+          overParryTorsoRatioThreshold ?? this.overParryTorsoRatioThreshold,
+      stepShoulderProxyMultiplier:
+          stepShoulderProxyMultiplier ?? this.stepShoulderProxyMultiplier,
+      wideStepRatioThreshold:
+          wideStepRatioThreshold ?? this.wideStepRatioThreshold,
+      narrowStepRatioThreshold:
+          narrowStepRatioThreshold ?? this.narrowStepRatioThreshold,
+      stepSustainedSeconds: stepSustainedSeconds ?? this.stepSustainedSeconds,
+      comInFrontRatioThreshold:
+          comInFrontRatioThreshold ?? this.comInFrontRatioThreshold,
+      comLeaningBackRatioThreshold:
+          comLeaningBackRatioThreshold ?? this.comLeaningBackRatioThreshold,
+      comSustainedSeconds: comSustainedSeconds ?? this.comSustainedSeconds,
+    );
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Detected action classes (from FenceNetV2 class names)
@@ -134,12 +212,14 @@ String backAnkleName(String targetSide) =>
 class HeuristicsEngine {
   final String targetSide;
   final String trainingMode;
+  final HeuristicsConfig config;
   double? lastStepRatio;
   double? lastStepWidth;
 
   HeuristicsEngine({
     required this.targetSide,
     required this.trainingMode,
+    this.config = const HeuristicsConfig(),
   });
 
   /// Convert a duration threshold to a frame count at the given fps.
@@ -172,7 +252,7 @@ class HeuristicsEngine {
       final fShoulder = latestSkel[liveLimbs['shoulder']!];
       final pCenter = _pelvisCenter(latestSkel);
       if (fShoulder != null && pCenter != null) {
-        final sw = (fShoulder.dx - pCenter.dx).abs() * kStepShoulderProxyMultiplier;
+        final sw = (fShoulder.dx - pCenter.dx).abs() * config.stepShoulderProxyMultiplier;
         if (sw > 1e-6) lastStepRatio = lastStepWidth! / sw;
       }
     }
@@ -212,6 +292,174 @@ class HeuristicsEngine {
     if (key != null) list.add(key);
   }
 
+  /// Raw metric values for a window, keyed by name — the offline tuning tool
+  /// replays recorded sessions through this to see metric DISTRIBUTIONS, so
+  /// thresholds can be chosen from data instead of guessed.
+  /// Missing joints → the metric is simply absent from the map.
+  Map<String, double> computeWindowMetrics(
+    List<Skeleton> skeletons, {
+    double fps = kDefaultFps,
+  }) {
+    final m = <String, double>{};
+    if (skeletons.isEmpty) return m;
+    if (!fps.isFinite || fps <= 1.0) fps = kDefaultFps;
+    final limbs = frontLimbs(targetSide);
+    final backAnkleKey = backAnkleName(targetSide);
+
+    // bounce: pelvis Y range / bbox height
+    final pelvisYs = <double>[];
+    final allYs = <double>[];
+    for (final skel in skeletons) {
+      final pc = _pelvisCenter(skel);
+      if (pc != null) pelvisYs.add(pc.dy);
+      for (final v in skel.values) {
+        allYs.add(v.dy);
+      }
+    }
+    if (pelvisYs.length >= kBouncMinPelvisSamples && allYs.length >= 2) {
+      final bbox = allYs.reduce(math.max) - allYs.reduce(math.min);
+      if (bbox > 1e-4) {
+        m['bounce_ratio'] =
+            (pelvisYs.reduce(math.max) - pelvisYs.reduce(math.min)) / bbox;
+      }
+    }
+
+    // knee angles: average (stance) + at peak ankle displacement (lunge)
+    final kneeAngles = <double>[];
+    for (final skel in skeletons) {
+      final hip = skel[limbs['hip']!];
+      final knee = skel[limbs['knee']!];
+      final ankle = skel[limbs['ankle']!];
+      if (hip != null && knee != null && ankle != null) {
+        kneeAngles.add(calcAngle(hip, knee, ankle));
+      }
+    }
+    if (kneeAngles.length >= 3) {
+      m['avg_front_knee_angle_deg'] =
+          kneeAngles.reduce((a, b) => a + b) / kneeAngles.length;
+      m['min_front_knee_angle_deg'] = kneeAngles.reduce(math.min);
+    }
+
+    // knee angle at the peak-ankle-displacement frame (lunge_overextension)
+    final refAnkle = skeletons[0][limbs['ankle']!];
+    if (refAnkle != null) {
+      double maxDisp = 0;
+      Skeleton peakSkel = skeletons[0];
+      for (final skel in skeletons) {
+        final ankle = skel[limbs['ankle']!];
+        if (ankle != null) {
+          final d = (ankle - refAnkle).distance;
+          if (d > maxDisp) {
+            maxDisp = d;
+            peakSkel = skel;
+          }
+        }
+      }
+      final hip = peakSkel[limbs['hip']!];
+      final knee = peakSkel[limbs['knee']!];
+      final ankle = peakSkel[limbs['ankle']!];
+      if (hip != null && knee != null && ankle != null) {
+        m['lunge_knee_angle_deg'] = calcAngle(hip, knee, ankle);
+      }
+    }
+
+    // arm angle at peak wrist displacement (incomplete_arm_extension)
+    final refWrist = skeletons[0][limbs['wrist']!];
+    if (refWrist != null) {
+      double maxDisp = 0;
+      Skeleton peakSkel = skeletons[0];
+      for (final skel in skeletons) {
+        final wrist = skel[limbs['wrist']!];
+        if (wrist != null) {
+          final d = (wrist.dx - refWrist.dx).abs();
+          if (d > maxDisp) {
+            maxDisp = d;
+            peakSkel = skel;
+          }
+        }
+      }
+      final shoulder = peakSkel[limbs['shoulder']!];
+      final elbow = peakSkel[limbs['elbow']!];
+      final wrist = peakSkel[limbs['wrist']!];
+      if (shoulder != null && elbow != null && wrist != null) {
+        m['arm_extension_angle_deg'] = calcAngle(shoulder, elbow, wrist);
+      }
+    }
+
+    // over-parry: body-relative wrist sweep / torso length
+    final relXs = <double>[];
+    final torsoLens = <double>[];
+    for (final skel in skeletons) {
+      final wrist = skel[limbs['wrist']!];
+      final pelvis = _pelvisCenter(skel);
+      if (wrist == null || pelvis == null) continue;
+      relXs.add(wrist.dx - pelvis.dx);
+      final shoulder = skel[limbs['shoulder']!];
+      if (shoulder != null) torsoLens.add((shoulder - pelvis).distance);
+    }
+    if (relXs.length >= kOverParryMinWristSamples && torsoLens.isNotEmpty) {
+      final torso = _median(torsoLens);
+      if (torso > 1e-6) {
+        m['parry_sweep_torso_ratio'] =
+            (relXs.reduce(math.max) - relXs.reduce(math.min)) / torso;
+      }
+    }
+
+    // step ratio + CoM ratio ranges across the window
+    final stepRatios = <double>[];
+    final comRatios = <double>[];
+    for (final skel in skeletons) {
+      final frontAnkle = skel[limbs['ankle']!];
+      final back = skel[backAnkleKey];
+      final frontShoulder = skel[limbs['shoulder']!];
+      final pelvis = _pelvisCenter(skel);
+      if (frontAnkle == null || back == null || pelvis == null) continue;
+
+      if (frontShoulder != null) {
+        final sw = (frontShoulder.dx - pelvis.dx).abs() *
+            config.stepShoulderProxyMultiplier;
+        if (sw >= kStepMinShoulderWidthPx) {
+          stepRatios.add((frontAnkle.dx - back.dx).abs() / sw);
+        }
+      }
+
+      final baseWidth = (frontAnkle.dx - back.dx).abs();
+      if (baseWidth >= kComMinBaseWidthPx) {
+        final ratio = frontAnkle.dx > back.dx
+            ? (pelvis.dx - back.dx) / baseWidth
+            : (back.dx - pelvis.dx) / baseWidth;
+        comRatios.add(ratio);
+      }
+    }
+    if (stepRatios.isNotEmpty) {
+      m['step_ratio_min'] = stepRatios.reduce(math.min);
+      m['step_ratio_max'] = stepRatios.reduce(math.max);
+      m['step_ratio_median'] = _median(stepRatios);
+    }
+    if (comRatios.isNotEmpty) {
+      m['com_ratio_min'] = comRatios.reduce(math.min);
+      m['com_ratio_max'] = comRatios.reduce(math.max);
+      m['com_ratio_median'] = _median(comRatios);
+    }
+
+    // guard: longest run of wrist-below-pelvis, in seconds
+    int run = 0;
+    int maxRun = 0;
+    for (final skel in skeletons) {
+      final wrist = skel[limbs['wrist']!];
+      final pelvis = _pelvisCenter(skel);
+      if (wrist != null && pelvis != null && wrist.dy > pelvis.dy) {
+        run++;
+        if (run > maxRun) maxRun = run;
+      } else {
+        run = 0;
+      }
+    }
+    m['guard_below_pelvis_max_run_s'] = maxRun / fps;
+
+    return m;
+  }
+
   // ── Rule 1: bounce_excessive ──────────────────────────────────────────────
 
   String? _checkBounce(List<Skeleton> skeletons) {
@@ -230,7 +478,7 @@ class HeuristicsEngine {
     final bboxHeight = allYs.reduce(math.max) - allYs.reduce(math.min);
     if (bboxHeight < 1e-4) return null;
     final deltaY = pelvisYs.reduce(math.max) - pelvisYs.reduce(math.min);
-    if (deltaY > kBounceRatioThreshold * bboxHeight) {
+    if (deltaY > config.bounceRatioThreshold * bboxHeight) {
       return 'bounce_excessive';
     }
     return null;
@@ -262,7 +510,7 @@ class HeuristicsEngine {
     if (hip == null || knee == null || ankle == null) return null;
 
     final angle = calcAngle(hip, knee, ankle);
-    if (angle < kLungeKneeMinAngleDeg) return 'lunge_overextension';
+    if (angle < config.lungeKneeMinAngleDeg) return 'lunge_overextension';
     return null;
   }
 
@@ -272,8 +520,8 @@ class HeuristicsEngine {
     final limbs = frontLimbs(targetSide);
     int consecutive = 0;
     final seconds = trainingMode == 'Free Bouting'
-        ? kGuardDroppedFreeBoutingSeconds
-        : kGuardDroppedSeconds;
+        ? config.guardDroppedFreeBoutingSeconds
+        : config.guardDroppedSeconds;
     final threshold = _framesFor(seconds, fps);
 
     for (final skel in skeletons) {
@@ -309,14 +557,14 @@ class HeuristicsEngine {
       if (wristOnset == null) {
         final wrist = skel[limbs['wrist']!];
         if (wrist != null &&
-            (wrist.dx - refWrist.dx).abs() > kFootBeforeHandMinDisplacementPx) {
+            (wrist.dx - refWrist.dx).abs() > config.footBeforeHandMinDisplacement) {
           wristOnset = i;
         }
       }
       if (ankleOnset == null) {
         final ankle = skel[limbs['ankle']!];
         if (ankle != null &&
-            (ankle.dx - refAnkle.dx).abs() > kFootBeforeHandMinDisplacementPx) {
+            (ankle.dx - refAnkle.dx).abs() > config.footBeforeHandMinDisplacement) {
           ankleOnset = i;
         }
       }
@@ -325,7 +573,7 @@ class HeuristicsEngine {
 
     if (wristOnset == null || ankleOnset == null) return null;
 
-    final margin = _framesFor(kFootBeforeHandLeadSeconds, fps);
+    final margin = _framesFor(config.footBeforeHandLeadSeconds, fps);
     if (ankleOnset + margin <= wristOnset) return 'foot_before_hand';
     return null;
   }
@@ -345,7 +593,7 @@ class HeuristicsEngine {
     }
     if (angles.length < 3) return null;
     final avg = angles.reduce((a, b) => a + b) / angles.length;
-    if (avg > kStanceTooHighAngleDeg) return 'stance_too_high';
+    if (avg > config.stanceTooHighAngleDeg) return 'stance_too_high';
     return null;
   }
 
@@ -375,7 +623,7 @@ class HeuristicsEngine {
     if (shoulder == null || elbow == null || wrist == null) return null;
 
     final angle = calcAngle(shoulder, elbow, wrist);
-    if (angle < kIncompleteArmExtensionAngleDeg) return 'incomplete_arm_extension';
+    if (angle < config.incompleteArmExtensionAngleDeg) return 'incomplete_arm_extension';
     return null;
   }
 
@@ -410,7 +658,7 @@ class HeuristicsEngine {
     if (torso < 1e-6) return null;
 
     final sweepRange = relXs.reduce(math.max) - relXs.reduce(math.min);
-    if (sweepRange > kOverParryTorsoRatioThreshold * torso) {
+    if (sweepRange > config.overParryTorsoRatioThreshold * torso) {
       return 'over_parrying';
     }
     return null;
@@ -425,7 +673,7 @@ class HeuristicsEngine {
   String? _checkStepWidth(List<Skeleton> skeletons, double fps) {
     final limbs = frontLimbs(targetSide);
     final backAnkleKey = backAnkleName(targetSide);
-    final sustained = _framesFor(kStepSustainedSeconds, fps);
+    final sustained = _framesFor(config.stepSustainedSeconds, fps);
     int wideRun = 0;
     int narrowRun = 0;
 
@@ -438,17 +686,17 @@ class HeuristicsEngine {
           pelvis == null) continue;
 
       final sw =
-          (frontShoulder.dx - pelvis.dx).abs() * kStepShoulderProxyMultiplier;
+          (frontShoulder.dx - pelvis.dx).abs() * config.stepShoulderProxyMultiplier;
       if (sw < kStepMinShoulderWidthPx) continue;
 
       final stepWidth = (frontAnkle.dx - back.dx).abs();
       final ratio = stepWidth / sw;
 
-      if (ratio > kWideStepRatioThreshold) {
+      if (ratio > config.wideStepRatioThreshold) {
         wideRun++;
         narrowRun = 0;
         if (wideRun >= sustained) return 'wide_step';
-      } else if (ratio < kNarrowStepRatioThreshold) {
+      } else if (ratio < config.narrowStepRatioThreshold) {
         narrowRun++;
         wideRun = 0;
         if (narrowRun >= sustained) return 'narrow_step';
@@ -468,7 +716,7 @@ class HeuristicsEngine {
   String? _checkCenterOfMass(List<Skeleton> skeletons, double fps) {
     final limbs = frontLimbs(targetSide);
     final backAnkleKey = backAnkleName(targetSide);
-    final sustained = _framesFor(kComSustainedSeconds, fps);
+    final sustained = _framesFor(config.comSustainedSeconds, fps);
     int frontRun = 0;
     int backRun = 0;
 
@@ -491,11 +739,11 @@ class HeuristicsEngine {
         ratio = (backX - pelvisX) / baseWidth;
       }
 
-      if (ratio > kComInFrontRatioThreshold) {
+      if (ratio > config.comInFrontRatioThreshold) {
         frontRun++;
         backRun = 0;
         if (frontRun >= sustained) return 'center_of_mass_in_front';
-      } else if (ratio < kComLeaningBackRatioThreshold) {
+      } else if (ratio < config.comLeaningBackRatioThreshold) {
         backRun++;
         frontRun = 0;
         if (backRun >= sustained) return 'center_of_mass_leaning_backward';
