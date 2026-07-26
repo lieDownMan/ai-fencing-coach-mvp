@@ -13,6 +13,7 @@ Skeleton makeStance({
   double pelvisY = 0.50,
   double wristX = 0.74,
   double wristY = 0.45,
+  double shoulderX = 0.54, // front shoulder X — controls torso lean
   bool straightLeg = false,
 }) {
   final knee = straightLeg
@@ -24,9 +25,9 @@ Skeleton makeStance({
     'right_knee': Offset(knee.dx + dx, knee.dy),
     'right_ankle': Offset(frontAnkleX + dx, 0.80),
     'left_ankle': Offset(backAnkleX + dx, 0.80),
-    'front_shoulder': Offset(0.54 + dx, 0.35),
+    'front_shoulder': Offset(shoulderX + dx, 0.35),
     'left_shoulder': Offset(0.50 + dx, 0.35),
-    'right_shoulder': Offset(0.54 + dx, 0.35),
+    'right_shoulder': Offset(shoulderX + dx, 0.35),
     'front_elbow': Offset(0.64 + dx, 0.40),
     'front_wrist': Offset(wristX + dx, wristY),
   };
@@ -84,10 +85,10 @@ void main() {
     });
   });
 
-  group('center_of_mass', () {
-    test('sustained forward pelvis triggers center_of_mass_in_front', () {
-      // pelvis x=0.5 with ankles 0.30–0.52 → ratio (0.5-0.3)/0.22 ≈ 0.91 > 0.65
-      final leaning = makeStance(frontAnkleX: 0.52, backAnkleX: 0.30);
+  group('center_of_mass (torso lean)', () {
+    test('sustained forward lean triggers center_of_mass_in_front', () {
+      // shoulder x 0.64, pelvis (0.50, 0.50) → lean atan2(0.14, 0.15) ≈ 43° > 25°
+      final leaning = makeStance(shoulderX: 0.64);
       final errors = engine.evaluateWindow(
         action: 'SF',
         skeletons: repeat(leaning, 40),
@@ -96,15 +97,31 @@ void main() {
       expect(errors, contains('center_of_mass_in_front'));
     });
 
-    test('transient shift during a step does NOT trigger', () {
+    test('sustained backward lean triggers center_of_mass_leaning_backward', () {
+      // shoulder x 0.46 → lean atan2(-0.04, 0.15) ≈ -14.9° < -10°
+      final leaning = makeStance(shoulderX: 0.46);
+      final errors = engine.evaluateWindow(
+        action: 'SF',
+        skeletons: repeat(leaning, 40),
+        fps: 30,
+      );
+      expect(errors, contains('center_of_mass_leaning_backward'));
+    });
+
+    test('transient lean during a step does NOT trigger', () {
       final skels = [
         ...repeat(makeStance(), 20),
-        ...repeat(makeStance(frontAnkleX: 0.52, backAnkleX: 0.30), 4),
+        ...repeat(makeStance(shoulderX: 0.64), 4),
         ...repeat(makeStance(), 20),
       ];
       final errors =
           engine.evaluateWindow(action: 'SF', skeletons: skels, fps: 30);
       expect(errors, isNot(contains('center_of_mass_in_front')));
+    });
+
+    test('baseline en-garde lean (~15°) stays inside the healthy band', () {
+      final m = engine.computeWindowMetrics(repeat(makeStance(), 10), fps: 30);
+      expect(m['torso_lean_deg_median'], closeTo(14.93, 0.05));
     });
   });
 
@@ -132,11 +149,11 @@ void main() {
   });
 
   group('guard_dropped (time-based)', () {
-    test('wrist below pelvis for >0.35s triggers at 30fps', () {
+    test('wrist below pelvis for >3s triggers at 30fps', () {
       final dropped = makeStance(wristY: 0.60); // below pelvis (0.50)
       final errors = engine.evaluateWindow(
         action: 'SF',
-        skeletons: repeat(dropped, 15), // 15 frames @30fps = 0.5s > 0.35s
+        skeletons: repeat(dropped, 100), // 100 frames @30fps ≈ 3.3s > 3.0s
         fps: 30,
       );
       expect(errors, contains('guard_dropped'));
@@ -146,7 +163,7 @@ void main() {
       final dropped = makeStance(wristY: 0.60);
       final errors = engine.evaluateWindow(
         action: 'SF',
-        skeletons: repeat(dropped, 15), // 15 frames @60fps = 0.25s < 0.35s
+        skeletons: repeat(dropped, 100), // 100 frames @60fps ≈ 1.7s < 3.0s
         fps: 60,
       );
       expect(errors, isNot(contains('guard_dropped')));

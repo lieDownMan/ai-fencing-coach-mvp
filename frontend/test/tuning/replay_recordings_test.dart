@@ -192,7 +192,7 @@ void main() {
         'parry_sweep_torso_ratio > ${c.overParryTorsoRatioThreshold}\n'
         'step_ratio > ${c.wideStepRatioThreshold} (wide) / '
         '< ${c.narrowStepRatioThreshold} (narrow), sustained ${c.stepSustainedSeconds}s\n'
-        'com_ratio > ${c.comInFrontRatioThreshold} (front) / '
-        '< ${c.comLeaningBackRatioThreshold} (back), sustained ${c.comSustainedSeconds}s');
+        'torso_lean_deg > ${c.comForwardLeanDeg} (front) / '
+        '< ${c.comBackwardLeanDeg} (back), sustained ${c.comSustainedSeconds}s');
   }, timeout: const Timeout(Duration(minutes: 5)));
 }

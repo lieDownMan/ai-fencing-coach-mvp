@@ -25,6 +25,15 @@ class TuningConfigStore {
       final f = await _file();
       if (!await f.exists()) return const HeuristicsConfig();
       final raw = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+      // Stale-schema check: files written before the 2026-07 retune carry
+      // keys that no longer exist (old CoM ratio params) and values chosen
+      // against the old defaults/ranges — discard them wholesale so the new
+      // shipped defaults take effect.
+      final validKeys = const HeuristicsConfig().toMap().keys.toSet();
+      if (raw.keys.any((k) => !validKeys.contains(k))) {
+        await f.delete();
+        return const HeuristicsConfig();
+      }
       final map = raw.map((k, v) => MapEntry(k, (v as num).toDouble()));
       return HeuristicsConfig.fromMap(map);
     } catch (_) {

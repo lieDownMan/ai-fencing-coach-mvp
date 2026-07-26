@@ -42,21 +42,21 @@ OVERRIDES_PATH = BACKEND_DIR / "tuning_overrides.json"
 # ---------------------------------------------------------------------------
 
 DEFAULT_CONFIG = {
-    "bounceRatioThreshold": 0.33,
-    "lungeKneeMinAngleDeg": 90.0,
-    "guardDroppedSeconds": 0.35,
-    "guardDroppedFreeBoutingSeconds": 0.70,
+    "bounceRatioThreshold": 0.13,
+    "lungeKneeMinAngleDeg": 150.0,
+    "guardDroppedSeconds": 3.0,
+    "guardDroppedFreeBoutingSeconds": 3.0,
     "footBeforeHandMinDisplacement": 0.03,
     "footBeforeHandLeadSeconds": 0.10,
     "stanceTooHighAngleDeg": 170.0,
-    "incompleteArmExtensionAngleDeg": 155.0,
-    "overParryTorsoRatioThreshold": 1.2,
+    "incompleteArmExtensionAngleDeg": 95.0,
+    "overParryTorsoRatioThreshold": 0.54,
     "stepShoulderProxyMultiplier": 2.5,
-    "wideStepRatioThreshold": 3.0,
-    "narrowStepRatioThreshold": 1.0,
+    "wideStepRatioThreshold": 2.0,
+    "narrowStepRatioThreshold": 0.9,
     "stepSustainedSeconds": 0.30,
-    "comInFrontRatioThreshold": 0.65,
-    "comLeaningBackRatioThreshold": 0.35,
+    "comForwardLeanDeg": 25.0,
+    "comBackwardLeanDeg": -10.0,
     "comSustainedSeconds": 0.30,
 }
 
@@ -69,23 +69,23 @@ SPECS = [
      "hint": "維持 en garde 看膝角。180=站直、標準蹲姿 120–140。"},
     {"error_key": "lunge_overextension", "label": "長刺過度前傾 Lunge Overextension",
      "metric": "lunge_knee_angle_deg", "param": "lungeKneeMinAngleDeg",
-     "direction": "below", "min": 60, "max": 120, "unit": "°", "decimals": 1,
+     "direction": "below", "min": 130, "max": 170, "unit": "°", "decimals": 1,
      "hint": "做弓步，數字是最深那幀的前膝角。90=小腿垂直。"},
     {"error_key": "incomplete_arm_extension", "label": "手沒有伸直 Incomplete Extension",
      "metric": "arm_extension_angle_deg", "param": "incompleteArmExtensionAngleDeg",
-     "direction": "below", "min": 120, "max": 180, "unit": "°", "decimals": 1,
+     "direction": "below", "min": 70, "max": 120, "unit": "°", "decimals": 1,
      "hint": "出手刺擊，數字是最遠那幀的手臂角。伸直=170–180。"},
     {"error_key": "bounce_excessive", "label": "步伐上下浮動 Excessive Bounce",
      "metric": "bounce_ratio", "param": "bounceRatioThreshold",
-     "direction": "above", "min": 0.10, "max": 0.60, "unit": "", "decimals": 2,
+     "direction": "above", "min": 0.05, "max": 0.60, "unit": "", "decimals": 2,
      "hint": "做步伐，數字是骨盆起伏佔身高比例。"},
     {"error_key": "guard_dropped", "label": "持劍手掉落 Guard Dropped",
      "metric": "guard_below_pelvis_max_run_s", "param": "guardDroppedSeconds",
-     "direction": "above", "min": 0.10, "max": 2.00, "unit": "s", "decimals": 2,
+     "direction": "above", "min": 0.50, "max": 5.00, "unit": "s", "decimals": 2,
      "hint": "手垂低於骨盆，數字是連續低垂秒數。"},
     {"error_key": "over_parrying", "label": "防守動作太大 Over-Parrying",
      "metric": "parry_sweep_torso_ratio", "param": "overParryTorsoRatioThreshold",
-     "direction": "above", "min": 0.40, "max": 2.50, "unit": "×軀幹", "decimals": 2,
+     "direction": "above", "min": 0.20, "max": 2.50, "unit": "×軀幹", "decimals": 2,
      "hint": "做防守揮劍，數字是手腕橫掃範圍 ÷ 軀幹長。"},
     {"error_key": "narrow_step", "label": "步伐太小 Narrow Step",
      "metric": "step_ratio_median", "param": "narrowStepRatioThreshold",
@@ -93,16 +93,16 @@ SPECS = [
      "hint": "維持窄站姿看數字。正常 en garde 約 1.5–2.5。"},
     {"error_key": "wide_step", "label": "步伐太大 Wide Step",
      "metric": "step_ratio_median", "param": "wideStepRatioThreshold",
-     "direction": "above", "min": 2.00, "max": 4.50, "unit": "×肩寬", "decimals": 2,
+     "direction": "above", "min": 1.00, "max": 2.00, "unit": "×肩寬", "decimals": 2,
      "hint": "維持寬站姿看數字。正常 en garde 約 1.5–2.5。"},
     {"error_key": "center_of_mass_in_front", "label": "重心向前 CoM Forward",
-     "metric": "com_ratio_median", "param": "comInFrontRatioThreshold",
-     "direction": "above", "min": 0.50, "max": 0.90, "unit": "", "decimals": 2,
-     "hint": "重心前傾看數字。0.5=正中、1.0=壓在前腳。"},
+     "metric": "torso_lean_deg_median", "param": "comForwardLeanDeg",
+     "direction": "above", "min": 5, "max": 45, "unit": "°", "decimals": 1,
+     "hint": "軀幹前傾角（骨盆→肩膀 vs 鉛直線）。0=直立、正=朝對手傾。"},
     {"error_key": "center_of_mass_leaning_backward", "label": "重心向後 CoM Backward",
-     "metric": "com_ratio_median", "param": "comLeaningBackRatioThreshold",
-     "direction": "below", "min": 0.10, "max": 0.50, "unit": "", "decimals": 2,
-     "hint": "重心後仰看數字。0.5=正中、0.0=壓在後腳。"},
+     "metric": "torso_lean_deg_median", "param": "comBackwardLeanDeg",
+     "direction": "below", "min": -30, "max": 5, "unit": "°", "decimals": 1,
+     "hint": "軀幹傾角，負=向後仰。低於閾值觸發。"},
     {"error_key": "foot_before_hand", "label": "手腳順序錯誤 Foot Before Hand",
      "metric": "foot_hand_lead_s", "param": "footBeforeHandLeadSeconds",
      "direction": "above", "min": 0.00, "max": 0.50, "unit": "s", "decimals": 2,
@@ -226,30 +226,30 @@ def compute_window_metrics(skeletons, fps, target_side, config):
         if torso > 1e-6:
             m["parry_sweep_torso_ratio"] = (max(rel_xs) - min(rel_xs)) / torso
 
-    step_ratios, com_ratios = [], []
+    sign = 1.0 if target_side == "left" else -1.0
+    step_ratios, leans = [], []
     for skel in skeletons:
         fa, ba_, pelvis = (skel.get(limbs["ankle"]), skel.get(back_key),
                            pelvis_center(skel))
-        if fa is None or ba_ is None or pelvis is None:
-            continue
         shoulder = skel.get(limbs["shoulder"])
-        if shoulder:
+        if fa is not None and ba_ is not None and pelvis is not None and shoulder:
             sw = abs(shoulder[0] - pelvis[0]) * config["stepShoulderProxyMultiplier"]
             if sw >= STEP_MIN_SHOULDER_WIDTH:
                 step_ratios.append(abs(fa[0] - ba_[0]) / sw)
-        base = abs(fa[0] - ba_[0])
-        if base >= COM_MIN_BASE_WIDTH:
-            ratio = ((pelvis[0] - ba_[0]) / base if fa[0] > ba_[0]
-                     else (ba_[0] - pelvis[0]) / base)
-            com_ratios.append(ratio)
+        # torso lean from vertical (pelvis→front shoulder), + = toward opponent
+        if pelvis is not None and shoulder:
+            vertical = pelvis[1] - shoulder[1]
+            if vertical > 1e-6:
+                fwd = sign * (shoulder[0] - pelvis[0])
+                leans.append(math.degrees(math.atan2(fwd, vertical)))
     if step_ratios:
         m["step_ratio_min"] = min(step_ratios)
         m["step_ratio_max"] = max(step_ratios)
         m["step_ratio_median"] = statistics.median(step_ratios)
-    if com_ratios:
-        m["com_ratio_min"] = min(com_ratios)
-        m["com_ratio_max"] = max(com_ratios)
-        m["com_ratio_median"] = statistics.median(com_ratios)
+    if leans:
+        m["torso_lean_deg_min"] = min(leans)
+        m["torso_lean_deg_max"] = max(leans)
+        m["torso_lean_deg_median"] = statistics.median(leans)
 
     run = max_run = 0
     for skel in skeletons:
@@ -263,7 +263,6 @@ def compute_window_metrics(skeletons, fps, target_side, config):
 
     # foot-before-hand: body-relative forward series + rise-onset from the
     # global peak — mirrors _checkFootBeforeHand / computeWindowMetrics (Dart).
-    sign = 1.0 if target_side == "left" else -1.0
     wrist_rel, ankle_rel = [], []
     for skel in skeletons:
         pelvis = pelvis_center(skel)
@@ -328,8 +327,13 @@ class TuningState:
         if OVERRIDES_PATH.exists():
             try:
                 stored = json.loads(OVERRIDES_PATH.read_text())
-                self.config.update({k: float(v) for k, v in stored.items()
-                                    if k in DEFAULT_CONFIG})
+                # Stale-schema check: pre-retune files carry removed keys and
+                # values chosen against the old defaults — discard wholesale.
+                if any(k not in DEFAULT_CONFIG for k in stored):
+                    OVERRIDES_PATH.unlink()
+                else:
+                    self.config.update(
+                        {k: float(v) for k, v in stored.items()})
             except Exception:
                 pass
         self.error_key = "stance_too_high"
@@ -608,7 +612,7 @@ def self_test():
     m = compute_window_metrics([stance()] * 40, 30, "left", DEFAULT_CONFIG)
     assert abs(m["avg_front_knee_angle_deg"] - 138.715) < 0.01, m
     assert abs(m["step_ratio_median"] - 2.0) < 1e-6, m
-    assert abs(m["com_ratio_median"] - 0.5) < 1e-6, m
+    assert abs(m["torso_lean_deg_median"] - 14.9314) < 0.01, m
     assert m["guard_below_pelvis_max_run_s"] == 0.0, m
     m2 = compute_window_metrics([stance(True)] * 40, 30, "left", DEFAULT_CONFIG)
     assert abs(m2["avg_front_knee_angle_deg"] - 180.0) < 0.01, m2

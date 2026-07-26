@@ -38,9 +38,9 @@ const double kDefaultFps = 30.0;
 
 /// Every tunable threshold in one place, overridable per-instance so the
 /// offline replay tool can sweep values and (later) per-user calibration can
-/// scale them. The defaults are the shipped behavior.
+/// scale them. The defaults are the shipped behavior — hand-tuned on-device
+/// (2026-07) via the in-app Tuning tab / Mac tuning server.
 class HeuristicsConfig {
-  // Python uses 0.25; kept looser here because live phone pose is noisier.
   final double bounceRatioThreshold;
   final double lungeKneeMinAngleDeg;
   final double guardDroppedSeconds;
@@ -55,28 +55,30 @@ class HeuristicsConfig {
   final double wideStepRatioThreshold;
   final double narrowStepRatioThreshold;
   final double stepSustainedSeconds; // ratio must stay out of range this long
-  final double comInFrontRatioThreshold;
-  final double comLeaningBackRatioThreshold;
+  // Torso lean from vertical (pelvis→front-shoulder line), degrees; positive
+  // = leaning toward the opponent. Beyond forward/behind backward = error.
+  final double comForwardLeanDeg;
+  final double comBackwardLeanDeg;
   final double comSustainedSeconds;
 
   const HeuristicsConfig({
-    this.bounceRatioThreshold = 0.33,
-    this.lungeKneeMinAngleDeg = 90.0,
-    this.guardDroppedSeconds = 0.35,
-    this.guardDroppedFreeBoutingSeconds = 0.70,
+    this.bounceRatioThreshold = 0.13,
+    this.lungeKneeMinAngleDeg = 150.0,
+    this.guardDroppedSeconds = 3.0,
+    this.guardDroppedFreeBoutingSeconds = 3.0,
     // Minimum body-relative forward RISE (peak minus baseline, normalized
     // units) for a wrist-extension / attack-step movement to count at all.
     this.footBeforeHandMinDisplacement = 0.03,
     this.footBeforeHandLeadSeconds = 0.10,
     this.stanceTooHighAngleDeg = 170.0,
-    this.incompleteArmExtensionAngleDeg = 155.0,
-    this.overParryTorsoRatioThreshold = 1.2,
+    this.incompleteArmExtensionAngleDeg = 95.0,
+    this.overParryTorsoRatioThreshold = 0.54,
     this.stepShoulderProxyMultiplier = 2.5,
-    this.wideStepRatioThreshold = 3.0,
-    this.narrowStepRatioThreshold = 1.0,
+    this.wideStepRatioThreshold = 2.0,
+    this.narrowStepRatioThreshold = 0.9,
     this.stepSustainedSeconds = 0.30,
-    this.comInFrontRatioThreshold = 0.65,
-    this.comLeaningBackRatioThreshold = 0.35,
+    this.comForwardLeanDeg = 25.0,
+    this.comBackwardLeanDeg = -10.0,
     this.comSustainedSeconds = 0.30,
   });
 
@@ -95,8 +97,8 @@ class HeuristicsConfig {
         'wideStepRatioThreshold': wideStepRatioThreshold,
         'narrowStepRatioThreshold': narrowStepRatioThreshold,
         'stepSustainedSeconds': stepSustainedSeconds,
-        'comInFrontRatioThreshold': comInFrontRatioThreshold,
-        'comLeaningBackRatioThreshold': comLeaningBackRatioThreshold,
+        'comForwardLeanDeg': comForwardLeanDeg,
+        'comBackwardLeanDeg': comBackwardLeanDeg,
         'comSustainedSeconds': comSustainedSeconds,
       };
 
@@ -129,10 +131,10 @@ class HeuristicsConfig {
           map['narrowStepRatioThreshold'] ?? d.narrowStepRatioThreshold,
       stepSustainedSeconds:
           map['stepSustainedSeconds'] ?? d.stepSustainedSeconds,
-      comInFrontRatioThreshold:
-          map['comInFrontRatioThreshold'] ?? d.comInFrontRatioThreshold,
-      comLeaningBackRatioThreshold: map['comLeaningBackRatioThreshold'] ??
-          d.comLeaningBackRatioThreshold,
+      comForwardLeanDeg:
+          map['comForwardLeanDeg'] ?? d.comForwardLeanDeg,
+      comBackwardLeanDeg: map['comBackwardLeanDeg'] ??
+          d.comBackwardLeanDeg,
       comSustainedSeconds: map['comSustainedSeconds'] ?? d.comSustainedSeconds,
     );
   }
@@ -151,8 +153,8 @@ class HeuristicsConfig {
     double? wideStepRatioThreshold,
     double? narrowStepRatioThreshold,
     double? stepSustainedSeconds,
-    double? comInFrontRatioThreshold,
-    double? comLeaningBackRatioThreshold,
+    double? comForwardLeanDeg,
+    double? comBackwardLeanDeg,
     double? comSustainedSeconds,
   }) {
     return HeuristicsConfig(
@@ -178,10 +180,10 @@ class HeuristicsConfig {
       narrowStepRatioThreshold:
           narrowStepRatioThreshold ?? this.narrowStepRatioThreshold,
       stepSustainedSeconds: stepSustainedSeconds ?? this.stepSustainedSeconds,
-      comInFrontRatioThreshold:
-          comInFrontRatioThreshold ?? this.comInFrontRatioThreshold,
-      comLeaningBackRatioThreshold:
-          comLeaningBackRatioThreshold ?? this.comLeaningBackRatioThreshold,
+      comForwardLeanDeg:
+          comForwardLeanDeg ?? this.comForwardLeanDeg,
+      comBackwardLeanDeg:
+          comBackwardLeanDeg ?? this.comBackwardLeanDeg,
       comSustainedSeconds: comSustainedSeconds ?? this.comSustainedSeconds,
     );
   }
@@ -464,17 +466,17 @@ class HeuristicsEngine {
       }
     }
 
-    // step ratio + CoM ratio ranges across the window
+    // step ratio + torso lean across the window
     final stepRatios = <double>[];
-    final comRatios = <double>[];
+    final leans = <double>[];
     for (final skel in skeletons) {
       final frontAnkle = skel[limbs['ankle']!];
       final back = skel[backAnkleKey];
       final frontShoulder = skel[limbs['shoulder']!];
       final pelvis = _pelvisCenter(skel);
-      if (frontAnkle == null || back == null || pelvis == null) continue;
 
-      if (frontShoulder != null) {
+      if (frontAnkle != null && back != null && frontShoulder != null &&
+          pelvis != null) {
         final sw = (frontShoulder.dx - pelvis.dx).abs() *
             config.stepShoulderProxyMultiplier;
         if (sw >= kStepMinShoulderWidthPx) {
@@ -482,23 +484,18 @@ class HeuristicsEngine {
         }
       }
 
-      final baseWidth = (frontAnkle.dx - back.dx).abs();
-      if (baseWidth >= kComMinBaseWidthPx) {
-        final ratio = frontAnkle.dx > back.dx
-            ? (pelvis.dx - back.dx) / baseWidth
-            : (back.dx - pelvis.dx) / baseWidth;
-        comRatios.add(ratio);
-      }
+      final lean = torsoLeanDeg(skel);
+      if (lean != null) leans.add(lean);
     }
     if (stepRatios.isNotEmpty) {
       m['step_ratio_min'] = stepRatios.reduce(math.min);
       m['step_ratio_max'] = stepRatios.reduce(math.max);
       m['step_ratio_median'] = _median(stepRatios);
     }
-    if (comRatios.isNotEmpty) {
-      m['com_ratio_min'] = comRatios.reduce(math.min);
-      m['com_ratio_max'] = comRatios.reduce(math.max);
-      m['com_ratio_median'] = _median(comRatios);
+    if (leans.isNotEmpty) {
+      m['torso_lean_deg_min'] = leans.reduce(math.min);
+      m['torso_lean_deg_max'] = leans.reduce(math.max);
+      m['torso_lean_deg_median'] = _median(leans);
     }
 
     // guard: longest run of wrist-below-pelvis, in seconds
@@ -818,40 +815,38 @@ class HeuristicsEngine {
 
   // ── Rule 11: center_of_mass_in_front / leaning_backward ──────────────────
   //
-  // Same sustained-duration requirement as step width: the pelvis ratio
-  // legitimately leaves the healthy band during a step's transfer phase.
+  // Torso lean angle from vertical (pelvis center → front shoulder), signed
+  // toward the opponent: leaning too far forward/backward = the error. Same
+  // sustained-duration requirement as step width so a transient lean during
+  // a step's transfer phase doesn't trigger.
+
+  /// Torso lean from vertical in degrees; positive = toward the opponent.
+  /// Null when the joints are missing or the pose is degenerate.
+  double? torsoLeanDeg(Skeleton skel) {
+    final limbs = frontLimbs(targetSide);
+    final shoulder = skel[limbs['shoulder']!];
+    final pelvis = _pelvisCenter(skel);
+    if (shoulder == null || pelvis == null) return null;
+    final vertical = pelvis.dy - shoulder.dy; // >0: shoulder above pelvis
+    if (vertical <= 1e-6) return null;
+    final forward = _forwardSign * (shoulder.dx - pelvis.dx);
+    return math.atan2(forward, vertical) * 180.0 / math.pi;
+  }
 
   String? _checkCenterOfMass(List<Skeleton> skeletons, double fps) {
-    final limbs = frontLimbs(targetSide);
-    final backAnkleKey = backAnkleName(targetSide);
     final sustained = _framesFor(config.comSustainedSeconds, fps);
     int frontRun = 0;
     int backRun = 0;
 
     for (final skel in skeletons) {
-      final frontAnkle = skel[limbs['ankle']!];
-      final back = skel[backAnkleKey];
-      final pelvis = _pelvisCenter(skel);
-      if (frontAnkle == null || back == null || pelvis == null) continue;
+      final lean = torsoLeanDeg(skel);
+      if (lean == null) continue;
 
-      final frontX = frontAnkle.dx;
-      final backX = back.dx;
-      final pelvisX = pelvis.dx;
-      final baseWidth = (frontX - backX).abs();
-      if (baseWidth < kComMinBaseWidthPx) continue;
-
-      double ratio;
-      if (frontX > backX) {
-        ratio = (pelvisX - backX) / baseWidth;
-      } else {
-        ratio = (backX - pelvisX) / baseWidth;
-      }
-
-      if (ratio > config.comInFrontRatioThreshold) {
+      if (lean > config.comForwardLeanDeg) {
         frontRun++;
         backRun = 0;
         if (frontRun >= sustained) return 'center_of_mass_in_front';
-      } else if (ratio < config.comLeaningBackRatioThreshold) {
+      } else if (lean < config.comBackwardLeanDeg) {
         backRun++;
         frontRun = 0;
         if (backRun >= sustained) return 'center_of_mass_leaning_backward';

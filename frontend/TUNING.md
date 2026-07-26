@@ -97,14 +97,14 @@ Idle 誤判多（conf 常在 0.5–0.6 徘徊被砍成 Idle）或亂報動作（
 | 回放輸出的指標 | 對應閾值 (HeuristicsConfig) | 觸發方向 |
 |---|---|---|
 | `avg_front_knee_angle_deg` | `stanceTooHighAngleDeg` (170) | 大於 |
-| `lunge_knee_angle_deg` | `lungeKneeMinAngleDeg` (90) | 小於 |
-| `arm_extension_angle_deg` | `incompleteArmExtensionAngleDeg` (155) | 小於 |
-| `bounce_ratio` | `bounceRatioThreshold` (0.33) | 大於 |
-| `guard_below_pelvis_max_run_s` | `guardDroppedSeconds` (0.35 / 0.70) | 大於 |
-| `parry_sweep_torso_ratio` | `overParryTorsoRatioThreshold` (1.2) | 大於 |
-| `step_ratio_min/max/median` | `narrowStepRatioThreshold` (1.0) / `wideStepRatioThreshold` (3.0) | 小於 / 大於 |
-| `com_ratio_min/max/median` | `comLeaningBackRatioThreshold` (0.35) / `comInFrontRatioThreshold` (0.65) | 小於 / 大於 |
+| `lunge_knee_angle_deg` | `lungeKneeMinAngleDeg` (150) | 小於 |
+| `arm_extension_angle_deg` | `incompleteArmExtensionAngleDeg` (95) | 小於 |
+| `bounce_ratio` | `bounceRatioThreshold` (0.13) | 大於 |
+| `guard_below_pelvis_max_run_s` | `guardDroppedSeconds` (3.0) | 大於 |
+| `parry_sweep_torso_ratio` | `overParryTorsoRatioThreshold` (0.54) | 大於 |
+| `step_ratio_min/max/median` | `narrowStepRatioThreshold` (0.9) / `wideStepRatioThreshold` (2.0) | 小於 / 大於 |
+| `torso_lean_deg_min/max/median`（軀幹傾角，°，前傾為正） | `comBackwardLeanDeg` (−10) / `comForwardLeanDeg` (25) | 小於 / 大於 |
 
-優先驗證順序：`overParryTorsoRatioThreshold`（1.2 是新設的估計值）→
-`bounceRatioThreshold`（Dart 0.33 vs Python 0.25 尚未用數據對齊）→
-step/CoM 比值 → 膝角/手臂角（有生物力學依據，最不急）。
+預設值為 2026-07 於實機人工調校的結果（Tuning tab / Mac tuning server）。
+`comForwardLeanDeg`/`comBackwardLeanDeg` 是軀幹傾角語義（取代舊的骨盆位置比），
+還未實測、優先驗證。
