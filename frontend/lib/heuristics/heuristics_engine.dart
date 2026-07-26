@@ -63,7 +63,7 @@ class HeuristicsConfig {
 
   const HeuristicsConfig({
     this.bounceRatioThreshold = 0.13,
-    this.lungeKneeMinAngleDeg = 150.0,
+    this.lungeKneeMinAngleDeg = 153.5,
     this.guardDroppedSeconds = 3.0,
     this.guardDroppedFreeBoutingSeconds = 3.0,
     // Minimum body-relative forward RISE (peak minus baseline, normalized
@@ -71,10 +71,10 @@ class HeuristicsConfig {
     this.footBeforeHandMinDisplacement = 0.03,
     this.footBeforeHandLeadSeconds = 0.10,
     this.stanceTooHighAngleDeg = 170.0,
-    this.incompleteArmExtensionAngleDeg = 95.0,
+    this.incompleteArmExtensionAngleDeg = 101.0,
     this.overParryTorsoRatioThreshold = 0.54,
     this.stepShoulderProxyMultiplier = 2.5,
-    this.wideStepRatioThreshold = 2.0,
+    this.wideStepRatioThreshold = 1.72,
     this.narrowStepRatioThreshold = 0.9,
     this.stepSustainedSeconds = 0.30,
     this.comForwardLeanDeg = 25.0,

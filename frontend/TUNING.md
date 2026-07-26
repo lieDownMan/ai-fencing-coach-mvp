@@ -97,12 +97,12 @@ Idle 誤判多（conf 常在 0.5–0.6 徘徊被砍成 Idle）或亂報動作（
 | 回放輸出的指標 | 對應閾值 (HeuristicsConfig) | 觸發方向 |
 |---|---|---|
 | `avg_front_knee_angle_deg` | `stanceTooHighAngleDeg` (170) | 大於 |
-| `lunge_knee_angle_deg` | `lungeKneeMinAngleDeg` (150) | 小於 |
-| `arm_extension_angle_deg` | `incompleteArmExtensionAngleDeg` (95) | 小於 |
+| `lunge_knee_angle_deg` | `lungeKneeMinAngleDeg` (153.5) | 小於 |
+| `arm_extension_angle_deg` | `incompleteArmExtensionAngleDeg` (101) | 小於 |
 | `bounce_ratio` | `bounceRatioThreshold` (0.13) | 大於 |
 | `guard_below_pelvis_max_run_s` | `guardDroppedSeconds` (3.0) | 大於 |
 | `parry_sweep_torso_ratio` | `overParryTorsoRatioThreshold` (0.54) | 大於 |
-| `step_ratio_min/max/median` | `narrowStepRatioThreshold` (0.9) / `wideStepRatioThreshold` (2.0) | 小於 / 大於 |
+| `step_ratio_min/max/median` | `narrowStepRatioThreshold` (0.9) / `wideStepRatioThreshold` (1.72) | 小於 / 大於 |
 | `torso_lean_deg_min/max/median`（軀幹傾角，°，前傾為正） | `comBackwardLeanDeg` (−10) / `comForwardLeanDeg` (25) | 小於 / 大於 |
 
 預設值為 2026-07 於實機人工調校的結果（Tuning tab / Mac tuning server）。

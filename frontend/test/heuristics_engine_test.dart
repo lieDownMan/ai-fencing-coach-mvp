@@ -35,6 +35,10 @@ Skeleton makeStance({
 
 List<Skeleton> repeat(Skeleton s, int n) => List.generate(n, (_) => Map.of(s));
 
+/// Stance whose step ratio (≈1.4) sits inside the tuned healthy band
+/// (narrow 0.9 – wide 1.72) — use for "nothing should trigger" filler frames.
+Skeleton goodStance() => makeStance(frontAnkleX: 0.57, backAnkleX: 0.43);
+
 void main() {
   final engine = HeuristicsEngine(targetSide: 'left', trainingMode: 'Footwork');
 
@@ -42,7 +46,7 @@ void main() {
     test('sound en-garde during SF triggers nothing', () {
       final errors = engine.evaluateWindow(
         action: 'SF',
-        skeletons: repeat(makeStance(), 40),
+        skeletons: repeat(goodStance(), 40),
         fps: 30,
       );
       expect(errors, isEmpty);
@@ -75,9 +79,9 @@ void main() {
     test('transient feet-together mid-stride does NOT trigger narrow_step', () {
       // 0.3s sustained @30fps = 9 frames; only 4 narrow frames here.
       final skels = [
-        ...repeat(makeStance(), 20),
+        ...repeat(goodStance(), 20),
         ...repeat(makeStance(frontAnkleX: 0.54, backAnkleX: 0.46), 4),
-        ...repeat(makeStance(), 20),
+        ...repeat(goodStance(), 20),
       ];
       final errors =
           engine.evaluateWindow(action: 'SF', skeletons: skels, fps: 30);
@@ -110,9 +114,9 @@ void main() {
 
     test('transient lean during a step does NOT trigger', () {
       final skels = [
-        ...repeat(makeStance(), 20),
+        ...repeat(goodStance(), 20),
         ...repeat(makeStance(shoulderX: 0.64), 4),
-        ...repeat(makeStance(), 20),
+        ...repeat(goodStance(), 20),
       ];
       final errors =
           engine.evaluateWindow(action: 'SF', skeletons: skels, fps: 30);
