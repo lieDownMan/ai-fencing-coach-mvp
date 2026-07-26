@@ -190,6 +190,8 @@ class _MainScreenState extends State<MainScreen>
   HeuristicsConfig _config = const HeuristicsConfig();
   String _tuningErrorKey = 'stance_too_high';
   Map<String, double> _lastWindowMetrics = {};
+  bool _tuningVoiceCue = true; // speak when the tuned error starts triggering
+  bool _lastTuningTriggered = false;
 
   // Live state
   String _currentAction = 'Idle';
@@ -597,6 +599,21 @@ class _MainScreenState extends State<MainScreen>
       List.from(_skeletonBuffer),
       fps: _effectivePoseFps,
     );
+
+    // Tuning tab: announce trigger onsets by voice so thresholds can be
+    // dialed in from fencing distance (screen-mirrored or not).
+    if (_tabController.index == 5) {
+      final spec = specForError(_tuningErrorKey);
+      final metric = _lastWindowMetrics[spec.metricKey];
+      final trig = metric != null &&
+          spec.wouldTrigger(metric, spec.thresholdOf(_config));
+      if (trig && !_lastTuningTriggered && _tuningVoiceCue && _ttsReady) {
+        try {
+          _tts.speak('觸發');
+        } catch (_) {}
+      }
+      _lastTuningTriggered = trig;
+    }
 
     // Filter by mode
     final filtered = errors.where((e) {
@@ -1577,6 +1594,19 @@ class _MainScreenState extends State<MainScreen>
             ),
           ),
           const SizedBox(height: 16),
+
+          // ── Voice cue toggle (for tuning from a distance) ──────────────
+          SwitchListTile(
+            title: const Text('觸發時語音提示', style: TextStyle(fontSize: 13)),
+            subtitle: const Text('遠距離調參用——開始觸發時唸「觸發」',
+                style: TextStyle(fontSize: 11)),
+            value: _tuningVoiceCue,
+            activeThumbColor: const Color(0xFFFF6600),
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            onChanged: (v) => setState(() => _tuningVoiceCue = v),
+          ),
+          const SizedBox(height: 4),
 
           // ── Actions ─────────────────────────────────────────────────────
           Row(
