@@ -55,8 +55,8 @@ DEFAULT_CONFIG = {
     "wideStepRatioThreshold": 1.72,
     "narrowStepRatioThreshold": 0.9,
     "stepSustainedSeconds": 0.30,
-    "comForwardLeanDeg": 25.0,
-    "comBackwardLeanDeg": -10.0,
+    "comForwardLeanDeg": 14.0,
+    "comBackwardLeanDeg": 5.5,
     "comSustainedSeconds": 0.30,
 }
 
@@ -101,7 +101,7 @@ SPECS = [
      "hint": "軀幹前傾角（骨盆→肩膀 vs 鉛直線）。0=直立、正=朝對手傾。"},
     {"error_key": "center_of_mass_leaning_backward", "label": "重心向後 CoM Backward",
      "metric": "torso_lean_deg_median", "param": "comBackwardLeanDeg",
-     "direction": "below", "min": -30, "max": 5, "unit": "°", "decimals": 1,
+     "direction": "below", "min": -30, "max": 15, "unit": "°", "decimals": 1,
      "hint": "軀幹傾角，負=向後仰。低於閾值觸發。"},
     {"error_key": "foot_before_hand", "label": "手腳順序錯誤 Foot Before Hand",
      "metric": "foot_hand_lead_s", "param": "footBeforeHandLeadSeconds",

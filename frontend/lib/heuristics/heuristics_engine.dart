@@ -77,8 +77,8 @@ class HeuristicsConfig {
     this.wideStepRatioThreshold = 1.72,
     this.narrowStepRatioThreshold = 0.9,
     this.stepSustainedSeconds = 0.30,
-    this.comForwardLeanDeg = 25.0,
-    this.comBackwardLeanDeg = -10.0,
+    this.comForwardLeanDeg = 14.0,
+    this.comBackwardLeanDeg = 5.5,
     this.comSustainedSeconds = 0.30,
   });
 

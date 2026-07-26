@@ -35,9 +35,11 @@ Skeleton makeStance({
 
 List<Skeleton> repeat(Skeleton s, int n) => List.generate(n, (_) => Map.of(s));
 
-/// Stance whose step ratio (≈1.4) sits inside the tuned healthy band
-/// (narrow 0.9 – wide 1.72) — use for "nothing should trigger" filler frames.
-Skeleton goodStance() => makeStance(frontAnkleX: 0.57, backAnkleX: 0.43);
+/// Stance sitting inside every tuned healthy band — step ratio ≈1.33
+/// (narrow 0.9 – wide 1.72) and torso lean ≈11.3° (back 5.5° – front 14°).
+/// Use for "nothing should trigger" filler frames.
+Skeleton goodStance() => makeStance(
+    frontAnkleX: 0.55, backAnkleX: 0.45, shoulderX: 0.53);
 
 void main() {
   final engine = HeuristicsEngine(targetSide: 'left', trainingMode: 'Footwork');

@@ -103,8 +103,8 @@ Idle 誤判多（conf 常在 0.5–0.6 徘徊被砍成 Idle）或亂報動作（
 | `guard_below_pelvis_max_run_s` | `guardDroppedSeconds` (3.0) | 大於 |
 | `parry_sweep_torso_ratio` | `overParryTorsoRatioThreshold` (0.54) | 大於 |
 | `step_ratio_min/max/median` | `narrowStepRatioThreshold` (0.9) / `wideStepRatioThreshold` (1.72) | 小於 / 大於 |
-| `torso_lean_deg_min/max/median`（軀幹傾角，°，前傾為正） | `comBackwardLeanDeg` (−10) / `comForwardLeanDeg` (25) | 小於 / 大於 |
+| `torso_lean_deg_min/max/median`（軀幹傾角，°，前傾為正） | `comBackwardLeanDeg` (5.5) / `comForwardLeanDeg` (14) | 小於 / 大於 |
 
-預設值為 2026-07 於實機人工調校的結果（Tuning tab / Mac tuning server）。
-`comForwardLeanDeg`/`comBackwardLeanDeg` 是軀幹傾角語義（取代舊的骨盆位置比），
-還未實測、優先驗證。
+預設值為 2026-07 於實機人工調校的結果（Tuning tab / Mac tuning server），
+全部 11 種錯誤皆已實測調校。注意後傾閾值為正值——自然 en garde 本身
+帶有約 10° 前傾，低於 5.5° 即視為後仰。

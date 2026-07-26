@@ -146,7 +146,7 @@ const List<TuningSpec> kTuningSpecs = [
     paramName: 'comBackwardLeanDeg',
     direction: TriggerDirection.below,
     min: -30,
-    max: 5,
+    max: 15,
     unit: '°',
     decimals: 1,
     hint: '軀幹傾角，負=向後仰。低於閾值觸發。',
