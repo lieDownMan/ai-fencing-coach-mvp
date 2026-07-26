@@ -78,6 +78,63 @@ class HeuristicsConfig {
     this.comSustainedSeconds = 0.30,
   });
 
+  /// Param-name → value map, used for persistence and the in-app tuning UI.
+  Map<String, double> toMap() => {
+        'bounceRatioThreshold': bounceRatioThreshold,
+        'lungeKneeMinAngleDeg': lungeKneeMinAngleDeg,
+        'guardDroppedSeconds': guardDroppedSeconds,
+        'guardDroppedFreeBoutingSeconds': guardDroppedFreeBoutingSeconds,
+        'footBeforeHandMinDisplacement': footBeforeHandMinDisplacement,
+        'footBeforeHandLeadSeconds': footBeforeHandLeadSeconds,
+        'stanceTooHighAngleDeg': stanceTooHighAngleDeg,
+        'incompleteArmExtensionAngleDeg': incompleteArmExtensionAngleDeg,
+        'overParryTorsoRatioThreshold': overParryTorsoRatioThreshold,
+        'stepShoulderProxyMultiplier': stepShoulderProxyMultiplier,
+        'wideStepRatioThreshold': wideStepRatioThreshold,
+        'narrowStepRatioThreshold': narrowStepRatioThreshold,
+        'stepSustainedSeconds': stepSustainedSeconds,
+        'comInFrontRatioThreshold': comInFrontRatioThreshold,
+        'comLeaningBackRatioThreshold': comLeaningBackRatioThreshold,
+        'comSustainedSeconds': comSustainedSeconds,
+      };
+
+  /// Inverse of [toMap]; missing keys fall back to the shipped defaults.
+  factory HeuristicsConfig.fromMap(Map<String, double> map) {
+    const d = HeuristicsConfig();
+    return HeuristicsConfig(
+      bounceRatioThreshold:
+          map['bounceRatioThreshold'] ?? d.bounceRatioThreshold,
+      lungeKneeMinAngleDeg:
+          map['lungeKneeMinAngleDeg'] ?? d.lungeKneeMinAngleDeg,
+      guardDroppedSeconds: map['guardDroppedSeconds'] ?? d.guardDroppedSeconds,
+      guardDroppedFreeBoutingSeconds: map['guardDroppedFreeBoutingSeconds'] ??
+          d.guardDroppedFreeBoutingSeconds,
+      footBeforeHandMinDisplacement: map['footBeforeHandMinDisplacement'] ??
+          d.footBeforeHandMinDisplacement,
+      footBeforeHandLeadSeconds:
+          map['footBeforeHandLeadSeconds'] ?? d.footBeforeHandLeadSeconds,
+      stanceTooHighAngleDeg:
+          map['stanceTooHighAngleDeg'] ?? d.stanceTooHighAngleDeg,
+      incompleteArmExtensionAngleDeg: map['incompleteArmExtensionAngleDeg'] ??
+          d.incompleteArmExtensionAngleDeg,
+      overParryTorsoRatioThreshold: map['overParryTorsoRatioThreshold'] ??
+          d.overParryTorsoRatioThreshold,
+      stepShoulderProxyMultiplier: map['stepShoulderProxyMultiplier'] ??
+          d.stepShoulderProxyMultiplier,
+      wideStepRatioThreshold:
+          map['wideStepRatioThreshold'] ?? d.wideStepRatioThreshold,
+      narrowStepRatioThreshold:
+          map['narrowStepRatioThreshold'] ?? d.narrowStepRatioThreshold,
+      stepSustainedSeconds:
+          map['stepSustainedSeconds'] ?? d.stepSustainedSeconds,
+      comInFrontRatioThreshold:
+          map['comInFrontRatioThreshold'] ?? d.comInFrontRatioThreshold,
+      comLeaningBackRatioThreshold: map['comLeaningBackRatioThreshold'] ??
+          d.comLeaningBackRatioThreshold,
+      comSustainedSeconds: map['comSustainedSeconds'] ?? d.comSustainedSeconds,
+    );
+  }
+
   HeuristicsConfig copyWith({
     double? bounceRatioThreshold,
     double? lungeKneeMinAngleDeg,
@@ -456,6 +513,37 @@ class HeuristicsEngine {
       }
     }
     m['guard_below_pelvis_max_run_s'] = maxRun / fps;
+
+    // foot-before-hand: how much earlier the ankle started moving than the
+    // wrist, in seconds (positive = foot first = the error direction).
+    // Only present when both onsets occur inside the window.
+    if (refWrist != null && refAnkle != null) {
+      int? wristOnset;
+      int? ankleOnset;
+      for (int i = 0; i < skeletons.length; i++) {
+        final skel = skeletons[i];
+        if (wristOnset == null) {
+          final wrist = skel[limbs['wrist']!];
+          if (wrist != null &&
+              (wrist.dx - refWrist.dx).abs() >
+                  config.footBeforeHandMinDisplacement) {
+            wristOnset = i;
+          }
+        }
+        if (ankleOnset == null) {
+          final ankle = skel[limbs['ankle']!];
+          if (ankle != null &&
+              (ankle.dx - refAnkle.dx).abs() >
+                  config.footBeforeHandMinDisplacement) {
+            ankleOnset = i;
+          }
+        }
+        if (wristOnset != null && ankleOnset != null) break;
+      }
+      if (wristOnset != null && ankleOnset != null) {
+        m['foot_hand_lead_s'] = (wristOnset - ankleOnset) / fps;
+      }
+    }
 
     return m;
   }

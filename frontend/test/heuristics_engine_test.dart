@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frontend/heuristics/heuristics_engine.dart';
+import 'package:frontend/tuning/tuning_specs.dart';
 
 /// Synthetic skeleton for a LEFT-side fencer (front limbs = right_*) in
 /// normalized [0,1] coordinates, standing in a sound en-garde:
@@ -152,6 +153,30 @@ void main() {
     });
   });
 
+  group('HeuristicsConfig + tuning specs', () {
+    test('toMap/fromMap roundtrip preserves every value', () {
+      final original = const HeuristicsConfig().copyWith(
+        stanceTooHighAngleDeg: 163.5,
+        overParryTorsoRatioThreshold: 0.95,
+        guardDroppedSeconds: 0.5,
+      );
+      final restored = HeuristicsConfig.fromMap(original.toMap());
+      expect(restored.toMap(), equals(original.toMap()));
+    });
+
+    test('every tuning spec maps to a real config param and metric name', () {
+      final params = const HeuristicsConfig().toMap().keys.toSet();
+      for (final spec in kTuningSpecs) {
+        expect(params, contains(spec.paramName),
+            reason: '${spec.errorKey} points at unknown param');
+        // apply() must change exactly that param
+        final changed =
+            spec.apply(const HeuristicsConfig(), spec.min).toMap();
+        expect(changed[spec.paramName], spec.min);
+      }
+    });
+  });
+
   group('stance_too_high', () {
     test('straight front leg triggers', () {
       final tall = makeStance(straightLeg: true);
@@ -181,6 +206,20 @@ void main() {
       final errors =
           tpEngine.evaluateWindow(action: 'R', skeletons: skels, fps: 30);
       expect(errors, contains('foot_before_hand'));
+    });
+
+    test('foot_hand_lead_s metric reports the onset gap in seconds', () {
+      final skels = List.generate(30, (i) {
+        final ankleShift = i >= 5 ? 0.05 : 0.0;
+        final wristShift = i >= 15 ? 0.05 : 0.0;
+        final s = makeStance(wristX: 0.74 + wristShift);
+        s['right_ankle'] =
+            Offset(s['right_ankle']!.dx + ankleShift, s['right_ankle']!.dy);
+        return s;
+      });
+      final m = tpEngine.computeWindowMetrics(skels, fps: 30);
+      // ankle onset frame 5, wrist onset frame 15 → 10 frames @30fps ≈ 0.333s
+      expect(m['foot_hand_lead_s'], closeTo(10 / 30, 1e-6));
     });
 
     test('simultaneous onset does NOT trigger', () {

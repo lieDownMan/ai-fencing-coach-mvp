@@ -1,5 +1,16 @@
 # Heuristics 調參流程 (Threshold Tuning Workflow)
 
+## 最快路徑：App 內建 Tuning 專區（人工即時調）
+
+App 的 **Tuning** tab 一次選一個錯誤：即時顯示該錯誤的指標數字與觸發狀態
+（不經動作分類過濾），滑桿拖動閾值**立刻生效**並自動保存
+（存於 Documents/tuning/config_overrides.json，重開 App 仍在，檔案App可見）。
+流程：擺出「剛好該被唸」的動作 → 看當下數字 → 把滑桿拉到那附近 → 反覆驗證
+good 動作不觸發、錯誤動作會觸發 → 按「複製全部參數」把 Dart 片段貼回
+`HeuristicsConfig` 的預設值（或貼給 AI 代寫），tuned 值就固化進程式。
+
+以下的錄製+回放流程是數據派做法，作為補充仍然可用。
+
 所有可調閾值集中在 [`HeuristicsConfig`](lib/heuristics/heuristics_engine.dart)（16 個參數，
 含目前預設值與註解）。動作分類的信心閾值另外在
 [`FenceNetBridge.swift`](ios/Runner/FenceNetBridge.swift)（`confidenceThreshold = 0.6`）。

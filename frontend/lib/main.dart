@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:camera/camera.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -19,6 +20,8 @@ import 'screens/history_screen.dart';
 import 'screens/postgame_screen.dart';
 import 'ai/gemini_agent.dart';
 import 'tuning/session_recorder.dart';
+import 'tuning/tuning_config_store.dart';
+import 'tuning/tuning_specs.dart';
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -183,6 +186,11 @@ class _MainScreenState extends State<MainScreen>
   final SessionRecorder _recorder = SessionRecorder();
   String? _lastRecordingPath;
 
+  // Tuning tab state: live-adjustable thresholds + latest window metrics
+  HeuristicsConfig _config = const HeuristicsConfig();
+  String _tuningErrorKey = 'stance_too_high';
+  Map<String, double> _lastWindowMetrics = {};
+
   // Live state
   String _currentAction = 'Idle';
   double _actionConfidence = 0.0;
@@ -207,12 +215,21 @@ class _MainScreenState extends State<MainScreen>
   @override
   void initState() {
     super.initState();
-    // Use length 5 for Live, Postgame, Settings, History, Debug
-    _tabController = TabController(length: 5, vsync: this);
+    // Live, Postgame, Settings, History, Debug, Tuning
+    _tabController = TabController(length: 6, vsync: this);
     _heuristics = HeuristicsEngine(
       targetSide: _targetSide,
       trainingMode: _trainingMode,
+      config: _config,
     );
+    // Load persisted tuning overrides (if any) and swap them in.
+    TuningConfigStore.load().then((c) {
+      if (!mounted) return;
+      setState(() {
+        _config = c;
+        _applyConfig();
+      });
+    });
     _gatekeeper = ActivityGatekeeper(fps: 30);
 
     _flashController = AnimationController(
@@ -575,6 +592,12 @@ class _MainScreenState extends State<MainScreen>
       fps: _effectivePoseFps,
     );
 
+    // Raw metric values for the Tuning tab (bypasses action/mode gating).
+    _lastWindowMetrics = _heuristics.computeWindowMetrics(
+      List.from(_skeletonBuffer),
+      fps: _effectivePoseFps,
+    );
+
     // Filter by mode
     final filtered = errors.where((e) {
       final supported = kErrorSupportedModes[e] ?? [];
@@ -666,11 +689,18 @@ class _MainScreenState extends State<MainScreen>
     _gatekeeper.reset();
   }
 
-  void _rebuildHeuristics() {
+  /// Swap in the current config WITHOUT clearing live buffers — used by the
+  /// Tuning tab so threshold changes take effect mid-motion.
+  void _applyConfig() {
     _heuristics = HeuristicsEngine(
       targetSide: _targetSide,
       trainingMode: _trainingMode,
+      config: _config,
     );
+  }
+
+  void _rebuildHeuristics() {
+    _applyConfig();
     _resetLiveBuffers();
   }
 
@@ -703,6 +733,7 @@ class _MainScreenState extends State<MainScreen>
             Tab(icon: Icon(Icons.tune, size: 20), text: 'Settings'),
             Tab(icon: Icon(Icons.history, size: 20), text: 'History'),
             Tab(icon: Icon(Icons.analytics, size: 20), text: 'Debug'),
+            Tab(icon: Icon(Icons.speed, size: 20), text: 'Tuning'),
           ],
         ),
       ),
@@ -715,6 +746,7 @@ class _MainScreenState extends State<MainScreen>
           _buildSettingsTab(),
           const HistoryScreen(),
           _buildDebugTab(),
+          _buildTuningTab(),
         ],
       ),
     );
@@ -1388,6 +1420,211 @@ class _MainScreenState extends State<MainScreen>
           ),
         ),
       ],
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // TAB: TUNING — pick ONE error, watch its live metric, drag its threshold
+  // ──────────────────────────────────────────────────────────────────────────
+
+  Widget _buildTuningTab() {
+    final spec = specForError(_tuningErrorKey);
+    final threshold = spec.thresholdOf(_config);
+    final defaultValue =
+        const HeuristicsConfig().toMap()[spec.paramName]!;
+    final metric = _lastWindowMetrics[spec.metricKey];
+    final triggered =
+        metric != null && spec.wouldTrigger(metric, threshold);
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Error selector ──────────────────────────────────────────────
+          _buildDropdownField<String>(
+            label: '要調的錯誤 Error to tune（一次一個）',
+            value: _tuningErrorKey,
+            items: [
+              for (final s in kTuningSpecs)
+                DropdownMenuItem(
+                  value: s.errorKey,
+                  child: Text(
+                    kErrorLabels[s.errorKey] ?? s.errorKey,
+                    style: const TextStyle(fontSize: 13),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+            ],
+            onChanged: (val) {
+              if (val != null) setState(() => _tuningErrorKey = val);
+            },
+          ),
+          const SizedBox(height: 6),
+          Text(spec.hint,
+              style: const TextStyle(color: Colors.white38, fontSize: 12)),
+          const SizedBox(height: 12),
+
+          // ── Camera + skeleton (flashes red when this error would fire) ──
+          if (_isCameraInitialized && _cameraController != null)
+            Center(
+              child: SizedBox(
+                height: 300,
+                child: AspectRatio(
+                  aspectRatio: 3 / 4,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      CameraPreview(_cameraController!),
+                      if (_currentSkeleton != null)
+                        CustomPaint(
+                          painter: PosePainter(
+                            skeleton: _currentSkeleton!,
+                            imageSize: const Size(1.0, 1.0),
+                            triggeredError:
+                                triggered ? spec.errorKey : null,
+                            currentAction: _currentAction,
+                            isFrontCamera:
+                                _cameraController?.description.lensDirection ==
+                                    CameraLensDirection.front,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          const SizedBox(height: 12),
+
+          // ── Live metric vs threshold ────────────────────────────────────
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: triggered
+                  ? const Color(0xFF3A0000)
+                  : const Color(0xFF0E2A12),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: triggered ? Colors.redAccent : Colors.greenAccent,
+                width: 1.5,
+              ),
+            ),
+            child: Column(
+              children: [
+                Text(
+                  triggered ? '⚠ 會觸發 TRIGGERED' : '✓ 不觸發 OK',
+                  style: TextStyle(
+                    color: triggered ? Colors.redAccent : Colors.greenAccent,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  metric == null
+                      ? '--'
+                      : '${metric.toStringAsFixed(spec.decimals)}${spec.unit}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 44,
+                    fontWeight: FontWeight.w700,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+                Text(
+                  '閾值 ${threshold.toStringAsFixed(spec.decimals)}${spec.unit}'
+                  '（${spec.direction == TriggerDirection.above ? "大於" : "小於"}觸發）',
+                  style:
+                      const TextStyle(color: Colors.white54, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // ── Threshold slider (realtime, persisted on release) ───────────
+          Row(
+            children: [
+              Text(spec.min.toStringAsFixed(spec.decimals),
+                  style:
+                      const TextStyle(color: Colors.white38, fontSize: 11)),
+              Expanded(
+                child: Slider(
+                  value: threshold.clamp(spec.min, spec.max),
+                  min: spec.min,
+                  max: spec.max,
+                  activeColor: const Color(0xFFFF6600),
+                  onChanged: (v) {
+                    setState(() {
+                      _config = spec.apply(_config, v);
+                      _applyConfig();
+                    });
+                  },
+                  onChangeEnd: (_) => TuningConfigStore.save(_config),
+                ),
+              ),
+              Text(spec.max.toStringAsFixed(spec.decimals),
+                  style:
+                      const TextStyle(color: Colors.white38, fontSize: 11)),
+            ],
+          ),
+          Center(
+            child: Text(
+              '預設 ${defaultValue.toStringAsFixed(spec.decimals)}${spec.unit}'
+              '${(threshold - defaultValue).abs() > 1e-9 ? "（已修改）" : ""}',
+              style: const TextStyle(color: Colors.white38, fontSize: 12),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // ── Actions ─────────────────────────────────────────────────────
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.restart_alt, size: 16),
+                  label: const Text('重設此項', style: TextStyle(fontSize: 12)),
+                  onPressed: () {
+                    setState(() {
+                      _config = spec.apply(_config, defaultValue);
+                      _applyConfig();
+                    });
+                    TuningConfigStore.save(_config);
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.copy, size: 16),
+                  label:
+                      const Text('複製全部參數', style: TextStyle(fontSize: 12)),
+                  onPressed: () async {
+                    await Clipboard.setData(ClipboardData(
+                        text: TuningConfigStore.asDartSnippet(_config)));
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('已複製 Dart 參數片段 — 貼回 HeuristicsConfig 或傳給 AI'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            '此頁直接比對指標與閾值，不經動作分類/模式過濾——'
+            '調好的值即時套用到 Live tab，並自動保存（重開 App 仍在）。'
+            '滿意後按「複製全部參數」，把片段貼回程式碼或傳給 AI 寫入預設值。',
+            style: TextStyle(color: Colors.white38, fontSize: 11),
+          ),
+          const SizedBox(height: 24),
+        ],
+      ),
     );
   }
 
