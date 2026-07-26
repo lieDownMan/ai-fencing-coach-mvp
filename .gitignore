@@ -50,3 +50,6 @@ android/**/build/
 android/local.properties
 android/captures/
 
+
+# Per-user tuning state (Mac tuning server)
+backend/tuning_overrides.json

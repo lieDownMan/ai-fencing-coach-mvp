@@ -1,6 +1,21 @@
 # Heuristics 調參流程 (Threshold Tuning Workflow)
 
-## 最快路徑：App 內建 Tuning 專區（人工即時調）
+## 免走動路徑：Mac 鏡頭 + 手機遙控（tuning_server）
+
+不想在手機腳架和站位之間來回走：讓 **Mac 的鏡頭拍你**，手機拿在手上當遙控器。
+
+```bash
+# Mac 上（repo 根目錄；第一次會跳相機權限）
+venv/bin/python backend/tuning_server.py
+```
+
+手機瀏覽器開它印出的 `http://<Mac-IP>:8123`（同一個 Wi-Fi）——手機上就有：
+即時畫面+骨架、大字指標、閾值滑桿、觸發語音提示、「複製 Dart 參數」。
+指標計算與 App 引擎**逐行對齊**（同名參數、同數學、同預設值，
+`--self-test` 可驗證），調出來的數字直接貼回 `HeuristicsConfig`。
+調整值存在 `backend/tuning_overrides.json`（gitignored）。
+
+## App 內建 Tuning 專區（手機單機、人工即時調）
 
 App 的 **Tuning** tab 一次選一個錯誤：即時顯示該錯誤的指標數字與觸發狀態
 （不經動作分類過濾），滑桿拖動閾值**立刻生效**並自動保存
