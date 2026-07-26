@@ -46,7 +46,7 @@ DEFAULT_CONFIG = {
     "lungeKneeMinAngleDeg": 90.0,
     "guardDroppedSeconds": 0.35,
     "guardDroppedFreeBoutingSeconds": 0.70,
-    "footBeforeHandMinDisplacement": 0.01,
+    "footBeforeHandMinDisplacement": 0.03,
     "footBeforeHandLeadSeconds": 0.10,
     "stanceTooHighAngleDeg": 170.0,
     "incompleteArmExtensionAngleDeg": 155.0,
@@ -261,24 +261,48 @@ def compute_window_metrics(skeletons, fps, target_side, config):
             run = 0
     m["guard_below_pelvis_max_run_s"] = max_run / fps
 
-    if ref_wrist and ref_ankle:
-        wrist_onset = ankle_onset = None
-        thresh = config["footBeforeHandMinDisplacement"]
-        for i, skel in enumerate(skeletons):
-            if wrist_onset is None:
-                wrist = skel.get(limbs["wrist"])
-                if wrist and abs(wrist[0] - ref_wrist[0]) > thresh:
-                    wrist_onset = i
-            if ankle_onset is None:
-                ankle = skel.get(limbs["ankle"])
-                if ankle and abs(ankle[0] - ref_ankle[0]) > thresh:
-                    ankle_onset = i
-            if wrist_onset is not None and ankle_onset is not None:
-                break
-        if wrist_onset is not None and ankle_onset is not None:
-            m["foot_hand_lead_s"] = (wrist_onset - ankle_onset) / fps
+    # foot-before-hand: body-relative forward series + rise-onset from the
+    # global peak — mirrors _checkFootBeforeHand / computeWindowMetrics (Dart).
+    sign = 1.0 if target_side == "left" else -1.0
+    wrist_rel, ankle_rel = [], []
+    for skel in skeletons:
+        pelvis = pelvis_center(skel)
+        wrist = skel.get(limbs["wrist"])
+        ankle = skel.get(limbs["ankle"])
+        wrist_rel.append(None if pelvis is None or wrist is None
+                         else sign * (wrist[0] - pelvis[0]))
+        ankle_rel.append(None if pelvis is None or ankle is None
+                         else sign * (ankle[0] - pelvis[0]))
+    w_on = _rise_onset(wrist_rel, config["footBeforeHandMinDisplacement"])
+    a_on = _rise_onset(ankle_rel, config["footBeforeHandMinDisplacement"])
+    if w_on is not None and a_on is not None:
+        m["foot_hand_lead_s"] = (w_on - a_on) / fps
 
     return m
+
+
+def _rise_onset(series, min_rise):
+    """Onset index of the final rise toward the global peak (Dart _riseOnset)."""
+    peak_idx, peak_val = None, -math.inf
+    for i, v in enumerate(series):
+        if v is not None and v > peak_val:
+            peak_val, peak_idx = v, i
+    if peak_idx is None:
+        return None
+    baseline = min(v for v in series[:peak_idx + 1] if v is not None)
+    rise = peak_val - baseline
+    if rise < min_rise:
+        return None
+    onset_level = baseline + 0.1 * rise
+    onset = peak_idx
+    for i in range(peak_idx, -1, -1):
+        v = series[i]
+        if v is None:
+            continue
+        if v <= onset_level:
+            break
+        onset = i
+    return onset
 
 
 # ---------------------------------------------------------------------------
@@ -588,6 +612,18 @@ def self_test():
     assert m["guard_below_pelvis_max_run_s"] == 0.0, m
     m2 = compute_window_metrics([stance(True)] * 40, 30, "left", DEFAULT_CONFIG)
     assert abs(m2["avg_front_knee_angle_deg"] - 180.0) < 0.01, m2
+
+    # foot-before-hand: ankle rise onset at frame 5, wrist at 15 → 10/30 s
+    seq = []
+    for i in range(30):
+        s = stance()
+        if i >= 5:
+            s["right_ankle"] = (0.65, 0.80)
+        if i >= 15:
+            s["front_wrist"] = (0.79, 0.45)
+        seq.append(s)
+    m3 = compute_window_metrics(seq, 30, "left", DEFAULT_CONFIG)
+    assert abs(m3["foot_hand_lead_s"] - 10 / 30) < 1e-6, m3
     print("self-test OK — metrics match the Dart unit-test values")
 
 

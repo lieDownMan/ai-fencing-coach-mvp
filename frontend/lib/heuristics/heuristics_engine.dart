@@ -64,7 +64,9 @@ class HeuristicsConfig {
     this.lungeKneeMinAngleDeg = 90.0,
     this.guardDroppedSeconds = 0.35,
     this.guardDroppedFreeBoutingSeconds = 0.70,
-    this.footBeforeHandMinDisplacement = 0.01,
+    // Minimum body-relative forward RISE (peak minus baseline, normalized
+    // units) for a wrist-extension / attack-step movement to count at all.
+    this.footBeforeHandMinDisplacement = 0.03,
     this.footBeforeHandLeadSeconds = 0.10,
     this.stanceTooHighAngleDeg = 170.0,
     this.incompleteArmExtensionAngleDeg = 155.0,
@@ -514,35 +516,16 @@ class HeuristicsEngine {
     }
     m['guard_below_pelvis_max_run_s'] = maxRun / fps;
 
-    // foot-before-hand: how much earlier the ankle started moving than the
-    // wrist, in seconds (positive = foot first = the error direction).
-    // Only present when both onsets occur inside the window.
-    if (refWrist != null && refAnkle != null) {
-      int? wristOnset;
-      int? ankleOnset;
-      for (int i = 0; i < skeletons.length; i++) {
-        final skel = skeletons[i];
-        if (wristOnset == null) {
-          final wrist = skel[limbs['wrist']!];
-          if (wrist != null &&
-              (wrist.dx - refWrist.dx).abs() >
-                  config.footBeforeHandMinDisplacement) {
-            wristOnset = i;
-          }
-        }
-        if (ankleOnset == null) {
-          final ankle = skel[limbs['ankle']!];
-          if (ankle != null &&
-              (ankle.dx - refAnkle.dx).abs() >
-                  config.footBeforeHandMinDisplacement) {
-            ankleOnset = i;
-          }
-        }
-        if (wristOnset != null && ankleOnset != null) break;
-      }
-      if (wristOnset != null && ankleOnset != null) {
-        m['foot_hand_lead_s'] = (wristOnset - ankleOnset) / fps;
-      }
+    // foot-before-hand: how much earlier the ankle's attack-step rise began
+    // vs the wrist's extension rise, in seconds (positive = foot first =
+    // the error direction). Body-relative + rise-onset — same algorithm as
+    // _checkFootBeforeHand. Absent when either movement's rise is below the
+    // noise floor.
+    final (wristRel, ankleRel) = _forwardSeries(skeletons);
+    final wristOn = _riseOnset(wristRel, config.footBeforeHandMinDisplacement);
+    final ankleOn = _riseOnset(ankleRel, config.footBeforeHandMinDisplacement);
+    if (wristOn != null && ankleOn != null) {
+      m['foot_hand_lead_s'] = (wristOn.$1 - ankleOn.$1) / fps;
     }
 
     return m;
@@ -627,42 +610,79 @@ class HeuristicsEngine {
 
   // ── Rule 4: foot_before_hand ──────────────────────────────────────────────
   //
-  // Compare the ONSET frame (first frame the joint has moved past the noise
-  // threshold from its start position) of the front ankle vs the front wrist.
-  // If the foot starts moving clearly before the hand, the sequencing is wrong.
+  // Signals are BODY-RELATIVE forward positions (wrist/ankle X minus pelvis X,
+  // signed toward the opponent) so whole-body translation — ordinary footwork
+  // before the attack — doesn't register as "movement". The onset of each
+  // movement is found by walking BACK from its global peak (full arm
+  // extension / lunge-foot landing) to where that final rise began, which
+  // anchors both events to the attack itself rather than to the arbitrary
+  // start of the rolling window. Foot onset clearly before hand onset =
+  // wrong sequencing.
+
+  /// Forward direction sign: left-side fencer faces +x, right-side faces −x.
+  double get _forwardSign => targetSide == 'left' ? 1.0 : -1.0;
+
+  /// Onset index of the final rise toward the series' global peak, or null
+  /// if the total rise (peak − baseline-before-peak) is below [minRise].
+  static (int, double)? _riseOnset(List<double?> series, double minRise) {
+    int? peakIdx;
+    double peakVal = -double.infinity;
+    for (int i = 0; i < series.length; i++) {
+      final v = series[i];
+      if (v != null && v > peakVal) {
+        peakVal = v;
+        peakIdx = i;
+      }
+    }
+    if (peakIdx == null) return null;
+
+    double baseline = double.infinity;
+    for (int i = 0; i <= peakIdx; i++) {
+      final v = series[i];
+      if (v != null && v < baseline) baseline = v;
+    }
+    final rise = peakVal - baseline;
+    if (rise < minRise) return null;
+
+    final onsetLevel = baseline + 0.1 * rise;
+    int onset = peakIdx;
+    for (int i = peakIdx; i >= 0; i--) {
+      final v = series[i];
+      if (v == null) continue;
+      if (v <= onsetLevel) break;
+      onset = i;
+    }
+    return (onset, rise);
+  }
+
+  /// Body-relative forward series for the front wrist and front ankle.
+  (List<double?>, List<double?>) _forwardSeries(List<Skeleton> skeletons) {
+    final limbs = frontLimbs(targetSide);
+    final sign = _forwardSign;
+    final wristRel = <double?>[];
+    final ankleRel = <double?>[];
+    for (final skel in skeletons) {
+      final pelvis = _pelvisCenter(skel);
+      final wrist = skel[limbs['wrist']!];
+      final ankle = skel[limbs['ankle']!];
+      wristRel.add(pelvis == null || wrist == null
+          ? null
+          : sign * (wrist.dx - pelvis.dx));
+      ankleRel.add(pelvis == null || ankle == null
+          ? null
+          : sign * (ankle.dx - pelvis.dx));
+    }
+    return (wristRel, ankleRel);
+  }
 
   String? _checkFootBeforeHand(List<Skeleton> skeletons, double fps) {
-    final limbs = frontLimbs(targetSide);
-    final refWrist = skeletons[0][limbs['wrist']!];
-    final refAnkle = skeletons[0][limbs['ankle']!];
-    if (refWrist == null || refAnkle == null) return null;
-
-    int? wristOnset;
-    int? ankleOnset;
-
-    for (int i = 0; i < skeletons.length; i++) {
-      final skel = skeletons[i];
-      if (wristOnset == null) {
-        final wrist = skel[limbs['wrist']!];
-        if (wrist != null &&
-            (wrist.dx - refWrist.dx).abs() > config.footBeforeHandMinDisplacement) {
-          wristOnset = i;
-        }
-      }
-      if (ankleOnset == null) {
-        final ankle = skel[limbs['ankle']!];
-        if (ankle != null &&
-            (ankle.dx - refAnkle.dx).abs() > config.footBeforeHandMinDisplacement) {
-          ankleOnset = i;
-        }
-      }
-      if (wristOnset != null && ankleOnset != null) break;
-    }
-
-    if (wristOnset == null || ankleOnset == null) return null;
+    final (wristRel, ankleRel) = _forwardSeries(skeletons);
+    final wrist = _riseOnset(wristRel, config.footBeforeHandMinDisplacement);
+    final ankle = _riseOnset(ankleRel, config.footBeforeHandMinDisplacement);
+    if (wrist == null || ankle == null) return null;
 
     final margin = _framesFor(config.footBeforeHandLeadSeconds, fps);
-    if (ankleOnset + margin <= wristOnset) return 'foot_before_hand';
+    if (ankle.$1 + margin <= wrist.$1) return 'foot_before_hand';
     return null;
   }
 
