@@ -123,6 +123,23 @@ void main() {
       final m = engine.computeWindowMetrics(repeat(makeStance(), 10), fps: 30);
       expect(m['torso_lean_deg_median'], closeTo(14.93, 0.05));
     });
+
+    test('facing the other way: forward lean is still positive and triggers '
+        '(regression: sign was hardcoded from targetSide)', () {
+      // Mirror the whole skeleton in X — fencer now faces −x.
+      Skeleton mirror(Skeleton s) =>
+          s.map((k, v) => MapEntry(k, Offset(1.0 - v.dx, v.dy)));
+      final leaningMirrored = mirror(makeStance(shoulderX: 0.64));
+      final m = engine.computeWindowMetrics(
+          repeat(leaningMirrored, 40), fps: 30);
+      expect(m['torso_lean_deg_median'], closeTo(43.0, 0.5));
+      final errors = engine.evaluateWindow(
+        action: 'SF',
+        skeletons: repeat(leaningMirrored, 40),
+        fps: 30,
+      );
+      expect(errors, contains('center_of_mass_in_front'));
+    });
   });
 
   group('over_parrying', () {

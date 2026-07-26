@@ -469,6 +469,7 @@ class HeuristicsEngine {
     // step ratio + torso lean across the window
     final stepRatios = <double>[];
     final leans = <double>[];
+    final facing = _windowFacingSign(skeletons);
     for (final skel in skeletons) {
       final frontAnkle = skel[limbs['ankle']!];
       final back = skel[backAnkleKey];
@@ -484,7 +485,7 @@ class HeuristicsEngine {
         }
       }
 
-      final lean = torsoLeanDeg(skel);
+      final lean = _torsoLeanDeg(skel, facing);
       if (lean != null) leans.add(lean);
     }
     if (stepRatios.isNotEmpty) {
@@ -617,7 +618,28 @@ class HeuristicsEngine {
   // wrong sequencing.
 
   /// Forward direction sign: left-side fencer faces +x, right-side faces −x.
+  /// Fallback only — prefer [_windowFacingSign], which reads the actual
+  /// stance instead of trusting the targetSide setting.
   double get _forwardSign => targetSide == 'left' ? 1.0 : -1.0;
+
+  /// Facing inferred from foot placement: the front (sword-side) ankle is
+  /// always toward the opponent, so the median X offset front−back ankle
+  /// gives the attack direction regardless of which way the fencer faces
+  /// on screen or whether targetSide is set correctly.
+  double _windowFacingSign(List<Skeleton> skeletons) {
+    final limbs = frontLimbs(targetSide);
+    final backKey = backAnkleName(targetSide);
+    final diffs = <double>[];
+    for (final skel in skeletons) {
+      final fa = skel[limbs['ankle']!];
+      final ba = skel[backKey];
+      if (fa != null && ba != null) diffs.add(fa.dx - ba.dx);
+    }
+    if (diffs.isEmpty) return _forwardSign;
+    final med = _median(diffs);
+    if (med.abs() < 1e-6) return _forwardSign;
+    return med > 0 ? 1.0 : -1.0;
+  }
 
   /// Onset index of the final rise toward the series' global peak, or null
   /// if the total rise (peak − baseline-before-peak) is below [minRise].
@@ -655,7 +677,7 @@ class HeuristicsEngine {
   /// Body-relative forward series for the front wrist and front ankle.
   (List<double?>, List<double?>) _forwardSeries(List<Skeleton> skeletons) {
     final limbs = frontLimbs(targetSide);
-    final sign = _forwardSign;
+    final sign = _windowFacingSign(skeletons);
     final wristRel = <double?>[];
     final ankleRel = <double?>[];
     for (final skel in skeletons) {
@@ -820,26 +842,28 @@ class HeuristicsEngine {
   // sustained-duration requirement as step width so a transient lean during
   // a step's transfer phase doesn't trigger.
 
-  /// Torso lean from vertical in degrees; positive = toward the opponent.
-  /// Null when the joints are missing or the pose is degenerate.
-  double? torsoLeanDeg(Skeleton skel) {
+  /// Torso lean from vertical in degrees; positive = toward the opponent
+  /// ([facingSign] from [_windowFacingSign]). Null when joints are missing
+  /// or the pose is degenerate.
+  double? _torsoLeanDeg(Skeleton skel, double facingSign) {
     final limbs = frontLimbs(targetSide);
     final shoulder = skel[limbs['shoulder']!];
     final pelvis = _pelvisCenter(skel);
     if (shoulder == null || pelvis == null) return null;
     final vertical = pelvis.dy - shoulder.dy; // >0: shoulder above pelvis
     if (vertical <= 1e-6) return null;
-    final forward = _forwardSign * (shoulder.dx - pelvis.dx);
+    final forward = facingSign * (shoulder.dx - pelvis.dx);
     return math.atan2(forward, vertical) * 180.0 / math.pi;
   }
 
   String? _checkCenterOfMass(List<Skeleton> skeletons, double fps) {
     final sustained = _framesFor(config.comSustainedSeconds, fps);
+    final facing = _windowFacingSign(skeletons);
     int frontRun = 0;
     int backRun = 0;
 
     for (final skel in skeletons) {
-      final lean = torsoLeanDeg(skel);
+      final lean = _torsoLeanDeg(skel, facing);
       if (lean == null) continue;
 
       if (lean > config.comForwardLeanDeg) {

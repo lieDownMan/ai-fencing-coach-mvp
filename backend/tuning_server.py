@@ -226,7 +226,7 @@ def compute_window_metrics(skeletons, fps, target_side, config):
         if torso > 1e-6:
             m["parry_sweep_torso_ratio"] = (max(rel_xs) - min(rel_xs)) / torso
 
-    sign = 1.0 if target_side == "left" else -1.0
+    sign = _window_facing_sign(skeletons, limbs, back_key, target_side)
     step_ratios, leans = [], []
     for skel in skeletons:
         fa, ba_, pelvis = (skel.get(limbs["ankle"]), skel.get(back_key),
@@ -278,6 +278,22 @@ def compute_window_metrics(skeletons, fps, target_side, config):
         m["foot_hand_lead_s"] = (w_on - a_on) / fps
 
     return m
+
+
+def _window_facing_sign(skeletons, limbs, back_key, target_side):
+    """Facing from foot placement: front ankle is always toward the opponent.
+    Falls back to the targetSide convention when feet are missing."""
+    diffs = []
+    for skel in skeletons:
+        fa, ba = skel.get(limbs["ankle"]), skel.get(back_key)
+        if fa is not None and ba is not None:
+            diffs.append(fa[0] - ba[0])
+    if not diffs:
+        return 1.0 if target_side == "left" else -1.0
+    med = statistics.median(diffs)
+    if abs(med) < 1e-6:
+        return 1.0 if target_side == "left" else -1.0
+    return 1.0 if med > 0 else -1.0
 
 
 def _rise_onset(series, min_rise):
