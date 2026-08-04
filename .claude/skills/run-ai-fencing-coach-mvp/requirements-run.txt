@@ -1,0 +1,15 @@
+# Minimal, verified-working dependency set for driving app.py's Clip Analysis UI.
+# This is a subset of the repo's requirements.txt — enough to import app.py and
+# run a full clip through the pipeline, pinned to versions verified together.
+# See SKILL.md Gotchas for why huggingface_hub/pydantic are pinned down.
+numpy>=1.24.0,<2.0.0
+torch
+opencv-python-headless
+ultralytics
+pandas
+gradio==4.44.1
+huggingface_hub<0.26
+pydantic<2.11
+python-dotenv
+scipy
+playwright

@@ -69,16 +69,16 @@ class HeuristicsConfig {
     // Minimum body-relative forward RISE (peak minus baseline, normalized
     // units) for a wrist-extension / attack-step movement to count at all.
     this.footBeforeHandMinDisplacement = 0.03,
-    this.footBeforeHandLeadSeconds = 0.10,
+    this.footBeforeHandLeadSeconds = 0.37,
     this.stanceTooHighAngleDeg = 170.0,
     this.incompleteArmExtensionAngleDeg = 101.0,
     this.overParryTorsoRatioThreshold = 0.54,
     this.stepShoulderProxyMultiplier = 2.5,
-    this.wideStepRatioThreshold = 1.72,
+    this.wideStepRatioThreshold = 3.0,
     this.narrowStepRatioThreshold = 0.9,
     this.stepSustainedSeconds = 0.30,
-    this.comForwardLeanDeg = 14.0,
-    this.comBackwardLeanDeg = 5.5,
+    this.comForwardLeanDeg = 21.0,
+    this.comBackwardLeanDeg = 3.0,
     this.comSustainedSeconds = 0.30,
   });
 
@@ -301,6 +301,10 @@ class HeuristicsEngine {
     if (!fps.isFinite || fps <= 1.0) {
       fps = kDefaultFps;
     }
+    // No (reliable) person in most of the window → stay silent. Guards
+    // against garbage detections and half-visible bodies producing cues
+    // when nobody is actually fencing in frame.
+    if (!_personInWindow(skeletons)) return [];
 
     // Unconditionally compute live step debug metrics
     final latestSkel = skeletons.last;
@@ -353,6 +357,19 @@ class HeuristicsEngine {
     if (key != null) list.add(key);
   }
 
+  /// A frame "has a person" when the core joints every rule depends on are
+  /// present (pelvis + front ankle). The window counts as containing a
+  /// person only when a majority of frames do — mirrors the Python
+  /// _person_in_window in backend/tuning_server.py.
+  bool _personInWindow(List<Skeleton> skeletons) {
+    final ankleKey = frontLimbs(targetSide)['ankle']!;
+    var visible = 0;
+    for (final skel in skeletons) {
+      if (_pelvisCenter(skel) != null && skel[ankleKey] != null) visible++;
+    }
+    return 2 * visible >= skeletons.length;
+  }
+
   /// Raw metric values for a window, keyed by name — the offline tuning tool
   /// replays recorded sessions through this to see metric DISTRIBUTIONS, so
   /// thresholds can be chosen from data instead of guessed.
@@ -364,6 +381,9 @@ class HeuristicsEngine {
     final m = <String, double>{};
     if (skeletons.isEmpty) return m;
     if (!fps.isFinite || fps <= 1.0) fps = kDefaultFps;
+    // Same no-person guard as evaluateWindow: without it the Tuning tab
+    // would flash/speak triggers computed from garbage frames.
+    if (!_personInWindow(skeletons)) return m;
     final limbs = frontLimbs(targetSide);
     final backAnkleKey = backAnkleName(targetSide);
 
@@ -641,8 +661,41 @@ class HeuristicsEngine {
     return med > 0 ? 1.0 : -1.0;
   }
 
+  /// Sliding k-frame median over a series with null gaps (null stays null,
+  /// null neighbours are skipped). Fixed constant, not a tunable — kills
+  /// single-frame keypoint jitter before it can poison peak/baseline stats.
+  /// Mirrors the Python _median_filter in backend/tuning_server.py.
+  static List<double?> _medianFilter(List<double?> series, {int k = 5}) {
+    final half = k ~/ 2;
+    final out = <double?>[];
+    for (int i = 0; i < series.length; i++) {
+      if (series[i] == null) {
+        out.add(null);
+        continue;
+      }
+      final window = <double>[];
+      for (int j = math.max(0, i - half);
+          j < math.min(series.length, i + half + 1);
+          j++) {
+        final v = series[j];
+        if (v != null) window.add(v);
+      }
+      out.add(_median(window));
+    }
+    return out;
+  }
+
   /// Onset index of the final rise toward the series' global peak, or null
   /// if the total rise (peak − baseline-before-peak) is below [minRise].
+  ///
+  /// Baseline is the MEDIAN of the pre-peak samples, not the minimum: a
+  /// sustained genuine low (e.g. a retreat before the lunge) would drag a
+  /// min-baseline far below the en-garde plateau, letting the back-walk
+  /// punch through the plateau and anchor the onset to the retreat instead
+  /// of the attack — a false foot_before_hand on a correct action.
+  /// Known limit (by design, stateless): a retreat that flows into the lunge
+  /// with no pause in between is inseparable in a 2D ankle series; the
+  /// leadSeconds margin absorbs it.
   static (int, double)? _riseOnset(List<double?> series, double minRise) {
     int? peakIdx;
     double peakVal = -double.infinity;
@@ -655,11 +708,10 @@ class HeuristicsEngine {
     }
     if (peakIdx == null) return null;
 
-    double baseline = double.infinity;
-    for (int i = 0; i <= peakIdx; i++) {
-      final v = series[i];
-      if (v != null && v < baseline) baseline = v;
-    }
+    final baseline = _median([
+      for (int i = 0; i <= peakIdx; i++)
+        if (series[i] != null) series[i]!,
+    ]);
     final rise = peakVal - baseline;
     if (rise < minRise) return null;
 
@@ -691,7 +743,7 @@ class HeuristicsEngine {
           ? null
           : sign * (ankle.dx - pelvis.dx));
     }
-    return (wristRel, ankleRel);
+    return (_medianFilter(wristRel), _medianFilter(ankleRel));
   }
 
   String? _checkFootBeforeHand(List<Skeleton> skeletons, double fps) {

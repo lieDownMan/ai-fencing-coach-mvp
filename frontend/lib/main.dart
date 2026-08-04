@@ -169,6 +169,7 @@ class _MainScreenState extends State<MainScreen>
   // Skeleton window buffer (28 frames)
   final List<Skeleton> _skeletonBuffer = [];
   FencingSkeleton? _currentSkeleton;
+  int _noPersonFrames = 0;
 
   // Reference for normalization (nose at t=0 of action)
   Offset? _refNose;
@@ -447,6 +448,7 @@ class _MainScreenState extends State<MainScreen>
       if (!mounted) return;
 
       if (skeleton != null) {
+        _noPersonFrames = 0;
         _frameCount++;
         _currentSkeleton = skeleton;
 
@@ -491,6 +493,17 @@ class _MainScreenState extends State<MainScreen>
           setState(() => _coachState = newState);
         }
       } else {
+        // Person gone for ~1s → the buffered window is no longer continuous
+        // with whatever gets detected next; drop it and silence any lingering
+        // warnings instead of judging stale frames.
+        _noPersonFrames++;
+        if (_noPersonFrames == 30) {
+          _skeletonBuffer.clear();
+          _classifierBuffer.clear();
+          if (_activeErrors.isNotEmpty && mounted) {
+            setState(() => _activeErrors = []);
+          }
+        }
         final isActive = _gatekeeper.update(null, _targetSide);
         final newState = isActive ? 'ACTIVE' : 'IDLE';
         if (newState != _coachState) {

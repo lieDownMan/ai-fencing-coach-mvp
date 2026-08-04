@@ -89,6 +89,7 @@ Important:
 - [TRAINING.md](TRAINING.md): model-data workflow
 - [CHECKPOINTS.md](CHECKPOINTS.md): model checkpoint expectations
 - [CONTRIBUTING.md](CONTRIBUTING.md): coding conventions
+- [HEURISTICS.md](HEURISTICS.md): posture heuristics calculations and logic details
 
 ## Current Priorities
 

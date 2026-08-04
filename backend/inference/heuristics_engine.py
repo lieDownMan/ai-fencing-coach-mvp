@@ -10,9 +10,6 @@ Detectable keys (via skeleton geometry):
     foot_before_hand, stance_too_high, incomplete_arm_extension,
     over_parrying, wide_step, narrow_step,
     center_of_mass_in_front, center_of_mass_leaning_backward
-
-Keys reserved for future detection (require sword-tip / multi-segment):
-    wide_disengage
 """
 
 from __future__ import annotations
@@ -35,7 +32,6 @@ HEURISTIC_ERROR_KEYS: tuple[str, ...] = (
     "center_of_mass_in_front",
     "center_of_mass_leaning_backward",
 )
-FUTURE_HEURISTIC_ERROR_KEYS: tuple[str, ...] = ("wide_disengage",)
 
 OFFENSIVE_ACTIONS: set[str] = {"R", "JS", "WW", "IS"}
 FOOTWORK_ACTIONS: set[str] = {"SF", "SB"}

@@ -125,7 +125,7 @@ const List<TuningSpec> kTuningSpecs = [
     paramName: 'wideStepRatioThreshold',
     direction: TriggerDirection.above,
     min: 1.00,
-    max: 2.00,
+    max: 3.50,
     unit: '×肩寬',
     hint: '維持寬站姿看數字。正常 en garde 約 1.5–2.5。',
   ),

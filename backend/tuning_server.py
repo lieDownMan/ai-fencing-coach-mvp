@@ -47,16 +47,16 @@ DEFAULT_CONFIG = {
     "guardDroppedSeconds": 3.0,
     "guardDroppedFreeBoutingSeconds": 3.0,
     "footBeforeHandMinDisplacement": 0.03,
-    "footBeforeHandLeadSeconds": 0.10,
+    "footBeforeHandLeadSeconds": 0.37,
     "stanceTooHighAngleDeg": 170.0,
     "incompleteArmExtensionAngleDeg": 101.0,
     "overParryTorsoRatioThreshold": 0.54,
     "stepShoulderProxyMultiplier": 2.5,
-    "wideStepRatioThreshold": 1.72,
+    "wideStepRatioThreshold": 3.0,
     "narrowStepRatioThreshold": 0.9,
     "stepSustainedSeconds": 0.30,
-    "comForwardLeanDeg": 14.0,
-    "comBackwardLeanDeg": 5.5,
+    "comForwardLeanDeg": 21.0,
+    "comBackwardLeanDeg": 3.0,
     "comSustainedSeconds": 0.30,
 }
 
@@ -93,7 +93,7 @@ SPECS = [
      "hint": "維持窄站姿看數字。正常 en garde 約 1.5–2.5。"},
     {"error_key": "wide_step", "label": "步伐太大 Wide Step",
      "metric": "step_ratio_median", "param": "wideStepRatioThreshold",
-     "direction": "above", "min": 1.00, "max": 2.00, "unit": "×肩寬", "decimals": 2,
+     "direction": "above", "min": 1.00, "max": 3.50, "unit": "×肩寬", "decimals": 2,
      "hint": "維持寬站姿看數字。正常 en garde 約 1.5–2.5。"},
     {"error_key": "center_of_mass_in_front", "label": "重心向前 CoM Forward",
      "metric": "torso_lean_deg_median", "param": "comForwardLeanDeg",
@@ -152,6 +152,16 @@ def back_ankle_name(target_side):
     return "left_ankle" if target_side == "left" else "right_ankle"
 
 
+def _person_in_window(skeletons, target_side):
+    """A frame "has a person" when the core joints every rule depends on are
+    present (pelvis + front ankle); the window counts only when a majority of
+    frames do. Mirrors the Dart _personInWindow."""
+    ankle_key = front_limbs(target_side)["ankle"]
+    visible = sum(1 for s in skeletons
+                  if pelvis_center(s) is not None and s.get(ankle_key) is not None)
+    return 2 * visible >= len(skeletons)
+
+
 def compute_window_metrics(skeletons, fps, target_side, config):
     """Python mirror of HeuristicsEngine.computeWindowMetrics (Dart)."""
     m = {}
@@ -159,6 +169,10 @@ def compute_window_metrics(skeletons, fps, target_side, config):
         return m
     if not math.isfinite(fps) or fps <= 1.0:
         fps = 30.0
+    # No-person guard (mirrors evaluateWindow/computeWindowMetrics in Dart):
+    # garbage or half-visible detections must not produce metrics/triggers.
+    if not _person_in_window(skeletons, target_side):
+        return m
     limbs = front_limbs(target_side)
     back_key = back_ankle_name(target_side)
 
@@ -272,8 +286,10 @@ def compute_window_metrics(skeletons, fps, target_side, config):
                          else sign * (wrist[0] - pelvis[0]))
         ankle_rel.append(None if pelvis is None or ankle is None
                          else sign * (ankle[0] - pelvis[0]))
-    w_on = _rise_onset(wrist_rel, config["footBeforeHandMinDisplacement"])
-    a_on = _rise_onset(ankle_rel, config["footBeforeHandMinDisplacement"])
+    w_on = _rise_onset(_median_filter(wrist_rel),
+                       config["footBeforeHandMinDisplacement"])
+    a_on = _rise_onset(_median_filter(ankle_rel),
+                       config["footBeforeHandMinDisplacement"])
     if w_on is not None and a_on is not None:
         m["foot_hand_lead_s"] = (w_on - a_on) / fps
 
@@ -296,15 +312,40 @@ def _window_facing_sign(skeletons, limbs, back_key, target_side):
     return 1.0 if med > 0 else -1.0
 
 
+def _median_filter(series, k=5):
+    """Sliding k-frame median over a series with None gaps (None stays None,
+    None neighbours are skipped). Fixed constant, not a tunable — kills
+    single-frame keypoint jitter before it can poison peak/baseline stats.
+    Mirrors the Dart _medianFilter."""
+    half = k // 2
+    out = []
+    for i, v in enumerate(series):
+        if v is None:
+            out.append(None)
+            continue
+        window = [series[j]
+                  for j in range(max(0, i - half), min(len(series), i + half + 1))
+                  if series[j] is not None]
+        out.append(statistics.median(window))
+    return out
+
+
 def _rise_onset(series, min_rise):
-    """Onset index of the final rise toward the global peak (Dart _riseOnset)."""
+    """Onset index of the final rise toward the global peak (Dart _riseOnset).
+
+    Baseline is the MEDIAN of the pre-peak samples, not the minimum: a
+    sustained genuine low (e.g. a retreat before the lunge) would drag a
+    min-baseline far below the en-garde plateau, letting the back-walk
+    punch through the plateau and anchor the onset to the retreat instead
+    of the attack — a false foot_before_hand on a correct action."""
     peak_idx, peak_val = None, -math.inf
     for i, v in enumerate(series):
         if v is not None and v > peak_val:
             peak_val, peak_idx = v, i
     if peak_idx is None:
         return None
-    baseline = min(v for v in series[:peak_idx + 1] if v is not None)
+    baseline = statistics.median(
+        v for v in series[:peak_idx + 1] if v is not None)
     rise = peak_val - baseline
     if rise < min_rise:
         return None
@@ -424,7 +465,9 @@ class CameraLoop(threading.Thread):
                 spec = SPEC_BY_KEY[key]
                 value = metrics.get(spec["metric"])
                 thr = cfg[spec["param"]]
-                trig = (value is not None and
+                # No live person → never announce a trigger, even though the
+                # stale buffer could still produce metric values.
+                trig = (skel_px is not None and value is not None and
                         (value > thr if spec["direction"] == "above"
                          else value < thr))
                 with self.state.lock:
@@ -541,7 +584,7 @@ async function poll(){
     if(!s.person_visible){ el.className='ok'; el.textContent='偵測不到人'; }
     else if(s.triggered){ el.className='trig'; el.textContent='⚠ 會觸發 TRIGGERED'; }
     else { el.className='ok'; el.textContent='✓ 不觸發 OK  (fps '+s.fps.toFixed(0)+')'; }
-    if(s.triggered && !lastTrig && voiceOn){
+    if(s.person_visible && s.triggered && !lastTrig && voiceOn){
       speechSynthesis.speak(new SpeechSynthesisUtterance('觸發')); }
     lastTrig = s.triggered;
   }catch(e){}
@@ -644,6 +687,26 @@ def self_test():
         seq.append(s)
     m3 = compute_window_metrics(seq, 30, "left", DEFAULT_CONFIG)
     assert abs(m3["foot_hand_lead_s"] - 10 / 30) < 1e-6, m3
+
+    # retreat–retreat–lunge regression: a sustained genuine retreat low used
+    # to drag the min-baseline below the guard plateau, punching the ankle
+    # onset back to the retreat and faking a huge foot lead on a correct
+    # (simultaneous) attack. Median baseline + median filter anchor both
+    # onsets to the lunge itself → lead 0. Includes a single-frame ankle
+    # glitch (frame 30) that the 5-frame median filter must absorb.
+    seq2 = []
+    for i in range(60):
+        s = stance()
+        if 10 <= i < 20:                      # retreat: front ankle pulled in
+            s["right_ankle"] = (0.53, 0.80)
+        if i == 30:                           # single-frame keypoint glitch
+            s["right_ankle"] = (0.52, 0.80)
+        if i >= 45:                           # lunge: foot and hand together
+            s["right_ankle"] = (0.75, 0.80)
+            s["front_wrist"] = (0.79, 0.45)
+        seq2.append(s)
+    m4 = compute_window_metrics(seq2, 30, "left", DEFAULT_CONFIG)
+    assert abs(m4["foot_hand_lead_s"]) < 1e-6, m4
     print("self-test OK — metrics match the Dart unit-test values")
 
 

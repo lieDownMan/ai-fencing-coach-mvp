@@ -50,5 +50,3 @@ def test_mode_availability_is_derived_from_registry():
 
     assert supported_modes_for_error_key("lunge_overextension") == ["Target Practice"]
     assert supported_modes_for_error_key("stance_too_high") == list(TRAINING_MODES)
-    assert "wide_disengage" not in available_error_keys_for_mode("Footwork")
-    assert "wide_disengage" in available_error_keys_for_mode("Footwork", include_future=True)

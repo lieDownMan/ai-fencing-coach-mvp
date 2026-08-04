@@ -93,11 +93,10 @@ def test_only_selected_limits_feedback_to_focus_list():
     assert [item.error_key for item in decision.visual_items] == ["minor"]
 
 
-def test_mode_availability_excludes_unimplemented_future_errors():
+def test_mode_availability_footwork_includes_expected_errors():
     footwork_errors = available_error_keys_for_mode("Footwork")
 
     assert "stance_too_high" in footwork_errors
-    assert "wide_disengage" not in footwork_errors
 
 
 def test_mode_preferences_reject_unavailable_errors():

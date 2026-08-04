@@ -19,7 +19,7 @@ class FeedbackErrorConfig:
 
     weight: float
     modes: tuple[str, ...] = TRAINING_MODES
-    future: bool = False
+
 
 
 # Add or tune feedback errors here. The scheduler, CLI, Gradio app, and web UI
@@ -36,18 +36,11 @@ FEEDBACK_ERROR_CONFIG: Dict[str, FeedbackErrorConfig] = {
     "over_parrying": FeedbackErrorConfig(5.0),
     "wide_step": FeedbackErrorConfig(4.0),
     "narrow_step": FeedbackErrorConfig(9.0),
-    "wide_disengage": FeedbackErrorConfig(4.0, future=True),
 }
 
 DEFAULT_ERROR_WEIGHTS: Dict[str, float] = {
     key: config.weight
     for key, config in FEEDBACK_ERROR_CONFIG.items()
-}
-
-# Present in the playbook/weights but not emitted by the current heuristic engine.
-FUTURE_ERROR_KEYS: set[str] = {
-    key for key, config in FEEDBACK_ERROR_CONFIG.items()
-    if config.future
 }
 
 # Mode-level availability mirrors HeuristicsEngine._check_rules. This is less
@@ -78,8 +71,6 @@ def normalize_error_keys(keys: Optional[Iterable[str]]) -> List[str]:
 
 def available_error_keys_for_mode(
     training_mode: Optional[str] = None,
-    *,
-    include_future: bool = False,
 ) -> List[str]:
     """Return error keys that can be emitted in the selected training mode."""
     if training_mode in TRAINING_MODES:
@@ -90,22 +81,15 @@ def available_error_keys_for_mode(
     else:
         keys = set(FEEDBACK_ERROR_CONFIG.keys())
 
-    if not include_future:
-        keys.difference_update(FUTURE_ERROR_KEYS)
-
     return sorted(keys)
 
 
 def supported_modes_for_error_key(
     error_key: str,
-    *,
-    include_future: bool = False,
 ) -> List[str]:
     """Return training modes where an error can be configured."""
     config = FEEDBACK_ERROR_CONFIG.get(error_key)
     if config is None:
-        return []
-    if config.future and not include_future:
         return []
     return list(config.modes)
 
@@ -113,24 +97,20 @@ def supported_modes_for_error_key(
 def is_error_available_for_mode(
     error_key: str,
     training_mode: Optional[str] = None,
-    *,
-    include_future: bool = False,
 ) -> bool:
     return error_key in set(
-        available_error_keys_for_mode(training_mode, include_future=include_future)
+        available_error_keys_for_mode(training_mode)
     )
 
 
 def filter_error_keys_for_mode(
     keys: Optional[Iterable[str]],
     training_mode: Optional[str] = None,
-    *,
-    include_future: bool = False,
 ) -> tuple[List[str], List[str]]:
     """Split requested error keys into allowed and rejected lists."""
     normalized = normalize_error_keys(keys)
     allowed_set = set(
-        available_error_keys_for_mode(training_mode, include_future=include_future)
+        available_error_keys_for_mode(training_mode)
     )
     allowed = [key for key in normalized if key in allowed_set]
     rejected = [key for key in normalized if key not in allowed_set]

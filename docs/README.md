@@ -26,6 +26,7 @@ If you arrived here from GitHub, you may also want the repository landing page:
 - [Checkpoints Guide](dev/CHECKPOINTS.md)
 - [Contributing](dev/CONTRIBUTING.md)
 - [Chinese Overview](dev/README_zh.md)
+- [Heuristics Engine Guide](dev/HEURISTICS.md)
 
 ## Research Docs
 

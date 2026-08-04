@@ -35,13 +35,6 @@
         "short_cue": "重心壓低，蹲好！",
         "practice": "預備姿勢（en guard）練習"
     },
-    "wide_disengage": {
-        "error_name": "換側動作太大",
-        "diagnosis": "繞劍幅度過大會浪費攻擊時間，不僅容易被對手直接反擊，也容易讓自己的劍尖偏離有效部位。",
-        "short_cue": "換側小一點！用手指頭控制劍尖，不要動到整支手臂和手肘！",
-        "practice": "重複換側練習"
-    },
-    
     "incomplete_arm_extension": {
         "error_name": "刺的時候手沒有伸直",
         "diagnosis": "手臂沒有完全伸直會讓你平白損失攻擊距離，導致原本能擊中的攻擊落空。",

@@ -53,6 +53,20 @@ void main() {
       );
       expect(errors, isEmpty);
     });
+
+    test('no person in most of the window → no warnings, no metrics', () {
+      // 30 empty (no detection) frames + 10 real ones: majority has no
+      // person, so the engine must stay silent even though the real frames
+      // alone would trigger stance_too_high.
+      final skels = [
+        ...repeat(<String, Offset>{}, 30),
+        ...repeat(makeStance(straightLeg: true), 10),
+      ];
+      final errors =
+          engine.evaluateWindow(action: 'SF', skeletons: skels, fps: 30);
+      expect(errors, isEmpty);
+      expect(engine.computeWindowMetrics(skels, fps: 30), isEmpty);
+    });
   });
 
   group('wide_step / narrow_step', () {
@@ -234,8 +248,24 @@ void main() {
         HeuristicsEngine(targetSide: 'left', trainingMode: 'Target Practice');
 
     test('foot starts clearly before hand → triggers', () {
+      final skels = List.generate(40, (i) {
+        // ankle moves from frame 5, wrist from frame 25 — 20-frame lead
+        // (0.67s @30fps) > tuned leadSeconds 0.37s (11-frame margin)
+        final ankleShift = i >= 5 ? 0.05 : 0.0;
+        final wristShift = i >= 25 ? 0.05 : 0.0;
+        final s = makeStance(wristX: 0.74 + wristShift);
+        s['right_ankle'] =
+            Offset(s['right_ankle']!.dx + ankleShift, s['right_ankle']!.dy);
+        return s;
+      });
+      final errors =
+          tpEngine.evaluateWindow(action: 'R', skeletons: skels, fps: 30);
+      expect(errors, contains('foot_before_hand'));
+    });
+
+    test('lead below the 0.37s threshold does NOT trigger', () {
       final skels = List.generate(30, (i) {
-        // ankle moves from frame 5, wrist from frame 15 (10-frame lead > 3-frame margin)
+        // 10-frame lead = 0.33s < 0.37s margin
         final ankleShift = i >= 5 ? 0.05 : 0.0;
         final wristShift = i >= 15 ? 0.05 : 0.0;
         final s = makeStance(wristX: 0.74 + wristShift);
@@ -245,7 +275,32 @@ void main() {
       });
       final errors =
           tpEngine.evaluateWindow(action: 'R', skeletons: skels, fps: 30);
-      expect(errors, contains('foot_before_hand'));
+      expect(errors, isNot(contains('foot_before_hand')));
+    });
+
+    test('retreat then simultaneous lunge does NOT trigger '
+        '(regression: min-baseline anchored ankle onset to the retreat)', () {
+      final skels = List.generate(60, (i) {
+        // guard → retreat (frames 10–19, front ankle pulled in) → guard →
+        // lunge at 45 with foot and hand together; frame 30 is a one-frame
+        // ankle glitch the 5-frame median filter must absorb.
+        var ankleX = 0.60;
+        var wristX = 0.74;
+        if (i >= 10 && i < 20) ankleX = 0.53;
+        if (i == 30) ankleX = 0.52;
+        if (i >= 45) {
+          ankleX = 0.75;
+          wristX = 0.79;
+        }
+        final s = makeStance(wristX: wristX);
+        s['right_ankle'] = Offset(ankleX, s['right_ankle']!.dy);
+        return s;
+      });
+      final errors =
+          tpEngine.evaluateWindow(action: 'R', skeletons: skels, fps: 30);
+      expect(errors, isNot(contains('foot_before_hand')));
+      final m = tpEngine.computeWindowMetrics(skels, fps: 30);
+      expect(m['foot_hand_lead_s'], closeTo(0.0, 1e-6));
     });
 
     test('foot_hand_lead_s metric reports the onset gap in seconds', () {
