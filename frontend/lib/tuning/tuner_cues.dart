@@ -46,6 +46,14 @@ class AuxParamSpec {
 }
 
 const Map<String, List<AuxParamSpec>> kCueAuxParams = {
+  'guard_dropped': [
+    AuxParamSpec(
+      paramName: 'guardDroppedSeconds',
+      min: 0.1,
+      max: 3.0,
+      hint: '手肘伸直朝下要持續這麼多秒才觸發（Free Bouting 另有放寬值）',
+    ),
+  ],
   'foot_before_hand': [
     AuxParamSpec(
       paramName: 'footBeforeHandMinDisplacement',
@@ -119,19 +127,29 @@ const Map<String, String> kCueLabels = {
   'center_of_mass_leaning_backward': '重心向後 (CoM Backward)',
 };
 
+/// Filename fragments that map to cues without containing the error key
+/// verbatim.
+const Map<String, List<String>> kCueNameAliases = {
+  'center_of_mass': [
+    'center_of_mass_in_front',
+    'center_of_mass_leaning_backward',
+  ],
+  'lower_guard': ['guard_dropped'],
+  'guard_drop': ['guard_dropped'],
+};
+
 /// Cues matched from a video filename (e.g. `narrow_step_wide_step.MOV` →
-/// [narrow_step, wide_step]; `center_of_mass.MOV` → both CoM cues).
+/// [narrow_step, wide_step]; `center_of_mass.MOV` → both CoM cues;
+/// `lower_guard_.MOV` → guard_dropped).
 List<String> cuesForVideoName(String fileName) {
   final base = fileName.toLowerCase();
   final out = <String>[];
   for (final spec in kTuningSpecs) {
     if (base.contains(spec.errorKey)) out.add(spec.errorKey);
   }
-  if (base.contains('center_of_mass')) {
-    for (final key in [
-      'center_of_mass_in_front',
-      'center_of_mass_leaning_backward',
-    ]) {
+  for (final entry in kCueNameAliases.entries) {
+    if (!base.contains(entry.key)) continue;
+    for (final key in entry.value) {
       if (!out.contains(key)) out.add(key);
     }
   }

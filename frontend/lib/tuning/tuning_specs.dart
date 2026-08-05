@@ -91,13 +91,15 @@ const List<TuningSpec> kTuningSpecs = [
   ),
   TuningSpec(
     errorKey: 'guard_dropped',
-    metricKey: 'guard_below_pelvis_max_run_s',
-    paramName: 'guardDroppedSeconds',
+    metricKey: 'guard_elbow_angle_deg_median',
+    paramName: 'guardElbowAngleDeg',
     direction: TriggerDirection.above,
-    min: 0.50,
-    max: 5.00,
-    unit: 's',
-    hint: '手垂低於骨盆，數字是連續低垂秒數。(Free Bouting 另有放寬值)',
+    min: 90,
+    max: 180,
+    unit: '°',
+    decimals: 1,
+    hint: '前手手肘角度：持劍彎曲 ~90–120°、手垂放伸直 >150°。'
+        '另需手腕低於手肘（直臂前刺不算）、持續 guardDroppedSeconds 秒。',
   ),
   TuningSpec(
     errorKey: 'over_parrying',

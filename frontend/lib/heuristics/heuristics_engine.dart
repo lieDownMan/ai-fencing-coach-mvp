@@ -38,11 +38,17 @@ const double kDefaultFps = 30.0;
 
 /// Every tunable threshold in one place, overridable per-instance so the
 /// offline replay tool can sweep values and (later) per-user calibration can
-/// scale them. The defaults are the shipped behavior — hand-tuned on-device
-/// (2026-07) via the in-app Tuning tab / Mac tuning server.
+/// scale them. The defaults are the shipped behavior — tuned against the
+/// per-cue demo videos in docs/ via the macOS video tuner (2026-08,
+/// tool/run_tuner.sh); previously hand-tuned on-device (2026-07).
 class HeuristicsConfig {
   final double bounceRatioThreshold;
   final double lungeKneeMinAngleDeg;
+  // Guard dropped = front-arm ELBOW angle straightened past this (arm
+  // hanging; en garde keeps it bent ~90–120°) while the wrist is below the
+  // elbow (arm pointing down, so a straight thrust toward the opponent
+  // doesn't count), sustained for guardDroppedSeconds.
+  final double guardElbowAngleDeg;
   final double guardDroppedSeconds;
   final double guardDroppedFreeBoutingSeconds;
   final double footBeforeHandMinDisplacement; // normalized [0,1] space
@@ -62,23 +68,24 @@ class HeuristicsConfig {
   final double comSustainedSeconds;
 
   const HeuristicsConfig({
-    this.bounceRatioThreshold = 0.13,
-    this.lungeKneeMinAngleDeg = 153.5,
-    this.guardDroppedSeconds = 3.0,
+    this.bounceRatioThreshold = 0.116,
+    this.lungeKneeMinAngleDeg = 57.9,
+    this.guardElbowAngleDeg = 133.8,
+    this.guardDroppedSeconds = 1.99,
     this.guardDroppedFreeBoutingSeconds = 3.0,
     // Minimum body-relative forward RISE (peak minus baseline, normalized
     // units) for a wrist-extension / attack-step movement to count at all.
     this.footBeforeHandMinDisplacement = 0.03,
-    this.footBeforeHandLeadSeconds = 0.37,
-    this.stanceTooHighAngleDeg = 170.0,
-    this.incompleteArmExtensionAngleDeg = 101.0,
-    this.overParryTorsoRatioThreshold = 0.54,
+    this.footBeforeHandLeadSeconds = 0.182,
+    this.stanceTooHighAngleDeg = 131.5,
+    this.incompleteArmExtensionAngleDeg = 168.6,
+    this.overParryTorsoRatioThreshold = 0.97,
     this.stepShoulderProxyMultiplier = 2.5,
-    this.wideStepRatioThreshold = 3.0,
+    this.wideStepRatioThreshold = 1.93,
     this.narrowStepRatioThreshold = 0.9,
     this.stepSustainedSeconds = 0.30,
-    this.comForwardLeanDeg = 21.0,
-    this.comBackwardLeanDeg = 3.0,
+    this.comForwardLeanDeg = 60.5,
+    this.comBackwardLeanDeg = 15.8,
     this.comSustainedSeconds = 0.30,
   });
 
@@ -86,6 +93,7 @@ class HeuristicsConfig {
   Map<String, double> toMap() => {
         'bounceRatioThreshold': bounceRatioThreshold,
         'lungeKneeMinAngleDeg': lungeKneeMinAngleDeg,
+        'guardElbowAngleDeg': guardElbowAngleDeg,
         'guardDroppedSeconds': guardDroppedSeconds,
         'guardDroppedFreeBoutingSeconds': guardDroppedFreeBoutingSeconds,
         'footBeforeHandMinDisplacement': footBeforeHandMinDisplacement,
@@ -110,6 +118,7 @@ class HeuristicsConfig {
           map['bounceRatioThreshold'] ?? d.bounceRatioThreshold,
       lungeKneeMinAngleDeg:
           map['lungeKneeMinAngleDeg'] ?? d.lungeKneeMinAngleDeg,
+      guardElbowAngleDeg: map['guardElbowAngleDeg'] ?? d.guardElbowAngleDeg,
       guardDroppedSeconds: map['guardDroppedSeconds'] ?? d.guardDroppedSeconds,
       guardDroppedFreeBoutingSeconds: map['guardDroppedFreeBoutingSeconds'] ??
           d.guardDroppedFreeBoutingSeconds,
@@ -142,6 +151,7 @@ class HeuristicsConfig {
   HeuristicsConfig copyWith({
     double? bounceRatioThreshold,
     double? lungeKneeMinAngleDeg,
+    double? guardElbowAngleDeg,
     double? guardDroppedSeconds,
     double? guardDroppedFreeBoutingSeconds,
     double? footBeforeHandMinDisplacement,
@@ -160,6 +170,7 @@ class HeuristicsConfig {
     return HeuristicsConfig(
       bounceRatioThreshold: bounceRatioThreshold ?? this.bounceRatioThreshold,
       lungeKneeMinAngleDeg: lungeKneeMinAngleDeg ?? this.lungeKneeMinAngleDeg,
+      guardElbowAngleDeg: guardElbowAngleDeg ?? this.guardElbowAngleDeg,
       guardDroppedSeconds: guardDroppedSeconds ?? this.guardDroppedSeconds,
       guardDroppedFreeBoutingSeconds:
           guardDroppedFreeBoutingSeconds ?? this.guardDroppedFreeBoutingSeconds,
@@ -519,20 +530,31 @@ class HeuristicsEngine {
       m['torso_lean_deg_median'] = _median(leans);
     }
 
-    // guard: longest run of wrist-below-pelvis, in seconds
+    // guard: front-arm elbow angle per frame (smooth, continuous series —
+    // dropped guard = straight arm hanging down), plus the longest run of
+    // dropped-guard frames under the current thresholds for reference.
+    final elbowAngles = <double>[];
     int run = 0;
     int maxRun = 0;
     for (final skel in skeletons) {
+      final shoulder = skel[limbs['shoulder']!];
+      final elbow = skel[limbs['elbow']!];
       final wrist = skel[limbs['wrist']!];
-      final pelvis = _pelvisCenter(skel);
-      if (wrist != null && pelvis != null && wrist.dy > pelvis.dy) {
+      if (shoulder != null && elbow != null && wrist != null) {
+        elbowAngles.add(calcAngle(shoulder, elbow, wrist));
+      }
+      if (_guardDroppedFrame(skel)) {
         run++;
         if (run > maxRun) maxRun = run;
       } else {
         run = 0;
       }
     }
-    m['guard_below_pelvis_max_run_s'] = maxRun / fps;
+    if (elbowAngles.isNotEmpty) {
+      m['guard_elbow_angle_deg_median'] = _median(elbowAngles);
+      m['guard_elbow_angle_deg_max'] = elbowAngles.reduce(math.max);
+    }
+    m['guard_dropped_max_run_s'] = maxRun / fps;
 
     // foot-before-hand: how much earlier the ankle's attack-step rise began
     // vs the wrist's extension rise, in seconds (positive = foot first =
@@ -604,9 +626,24 @@ class HeuristicsEngine {
   }
 
   // ── Rule 3: guard_dropped ─────────────────────────────────────────────────
+  //
+  // Reads the front-arm ELBOW angle: en garde keeps the sword arm bent
+  // (~90–120°); a hanging arm straightens past guardElbowAngleDeg. The
+  // wrist-below-elbow condition keeps a straight arm extended TOWARD the
+  // opponent (thrust / point-in-line) from counting as dropped. Must hold
+  // continuously for guardDroppedSeconds.
+
+  bool _guardDroppedFrame(Skeleton skel) {
+    final limbs = frontLimbs(targetSide);
+    final shoulder = skel[limbs['shoulder']!];
+    final elbow = skel[limbs['elbow']!];
+    final wrist = skel[limbs['wrist']!];
+    if (shoulder == null || elbow == null || wrist == null) return false;
+    return calcAngle(shoulder, elbow, wrist) > config.guardElbowAngleDeg &&
+        wrist.dy > elbow.dy;
+  }
 
   String? _checkGuard(List<Skeleton> skeletons, double fps) {
-    final limbs = frontLimbs(targetSide);
     int consecutive = 0;
     final seconds = trainingMode == 'Free Bouting'
         ? config.guardDroppedFreeBoutingSeconds
@@ -614,9 +651,7 @@ class HeuristicsEngine {
     final threshold = _framesFor(seconds, fps);
 
     for (final skel in skeletons) {
-      final wrist = skel[limbs['wrist']!];
-      final pelvis = _pelvisCenter(skel);
-      if (wrist != null && pelvis != null && wrist.dy > pelvis.dy) {
+      if (_guardDroppedFrame(skel)) {
         consecutive++;
         if (consecutive > threshold) return 'guard_dropped';
       } else {

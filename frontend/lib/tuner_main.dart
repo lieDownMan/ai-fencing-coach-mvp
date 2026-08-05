@@ -111,6 +111,34 @@ class _TunerScreenState extends State<TunerScreen>
       _settings = settings;
     });
     _scanVideos();
+    // Headless batch mode: extract (cache-aware) every video in the folder,
+    // then quit. Used after re-recording clips:
+    //   flutter build macos --debug -t lib/tuner_main.dart \
+    //     --dart-define=TUNE_EXTRACT_ALL=true ... && open <app>
+    if (const bool.fromEnvironment('TUNE_EXTRACT_ALL')) {
+      for (final path in _videoPaths) {
+        setState(() {
+          _busy = true;
+          _busyLabel = '批次抽取 ${path.split('/').last}…';
+          _busyProgress = 0;
+        });
+        try {
+          await VideoPoseExtractor.extract(
+            videoPath: path,
+            modelPath: _settings!.modelPath,
+            onProgress: (done, total) {
+              if (mounted) {
+                setState(() => _busyProgress = total == 0 ? 0 : done / total);
+              }
+            },
+          );
+          debugPrint('TUNE_EXTRACT_ALL done: $path');
+        } catch (e) {
+          debugPrint('TUNE_EXTRACT_ALL failed: $path → $e');
+        }
+      }
+      exit(0);
+    }
     if (_videoPaths.isNotEmpty) {
       await _selectVideo(_videoPaths.first);
     }
