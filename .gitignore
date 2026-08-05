@@ -53,3 +53,6 @@ android/captures/
 
 # Per-user tuning state (Mac tuning server)
 backend/tuning_overrides.json
+
+# Video threshold-tuner pose caches (written next to cue videos)
+*.poses.json

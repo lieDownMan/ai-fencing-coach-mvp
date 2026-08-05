@@ -32,6 +32,8 @@ dependencies:
   path_provider: ^2.1.5
   google_generative_ai: ^0.4.7
   image_picker: ^1.2.2
+  # Video playback for the macOS threshold-tuner (lib/tuner_main.dart)
+  video_player: ^2.11.1
   uuid: ^4.6.0
   intl: ^0.20.3
   path: ^1.9.1

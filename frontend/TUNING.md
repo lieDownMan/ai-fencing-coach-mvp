@@ -1,5 +1,28 @@
 # Heuristics 調參流程 (Threshold Tuning Workflow)
 
+## 影片調參介面（Mac 桌面版，純 Dart，推薦）
+
+有「正常 → 逐漸違反 cue」的示範影片時用這個。每個 cue 錄一支影片、
+檔名照 error key 命名（如 `stance_too_high.MOV`、`narrow_step_wide_step.MOV`
+一支可對應多個 cue），放進 `docs/`（或任意資料夾，介面內可改路徑）。
+
+```bash
+frontend/tool/run_tuner.sh
+```
+
+流程：選片 → 第一次會用 **同一顆 yolov8n CoreML** 整支逐幀抽骨架
+（快取成 `<影片>.poses.json`，之後秒開）→ 影片播放同步畫骨架 →
+下方時間軸畫出該 cue 指標在全片的曲線，**評估用的就是 App 的
+`HeuristicsEngine`**（同 60 幀滾動窗、每 10 幀評估、實測 fps，觸發判定
+含 sustained/onset 全套邏輯，非只比大小）。拖滑桿或直接拖虛線閾值 →
+紅色觸發區段即時更新；把觸發起點對齊「影片裡動作開始變壞的時間點」
+即可。調好按「複製全部參數」，貼回 `HeuristicsConfig` 預設值。
+調整值同時自動存檔（Documents/tuning/config_overrides.json）。
+
+快捷鍵：space 播放/暫停、←/→ 逐幀、Shift+←/→ ±1 秒。
+注意左/右側要選對（fencer 在畫面中的慣用腳側），選錯前膝角會取到後腳。
+
+
 ## 免走動路徑：Mac 鏡頭 + 手機遙控（tuning_server）
 
 不想在手機腳架和站位之間來回走：讓 **Mac 的鏡頭拍你**，手機拿在手上當遙控器。

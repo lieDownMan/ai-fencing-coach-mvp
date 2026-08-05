@@ -73,6 +73,23 @@ class YoloPoseService {
     }
   }
 
+  /// Offline replay entry point (threshold tuner): feed a raw detection list
+  /// (same shape the native bridges return) through the exact same parsing +
+  /// target tracking as the live path, without a MethodChannel round-trip.
+  /// Call sequentially over a video's frames on a dedicated instance so the
+  /// tracker state mirrors a live session.
+  FencingSkeleton? processDetectionList(
+    List<dynamic>? raw, {
+    required String targetSide,
+  }) {
+    if (_configuredTargetSide != targetSide) {
+      _tracker.reset();
+      _configuredTargetSide = targetSide;
+    }
+    final detections = _parseDetections(raw, false);
+    return _tracker.process(detections, targetSide)?.skeleton;
+  }
+
   List<_PoseDetection> _parseDetections(
     List<dynamic>? raw,
     bool isFrontCamera,
